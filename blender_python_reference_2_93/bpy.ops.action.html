@@ -1,0 +1,780 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+  <meta charset="utf-8" />
+  
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  
+  <title>Action Operators &mdash; Blender Python API</title>
+  
+
+  
+  <link rel="stylesheet" href="_static/css/theme.css" type="text/css" />
+  <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+  <link rel="stylesheet" href="_static/css/theme_overrides.css" type="text/css" />
+
+  
+  
+    <link rel="shortcut icon" href="_static/favicon.ico"/>
+  
+
+  
+  
+
+  
+    <link rel="canonical" href="https://docs.blender.org/api/current/bpy.ops.action.html" />
+
+  
+  <!--[if lt IE 9]>
+    <script src="_static/js/html5shiv.min.js"></script>
+  <![endif]-->
+  
+    
+      <script type="text/javascript" id="documentation_options" data-url_root="./" src="_static/documentation_options.js"></script>
+        <script src="_static/jquery.js"></script>
+        <script src="_static/underscore.js"></script>
+        <script src="_static/doctools.js"></script>
+    
+    <script type="text/javascript" src="_static/js/theme.js"></script>
+
+    
+    <link rel="search" type="application/opensearchdescription+xml"
+          title="Search within Blender Python API"
+          href="_static/opensearch.xml"/>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Anim Operators" href="bpy.ops.anim.html" />
+    <link rel="prev" title="Operators (bpy.ops)" href="bpy.ops.html" /> 
+</head>
+
+<body class="wy-body-for-nav">
+
+   
+  <div class="wy-grid-for-nav">
+    
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+          
+
+          
+            <a href="index.html" class="icon icon-home"> Blender 2.93.0 Alpha Python API
+          
+
+          
+            
+            <img src="_static/blender_logo.svg" class="logo" alt="Logo"/>
+          
+          </a>
+
+          
+            
+            
+              <div class="version">
+                06d33a6876d2
+              </div>
+            
+          
+
+          
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+
+          
+        </div>
+
+        
+        <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="main navigation">
+          
+            
+            
+              
+            
+            
+              <p class="caption"><span class="caption-text">Documentation</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="info_quickstart.html">Quickstart: New to Blender or scripting and want to get your feet wet?</a></li>
+<li class="toctree-l1"><a class="reference internal" href="info_overview.html">API Overview: A more complete explanation of Python integration</a></li>
+<li class="toctree-l1"><a class="reference internal" href="info_api_reference.html">API Reference Usage: examples of how to use the API reference docs</a></li>
+<li class="toctree-l1"><a class="reference internal" href="info_best_practice.html">Best Practice: Conventions to follow for writing good scripts</a></li>
+<li class="toctree-l1"><a class="reference internal" href="info_tips_and_tricks.html">Tips and Tricks: Hints to help you while writing scripts for Blender</a></li>
+<li class="toctree-l1"><a class="reference internal" href="info_gotcha.html">Gotcha's: Some of the problems you may encounter when writing scripts</a></li>
+<li class="toctree-l1"><a class="reference internal" href="change_log.html">Change Log: List of changes since last Blender release</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Application Modules</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="bpy.context.html">Context Access (bpy.context)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="bpy.data.html">Data Access (bpy.data)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="bpy.msgbus.html">Message Bus (bpy.msgbus)</a></li>
+<li class="toctree-l1 current"><a class="reference internal" href="bpy.ops.html">Operators (bpy.ops)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="bpy.types.html">Types (bpy.types)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="bpy.utils.html">Utilities (bpy.utils)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="bpy.path.html">Path Utilities (bpy.path)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="bpy.app.html">Application Data (bpy.app)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="bpy.props.html">Property Definitions (bpy.props)</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Standalone Modules</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="aud.html">Audio System (aud)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="bgl.html">OpenGL Wrapper (bgl)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="bl_math.html">Additional Math Functions (bl_math)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="blf.html">Font Drawing (blf)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="bmesh.html">BMesh Module (bmesh)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="bpy_extras.html">Extra Utilities (bpy_extras)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="freestyle.html">Freestyle Module (freestyle)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="gpu.html">GPU Shader Module (gpu)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="gpu_extras.html">GPU Utilities (gpu_extras)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="idprop.types.html">ID Property Access (idprop.types)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="imbuf.html">Image Buffer (imbuf)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="mathutils.html">Math Types &amp; Utilities (mathutils)</a></li>
+</ul>
+
+            
+          
+        </div>
+        
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+
+      
+      <nav class="wy-nav-top" aria-label="top navigation">
+        
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">Blender 2.93.0 Alpha Python API</a>
+        
+      </nav>
+
+
+      <div class="wy-nav-content">
+        
+        <div class="rst-content">
+        
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div role="navigation" aria-label="breadcrumbs navigation">
+
+  <ul class="wy-breadcrumbs">
+    
+      <li><a href="index.html" class="icon icon-home"></a> &raquo;</li>
+        
+          <li><a href="bpy.ops.html">Operators (bpy.ops)</a> &raquo;</li>
+        
+      <li>Action Operators</li>
+    
+    
+      <li class="wy-breadcrumbs-aside">
+        
+          
+        
+      </li>
+    
+  </ul>
+
+  
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+            
+  <div class="section" id="module-bpy.ops.action">
+<span id="action-operators"></span><h1>Action Operators<a class="headerlink" href="#module-bpy.ops.action" title="Permalink to this headline">¶</a></h1>
+<dl class="py function">
+<dt id="bpy.ops.action.clean">
+<code class="sig-prename descclassname"><span class="pre">bpy.ops.action.</span></code><code class="sig-name descname"><span class="pre">clean</span></code><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">threshold</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0.001</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">channels</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#bpy.ops.action.clean" title="Permalink to this definition">¶</a></dt>
+<dd><p>Simplify F-Curves by removing closely spaced keyframes</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>threshold</strong> (<em>float in</em><em> [</em><em>0</em><em>, </em><em>inf</em><em>]</em><em>, </em><em>(</em><em>optional</em><em>)</em>) – Threshold</p></li>
+<li><p><strong>channels</strong> (<em>boolean</em><em>, </em><em>(</em><em>optional</em><em>)</em>) – Channels</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt id="bpy.ops.action.clickselect">
+<code class="sig-prename descclassname"><span class="pre">bpy.ops.action.</span></code><code class="sig-name descname"><span class="pre">clickselect</span></code><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">wait_to_deselect_others</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">mouse_x</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">mouse_y</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">extend</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">deselect_all</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">column</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">channel</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#bpy.ops.action.clickselect" title="Permalink to this definition">¶</a></dt>
+<dd><p>Select keyframes by clicking on them</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>wait_to_deselect_others</strong> (<em>boolean</em><em>, </em><em>(</em><em>optional</em><em>)</em>) – Wait to Deselect Others</p></li>
+<li><p><strong>mouse_x</strong> (<em>int in</em><em> [</em><em>-inf</em><em>, </em><em>inf</em><em>]</em><em>, </em><em>(</em><em>optional</em><em>)</em>) – Mouse X</p></li>
+<li><p><strong>mouse_y</strong> (<em>int in</em><em> [</em><em>-inf</em><em>, </em><em>inf</em><em>]</em><em>, </em><em>(</em><em>optional</em><em>)</em>) – Mouse Y</p></li>
+<li><p><strong>extend</strong> (<em>boolean</em><em>, </em><em>(</em><em>optional</em><em>)</em>) – Extend Select, Toggle keyframe selection instead of leaving newly selected keyframes only</p></li>
+<li><p><strong>deselect_all</strong> (<em>boolean</em><em>, </em><em>(</em><em>optional</em><em>)</em>) – Deselect On Nothing, Deselect all when nothing under the cursor</p></li>
+<li><p><strong>column</strong> (<em>boolean</em><em>, </em><em>(</em><em>optional</em><em>)</em>) – Column Select, Select all keyframes that occur on the same frame as the one under the mouse</p></li>
+<li><p><strong>channel</strong> (<em>boolean</em><em>, </em><em>(</em><em>optional</em><em>)</em>) – Only Channel, Select all the keyframes in the channel under the mouse</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt id="bpy.ops.action.copy">
+<code class="sig-prename descclassname"><span class="pre">bpy.ops.action.</span></code><code class="sig-name descname"><span class="pre">copy</span></code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#bpy.ops.action.copy" title="Permalink to this definition">¶</a></dt>
+<dd><p>Copy selected keyframes to the copy/paste buffer</p>
+</dd></dl>
+
+<dl class="py function">
+<dt id="bpy.ops.action.delete">
+<code class="sig-prename descclassname"><span class="pre">bpy.ops.action.</span></code><code class="sig-name descname"><span class="pre">delete</span></code><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">confirm</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#bpy.ops.action.delete" title="Permalink to this definition">¶</a></dt>
+<dd><p>Remove all selected keyframes</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>confirm</strong> (<em>boolean</em><em>, </em><em>(</em><em>optional</em><em>)</em>) – Confirm, Prompt for confirmation</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt id="bpy.ops.action.duplicate">
+<code class="sig-prename descclassname"><span class="pre">bpy.ops.action.</span></code><code class="sig-name descname"><span class="pre">duplicate</span></code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#bpy.ops.action.duplicate" title="Permalink to this definition">¶</a></dt>
+<dd><p>Make a copy of all selected keyframes</p>
+</dd></dl>
+
+<dl class="py function">
+<dt id="bpy.ops.action.duplicate_move">
+<code class="sig-prename descclassname"><span class="pre">bpy.ops.action.</span></code><code class="sig-name descname"><span class="pre">duplicate_move</span></code><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ACTION_OT_duplicate</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">TRANSFORM_OT_transform</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#bpy.ops.action.duplicate_move" title="Permalink to this definition">¶</a></dt>
+<dd><p>Make a copy of all selected keyframes and move them</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>ACTION_OT_duplicate</strong> (<code class="xref py py-class docutils literal notranslate"><span class="pre">ACTION_OT_duplicate</span></code>, (optional)) – Duplicate Keyframes, Make a copy of all selected keyframes</p></li>
+<li><p><strong>TRANSFORM_OT_transform</strong> (<code class="xref py py-class docutils literal notranslate"><span class="pre">TRANSFORM_OT_transform</span></code>, (optional)) – Transform, Transform selected items by mode type</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt id="bpy.ops.action.easing_type">
+<code class="sig-prename descclassname"><span class="pre">bpy.ops.action.</span></code><code class="sig-name descname"><span class="pre">easing_type</span></code><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">type</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'AUTO'</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#bpy.ops.action.easing_type" title="Permalink to this definition">¶</a></dt>
+<dd><p>Set easing type for the F-Curve segments starting from the selected keyframes</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>type</strong> (<em>enum in</em><em> [</em><em>'AUTO'</em><em>, </em><em>'EASE_IN'</em><em>, </em><em>'EASE_OUT'</em><em>, </em><em>'EASE_IN_OUT'</em><em>]</em><em>, </em><em>(</em><em>optional</em><em>)</em>) – <p>Type</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">AUTO</span></code>
+Automatic Easing, Easing type is chosen automatically based on what the type of interpolation used (e.g. Ease In for transitional types, and Ease Out for dynamic effects).</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">EASE_IN</span></code>
+Ease In, Only on the end closest to the next keyframe.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">EASE_OUT</span></code>
+Ease Out, Only on the end closest to the first keyframe.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">EASE_IN_OUT</span></code>
+Ease In and Out, Segment between both keyframes.</p></li>
+</ul>
+</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt id="bpy.ops.action.extrapolation_type">
+<code class="sig-prename descclassname"><span class="pre">bpy.ops.action.</span></code><code class="sig-name descname"><span class="pre">extrapolation_type</span></code><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">type</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'CONSTANT'</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#bpy.ops.action.extrapolation_type" title="Permalink to this definition">¶</a></dt>
+<dd><p>Set extrapolation mode for selected F-Curves</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>type</strong> (<em>enum in</em><em> [</em><em>'CONSTANT'</em><em>, </em><em>'LINEAR'</em><em>, </em><em>'MAKE_CYCLIC'</em><em>, </em><em>'CLEAR_CYCLIC'</em><em>]</em><em>, </em><em>(</em><em>optional</em><em>)</em>) – <p>Type</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">CONSTANT</span></code>
+Constant Extrapolation, Values on endpoint keyframes are held.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">LINEAR</span></code>
+Linear Extrapolation, Straight-line slope of end segments are extended past the endpoint keyframes.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">MAKE_CYCLIC</span></code>
+Make Cyclic (F-Modifier), Add Cycles F-Modifier if one doesn’t exist already.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">CLEAR_CYCLIC</span></code>
+Clear Cyclic (F-Modifier), Remove Cycles F-Modifier if not needed anymore.</p></li>
+</ul>
+</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt id="bpy.ops.action.frame_jump">
+<code class="sig-prename descclassname"><span class="pre">bpy.ops.action.</span></code><code class="sig-name descname"><span class="pre">frame_jump</span></code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#bpy.ops.action.frame_jump" title="Permalink to this definition">¶</a></dt>
+<dd><p>Set the current frame to the average frame value of selected keyframes</p>
+</dd></dl>
+
+<dl class="py function">
+<dt id="bpy.ops.action.handle_type">
+<code class="sig-prename descclassname"><span class="pre">bpy.ops.action.</span></code><code class="sig-name descname"><span class="pre">handle_type</span></code><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">type</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'FREE'</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#bpy.ops.action.handle_type" title="Permalink to this definition">¶</a></dt>
+<dd><p>Set type of handle for selected keyframes</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>type</strong> (<em>enum in</em><em> [</em><em>'FREE'</em><em>, </em><em>'ALIGNED'</em><em>, </em><em>'VECTOR'</em><em>, </em><em>'AUTO'</em><em>, </em><em>'AUTO_CLAMPED'</em><em>]</em><em>, </em><em>(</em><em>optional</em><em>)</em>) – <p>Type</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">FREE</span></code>
+Free, Completely independent manually set handle.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">ALIGNED</span></code>
+Aligned, Manually set handle with rotation locked together with its pair.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">VECTOR</span></code>
+Vector, Automatic handles that create straight lines.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">AUTO</span></code>
+Automatic, Automatic handles that create smooth curves.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">AUTO_CLAMPED</span></code>
+Auto Clamped, Automatic handles that create smooth curves which only change direction at keyframes.</p></li>
+</ul>
+</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt id="bpy.ops.action.interpolation_type">
+<code class="sig-prename descclassname"><span class="pre">bpy.ops.action.</span></code><code class="sig-name descname"><span class="pre">interpolation_type</span></code><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">type</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'CONSTANT'</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#bpy.ops.action.interpolation_type" title="Permalink to this definition">¶</a></dt>
+<dd><p>Set interpolation mode for the F-Curve segments starting from the selected keyframes</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>type</strong> (<em>enum in</em><em> [</em><em>'CONSTANT'</em><em>, </em><em>'LINEAR'</em><em>, </em><em>'BEZIER'</em><em>, </em><em>'SINE'</em><em>, </em><em>'QUAD'</em><em>, </em><em>'CUBIC'</em><em>, </em><em>'QUART'</em><em>, </em><em>'QUINT'</em><em>, </em><em>'EXPO'</em><em>, </em><em>'CIRC'</em><em>, </em><em>'BACK'</em><em>, </em><em>'BOUNCE'</em><em>, </em><em>'ELASTIC'</em><em>]</em><em>, </em><em>(</em><em>optional</em><em>)</em>) – <p>Type</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">CONSTANT</span></code>
+Constant, No interpolation, value of A gets held until B is encountered.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">LINEAR</span></code>
+Linear, Straight-line interpolation between A and B (i.e. no ease in/out).</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">BEZIER</span></code>
+Bezier, Smooth interpolation between A and B, with some control over curve shape.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">SINE</span></code>
+Sinusoidal, Sinusoidal easing (weakest, almost linear but with a slight curvature).</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">QUAD</span></code>
+Quadratic, Quadratic easing.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">CUBIC</span></code>
+Cubic, Cubic easing.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">QUART</span></code>
+Quartic, Quartic easing.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">QUINT</span></code>
+Quintic, Quintic easing.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">EXPO</span></code>
+Exponential, Exponential easing (dramatic).</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">CIRC</span></code>
+Circular, Circular easing (strongest and most dynamic).</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">BACK</span></code>
+Back, Cubic easing with overshoot and settle.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">BOUNCE</span></code>
+Bounce, Exponentially decaying parabolic bounce, like when objects collide.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">ELASTIC</span></code>
+Elastic, Exponentially decaying sine wave, like an elastic band.</p></li>
+</ul>
+</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt id="bpy.ops.action.keyframe_insert">
+<code class="sig-prename descclassname"><span class="pre">bpy.ops.action.</span></code><code class="sig-name descname"><span class="pre">keyframe_insert</span></code><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">type</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'ALL'</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#bpy.ops.action.keyframe_insert" title="Permalink to this definition">¶</a></dt>
+<dd><p>Insert keyframes for the specified channels</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>type</strong> (<em>enum in</em><em> [</em><em>'ALL'</em><em>, </em><em>'SEL'</em><em>, </em><em>'GROUP'</em><em>]</em><em>, </em><em>(</em><em>optional</em><em>)</em>) – Type</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt id="bpy.ops.action.keyframe_type">
+<code class="sig-prename descclassname"><span class="pre">bpy.ops.action.</span></code><code class="sig-name descname"><span class="pre">keyframe_type</span></code><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">type</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'KEYFRAME'</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#bpy.ops.action.keyframe_type" title="Permalink to this definition">¶</a></dt>
+<dd><p>Set type of keyframe for the selected keyframes</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>type</strong> (<em>enum in</em><em> [</em><em>'KEYFRAME'</em><em>, </em><em>'BREAKDOWN'</em><em>, </em><em>'MOVING_HOLD'</em><em>, </em><em>'EXTREME'</em><em>, </em><em>'JITTER'</em><em>]</em><em>, </em><em>(</em><em>optional</em><em>)</em>) – <p>Type</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">KEYFRAME</span></code>
+Keyframe, Normal keyframe, e.g. for key poses.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">BREAKDOWN</span></code>
+Breakdown, A breakdown pose, e.g. for transitions between key poses.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">MOVING_HOLD</span></code>
+Moving Hold, A keyframe that is part of a moving hold.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">EXTREME</span></code>
+Extreme, An “extreme” pose, or some other purpose as needed.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">JITTER</span></code>
+Jitter, A filler or baked keyframe for keying on ones, or some other purpose as needed.</p></li>
+</ul>
+</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt id="bpy.ops.action.layer_next">
+<code class="sig-prename descclassname"><span class="pre">bpy.ops.action.</span></code><code class="sig-name descname"><span class="pre">layer_next</span></code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#bpy.ops.action.layer_next" title="Permalink to this definition">¶</a></dt>
+<dd><p>Switch to editing action in animation layer above the current action in the NLA Stack</p>
+</dd></dl>
+
+<dl class="py function">
+<dt id="bpy.ops.action.layer_prev">
+<code class="sig-prename descclassname"><span class="pre">bpy.ops.action.</span></code><code class="sig-name descname"><span class="pre">layer_prev</span></code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#bpy.ops.action.layer_prev" title="Permalink to this definition">¶</a></dt>
+<dd><p>Switch to editing action in animation layer below the current action in the NLA Stack</p>
+</dd></dl>
+
+<dl class="py function">
+<dt id="bpy.ops.action.markers_make_local">
+<code class="sig-prename descclassname"><span class="pre">bpy.ops.action.</span></code><code class="sig-name descname"><span class="pre">markers_make_local</span></code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#bpy.ops.action.markers_make_local" title="Permalink to this definition">¶</a></dt>
+<dd><p>Move selected scene markers to the active Action as local ‘pose’ markers</p>
+</dd></dl>
+
+<dl class="py function">
+<dt id="bpy.ops.action.mirror">
+<code class="sig-prename descclassname"><span class="pre">bpy.ops.action.</span></code><code class="sig-name descname"><span class="pre">mirror</span></code><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">type</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'CFRA'</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#bpy.ops.action.mirror" title="Permalink to this definition">¶</a></dt>
+<dd><p>Flip selected keyframes over the selected mirror line</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>type</strong> (<em>enum in</em><em> [</em><em>'CFRA'</em><em>, </em><em>'XAXIS'</em><em>, </em><em>'MARKER'</em><em>]</em><em>, </em><em>(</em><em>optional</em><em>)</em>) – <p>Type</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">CFRA</span></code>
+By Times Over Current Frame, Flip times of selected keyframes using the current frame as the mirror line.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">XAXIS</span></code>
+By Values Over Zero Value, Flip values of selected keyframes (i.e. negative values become positive, and vice versa).</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">MARKER</span></code>
+By Times Over First Selected Marker, Flip times of selected keyframes using the first selected marker as the reference point.</p></li>
+</ul>
+</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt id="bpy.ops.action.new">
+<code class="sig-prename descclassname"><span class="pre">bpy.ops.action.</span></code><code class="sig-name descname"><span class="pre">new</span></code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#bpy.ops.action.new" title="Permalink to this definition">¶</a></dt>
+<dd><p>Create new action</p>
+</dd></dl>
+
+<dl class="py function">
+<dt id="bpy.ops.action.paste">
+<code class="sig-prename descclassname"><span class="pre">bpy.ops.action.</span></code><code class="sig-name descname"><span class="pre">paste</span></code><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">offset</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'START'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">merge</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'MIX'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">flipped</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#bpy.ops.action.paste" title="Permalink to this definition">¶</a></dt>
+<dd><p>Paste keyframes from copy/paste buffer for the selected channels, starting on the current frame</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>offset</strong> (<em>enum in</em><em> [</em><em>'START'</em><em>, </em><em>'END'</em><em>, </em><em>'RELATIVE'</em><em>, </em><em>'NONE'</em><em>]</em><em>, </em><em>(</em><em>optional</em><em>)</em>) – <p>Offset, Paste time offset of keys</p>
+<ul>
+<li><p><code class="docutils literal notranslate"><span class="pre">START</span></code>
+Frame Start, Paste keys starting at current frame.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">END</span></code>
+Frame End, Paste keys ending at current frame.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">RELATIVE</span></code>
+Frame Relative, Paste keys relative to the current frame when copying.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">NONE</span></code>
+No Offset, Paste keys from original time.</p></li>
+</ul>
+</p></li>
+<li><p><strong>merge</strong> (<em>enum in</em><em> [</em><em>'MIX'</em><em>, </em><em>'OVER_ALL'</em><em>, </em><em>'OVER_RANGE'</em><em>, </em><em>'OVER_RANGE_ALL'</em><em>]</em><em>, </em><em>(</em><em>optional</em><em>)</em>) – <p>Type, Method of merging pasted keys and existing</p>
+<ul>
+<li><p><code class="docutils literal notranslate"><span class="pre">MIX</span></code>
+Mix, Overlay existing with new keys.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">OVER_ALL</span></code>
+Overwrite All, Replace all keys.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">OVER_RANGE</span></code>
+Overwrite Range, Overwrite keys in pasted range.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">OVER_RANGE_ALL</span></code>
+Overwrite Entire Range, Overwrite keys in pasted range, using the range of all copied keys.</p></li>
+</ul>
+</p></li>
+<li><p><strong>flipped</strong> (<em>boolean</em><em>, </em><em>(</em><em>optional</em><em>)</em>) – Flipped, Paste keyframes from mirrored bones if they exist</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt id="bpy.ops.action.previewrange_set">
+<code class="sig-prename descclassname"><span class="pre">bpy.ops.action.</span></code><code class="sig-name descname"><span class="pre">previewrange_set</span></code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#bpy.ops.action.previewrange_set" title="Permalink to this definition">¶</a></dt>
+<dd><p>Set Preview Range based on extents of selected Keyframes</p>
+</dd></dl>
+
+<dl class="py function">
+<dt id="bpy.ops.action.push_down">
+<code class="sig-prename descclassname"><span class="pre">bpy.ops.action.</span></code><code class="sig-name descname"><span class="pre">push_down</span></code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#bpy.ops.action.push_down" title="Permalink to this definition">¶</a></dt>
+<dd><p>Push action down on to the NLA stack as a new strip</p>
+</dd></dl>
+
+<dl class="py function">
+<dt id="bpy.ops.action.sample">
+<code class="sig-prename descclassname"><span class="pre">bpy.ops.action.</span></code><code class="sig-name descname"><span class="pre">sample</span></code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#bpy.ops.action.sample" title="Permalink to this definition">¶</a></dt>
+<dd><p>Add keyframes on every frame between the selected keyframes</p>
+</dd></dl>
+
+<dl class="py function">
+<dt id="bpy.ops.action.select_all">
+<code class="sig-prename descclassname"><span class="pre">bpy.ops.action.</span></code><code class="sig-name descname"><span class="pre">select_all</span></code><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">action</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'TOGGLE'</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#bpy.ops.action.select_all" title="Permalink to this definition">¶</a></dt>
+<dd><p>Toggle selection of all keyframes</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>action</strong> (<em>enum in</em><em> [</em><em>'TOGGLE'</em><em>, </em><em>'SELECT'</em><em>, </em><em>'DESELECT'</em><em>, </em><em>'INVERT'</em><em>]</em><em>, </em><em>(</em><em>optional</em><em>)</em>) – <p>Action, Selection action to execute</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">TOGGLE</span></code>
+Toggle, Toggle selection for all elements.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">SELECT</span></code>
+Select, Select all elements.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">DESELECT</span></code>
+Deselect, Deselect all elements.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">INVERT</span></code>
+Invert, Invert selection of all elements.</p></li>
+</ul>
+</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt id="bpy.ops.action.select_box">
+<code class="sig-prename descclassname"><span class="pre">bpy.ops.action.</span></code><code class="sig-name descname"><span class="pre">select_box</span></code><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">axis_range</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">xmin</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">xmax</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ymin</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ymax</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">wait_for_input</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">mode</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'SET'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">tweak</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#bpy.ops.action.select_box" title="Permalink to this definition">¶</a></dt>
+<dd><p>Select all keyframes within the specified region</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>axis_range</strong> (<em>boolean</em><em>, </em><em>(</em><em>optional</em><em>)</em>) – Axis Range</p></li>
+<li><p><strong>xmin</strong> (<em>int in</em><em> [</em><em>-inf</em><em>, </em><em>inf</em><em>]</em><em>, </em><em>(</em><em>optional</em><em>)</em>) – X Min</p></li>
+<li><p><strong>xmax</strong> (<em>int in</em><em> [</em><em>-inf</em><em>, </em><em>inf</em><em>]</em><em>, </em><em>(</em><em>optional</em><em>)</em>) – X Max</p></li>
+<li><p><strong>ymin</strong> (<em>int in</em><em> [</em><em>-inf</em><em>, </em><em>inf</em><em>]</em><em>, </em><em>(</em><em>optional</em><em>)</em>) – Y Min</p></li>
+<li><p><strong>ymax</strong> (<em>int in</em><em> [</em><em>-inf</em><em>, </em><em>inf</em><em>]</em><em>, </em><em>(</em><em>optional</em><em>)</em>) – Y Max</p></li>
+<li><p><strong>wait_for_input</strong> (<em>boolean</em><em>, </em><em>(</em><em>optional</em><em>)</em>) – Wait for Input</p></li>
+<li><p><strong>mode</strong> (<em>enum in</em><em> [</em><em>'SET'</em><em>, </em><em>'ADD'</em><em>, </em><em>'SUB'</em><em>]</em><em>, </em><em>(</em><em>optional</em><em>)</em>) – <p>Mode</p>
+<ul>
+<li><p><code class="docutils literal notranslate"><span class="pre">SET</span></code>
+Set, Set a new selection.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">ADD</span></code>
+Extend, Extend existing selection.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">SUB</span></code>
+Subtract, Subtract existing selection.</p></li>
+</ul>
+</p></li>
+<li><p><strong>tweak</strong> (<em>boolean</em><em>, </em><em>(</em><em>optional</em><em>)</em>) – Tweak, Operator has been activated using a tweak event</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt id="bpy.ops.action.select_circle">
+<code class="sig-prename descclassname"><span class="pre">bpy.ops.action.</span></code><code class="sig-name descname"><span class="pre">select_circle</span></code><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">x</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">y</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">radius</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">25</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">wait_for_input</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">mode</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'SET'</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#bpy.ops.action.select_circle" title="Permalink to this definition">¶</a></dt>
+<dd><p>Select keyframe points using circle selection</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>x</strong> (<em>int in</em><em> [</em><em>-inf</em><em>, </em><em>inf</em><em>]</em><em>, </em><em>(</em><em>optional</em><em>)</em>) – X</p></li>
+<li><p><strong>y</strong> (<em>int in</em><em> [</em><em>-inf</em><em>, </em><em>inf</em><em>]</em><em>, </em><em>(</em><em>optional</em><em>)</em>) – Y</p></li>
+<li><p><strong>radius</strong> (<em>int in</em><em> [</em><em>1</em><em>, </em><em>inf</em><em>]</em><em>, </em><em>(</em><em>optional</em><em>)</em>) – Radius</p></li>
+<li><p><strong>wait_for_input</strong> (<em>boolean</em><em>, </em><em>(</em><em>optional</em><em>)</em>) – Wait for Input</p></li>
+<li><p><strong>mode</strong> (<em>enum in</em><em> [</em><em>'SET'</em><em>, </em><em>'ADD'</em><em>, </em><em>'SUB'</em><em>]</em><em>, </em><em>(</em><em>optional</em><em>)</em>) – <p>Mode</p>
+<ul>
+<li><p><code class="docutils literal notranslate"><span class="pre">SET</span></code>
+Set, Set a new selection.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">ADD</span></code>
+Extend, Extend existing selection.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">SUB</span></code>
+Subtract, Subtract existing selection.</p></li>
+</ul>
+</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt id="bpy.ops.action.select_column">
+<code class="sig-prename descclassname"><span class="pre">bpy.ops.action.</span></code><code class="sig-name descname"><span class="pre">select_column</span></code><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">mode</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'KEYS'</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#bpy.ops.action.select_column" title="Permalink to this definition">¶</a></dt>
+<dd><p>Select all keyframes on the specified frame(s)</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>mode</strong> (<em>enum in</em><em> [</em><em>'KEYS'</em><em>, </em><em>'CFRA'</em><em>, </em><em>'MARKERS_COLUMN'</em><em>, </em><em>'MARKERS_BETWEEN'</em><em>]</em><em>, </em><em>(</em><em>optional</em><em>)</em>) – Mode</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt id="bpy.ops.action.select_lasso">
+<code class="sig-prename descclassname"><span class="pre">bpy.ops.action.</span></code><code class="sig-name descname"><span class="pre">select_lasso</span></code><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">path</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">mode</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'SET'</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#bpy.ops.action.select_lasso" title="Permalink to this definition">¶</a></dt>
+<dd><p>Select keyframe points using lasso selection</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>path</strong> (<code class="xref py py-class docutils literal notranslate"><span class="pre">bpy_prop_collection</span></code> of <code class="xref py py-class docutils literal notranslate"><span class="pre">OperatorMousePath</span></code>, (optional)) – Path</p></li>
+<li><p><strong>mode</strong> (<em>enum in</em><em> [</em><em>'SET'</em><em>, </em><em>'ADD'</em><em>, </em><em>'SUB'</em><em>]</em><em>, </em><em>(</em><em>optional</em><em>)</em>) – <p>Mode</p>
+<ul>
+<li><p><code class="docutils literal notranslate"><span class="pre">SET</span></code>
+Set, Set a new selection.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">ADD</span></code>
+Extend, Extend existing selection.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">SUB</span></code>
+Subtract, Subtract existing selection.</p></li>
+</ul>
+</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt id="bpy.ops.action.select_leftright">
+<code class="sig-prename descclassname"><span class="pre">bpy.ops.action.</span></code><code class="sig-name descname"><span class="pre">select_leftright</span></code><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">mode</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'CHECK'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">extend</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#bpy.ops.action.select_leftright" title="Permalink to this definition">¶</a></dt>
+<dd><p>Select keyframes to the left or the right of the current frame</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>mode</strong> (<em>enum in</em><em> [</em><em>'CHECK'</em><em>, </em><em>'LEFT'</em><em>, </em><em>'RIGHT'</em><em>]</em><em>, </em><em>(</em><em>optional</em><em>)</em>) – Mode</p></li>
+<li><p><strong>extend</strong> (<em>boolean</em><em>, </em><em>(</em><em>optional</em><em>)</em>) – Extend Select</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt id="bpy.ops.action.select_less">
+<code class="sig-prename descclassname"><span class="pre">bpy.ops.action.</span></code><code class="sig-name descname"><span class="pre">select_less</span></code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#bpy.ops.action.select_less" title="Permalink to this definition">¶</a></dt>
+<dd><p>Deselect keyframes on ends of selection islands</p>
+</dd></dl>
+
+<dl class="py function">
+<dt id="bpy.ops.action.select_linked">
+<code class="sig-prename descclassname"><span class="pre">bpy.ops.action.</span></code><code class="sig-name descname"><span class="pre">select_linked</span></code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#bpy.ops.action.select_linked" title="Permalink to this definition">¶</a></dt>
+<dd><p>Select keyframes occurring in the same F-Curves as selected ones</p>
+</dd></dl>
+
+<dl class="py function">
+<dt id="bpy.ops.action.select_more">
+<code class="sig-prename descclassname"><span class="pre">bpy.ops.action.</span></code><code class="sig-name descname"><span class="pre">select_more</span></code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#bpy.ops.action.select_more" title="Permalink to this definition">¶</a></dt>
+<dd><p>Select keyframes beside already selected ones</p>
+</dd></dl>
+
+<dl class="py function">
+<dt id="bpy.ops.action.snap">
+<code class="sig-prename descclassname"><span class="pre">bpy.ops.action.</span></code><code class="sig-name descname"><span class="pre">snap</span></code><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">type</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'CFRA'</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#bpy.ops.action.snap" title="Permalink to this definition">¶</a></dt>
+<dd><p>Snap selected keyframes to the times specified</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>type</strong> (<em>enum in</em><em> [</em><em>'CFRA'</em><em>, </em><em>'NEAREST_FRAME'</em><em>, </em><em>'NEAREST_SECOND'</em><em>, </em><em>'NEAREST_MARKER'</em><em>]</em><em>, </em><em>(</em><em>optional</em><em>)</em>) – <p>Type</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">CFRA</span></code>
+Selection to Current Frame, Snap selected keyframes to the current frame.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">NEAREST_FRAME</span></code>
+Selection to Nearest Frame, Snap selected keyframes to the nearest (whole) frame (use to fix accidental subframe offsets).</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">NEAREST_SECOND</span></code>
+Selection to Nearest Second, Snap selected keyframes to the nearest second.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">NEAREST_MARKER</span></code>
+Selection to Nearest Marker, Snap selected keyframes to the nearest marker.</p></li>
+</ul>
+</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt id="bpy.ops.action.stash">
+<code class="sig-prename descclassname"><span class="pre">bpy.ops.action.</span></code><code class="sig-name descname"><span class="pre">stash</span></code><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">create_new</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#bpy.ops.action.stash" title="Permalink to this definition">¶</a></dt>
+<dd><p>Store this action in the NLA stack as a non-contributing strip for later use</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>create_new</strong> (<em>boolean</em><em>, </em><em>(</em><em>optional</em><em>)</em>) – Create New Action, Create a new action once the existing one has been safely stored</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt id="bpy.ops.action.stash_and_create">
+<code class="sig-prename descclassname"><span class="pre">bpy.ops.action.</span></code><code class="sig-name descname"><span class="pre">stash_and_create</span></code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#bpy.ops.action.stash_and_create" title="Permalink to this definition">¶</a></dt>
+<dd><p>Store this action in the NLA stack as a non-contributing strip for later use, and create a new action</p>
+</dd></dl>
+
+<dl class="py function">
+<dt id="bpy.ops.action.unlink">
+<code class="sig-prename descclassname"><span class="pre">bpy.ops.action.</span></code><code class="sig-name descname"><span class="pre">unlink</span></code><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">force_delete</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#bpy.ops.action.unlink" title="Permalink to this definition">¶</a></dt>
+<dd><p>Unlink this action from the active action slot (and/or exit Tweak Mode)</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>force_delete</strong> (<em>boolean</em><em>, </em><em>(</em><em>optional</em><em>)</em>) – Force Delete, Clear Fake User and remove copy stashed in this data-block’s NLA stack</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt id="bpy.ops.action.view_all">
+<code class="sig-prename descclassname"><span class="pre">bpy.ops.action.</span></code><code class="sig-name descname"><span class="pre">view_all</span></code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#bpy.ops.action.view_all" title="Permalink to this definition">¶</a></dt>
+<dd><p>Reset viewable area to show full keyframe range</p>
+</dd></dl>
+
+<dl class="py function">
+<dt id="bpy.ops.action.view_frame">
+<code class="sig-prename descclassname"><span class="pre">bpy.ops.action.</span></code><code class="sig-name descname"><span class="pre">view_frame</span></code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#bpy.ops.action.view_frame" title="Permalink to this definition">¶</a></dt>
+<dd><p>Move the view to the current frame</p>
+</dd></dl>
+
+<dl class="py function">
+<dt id="bpy.ops.action.view_selected">
+<code class="sig-prename descclassname"><span class="pre">bpy.ops.action.</span></code><code class="sig-name descname"><span class="pre">view_selected</span></code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#bpy.ops.action.view_selected" title="Permalink to this definition">¶</a></dt>
+<dd><p>Reset viewable area to show selected keyframes range</p>
+</dd></dl>
+
+</div>
+
+
+           </div>
+           
+          </div>
+          <footer>
+    <div class="rst-footer-buttons" role="navigation" aria-label="footer navigation">
+        <a href="bpy.ops.anim.html" class="btn btn-neutral float-right" title="Anim Operators" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+        <a href="bpy.ops.html" class="btn btn-neutral float-left" title="Operators (bpy.ops)" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>
+        &#169; Copyright Blender Foundation.
+      <span class="lastupdated">
+        Last updated on 03/04/2021.
+      </span>
+
+    </p>
+  </div> 
+
+</footer>
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+  
+
+  <script type="text/javascript">
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(false);
+      });
+  </script>
+
+  
+  
+    
+   
+
+</body>
+</html>

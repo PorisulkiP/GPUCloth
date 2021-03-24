@@ -1,0 +1,59 @@
+air damping - трение о воздух
+bending damping - 
+bending model
+bending stiffness
+bending stiffness max
+bl rna
+collider friction
+compression damping
+compression stiffness
+compression stiffness max
+density strength
+density target
+effector weights
+fluid density
+goal default
+goal friction
+goal max
+goal min
+goal spring
+gravity
+internal compression stiffness
+internal compression stiffness max
+internal friction
+internal spring max diversion
+internal spring max length
+internal spring normal check
+internal tension stiffness
+internal tension stiffness max
+mass
+pin stiffness
+pressure factor
+quality
+rest shape key
+rna type
+sewing force max
+shear damping
+shear stiffness
+shear stiffness max
+shrink max
+shrink min
+target volume
+tension damping
+tension stiffness
+tension stiffness max
+time scale
+uniform pressure force
+use dynamic mesh
+use internal springs
+use pressure
+use pressure volume
+use sewing springs
+vertex group bending
+vertex group intern
+vertex group mass
+vertex group pressure
+vertex group shear stiffness
+vertex group shrink
+vertex group structural stiffness
+voxel cell size

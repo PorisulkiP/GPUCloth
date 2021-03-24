@@ -1,0 +1,59 @@
+air_damping =  1.0
+bending damping =  0.5
+bending model = 
+ANGULAR
+bending stiffness =  0.5
+bending stiffness max =  0.5
+collider friction =  0.0
+density target =  5.0
+fluid_density =  0.0
+goal_default =  0.0
+goal_friction =  0.0
+goal_max =  1.0
+goal_min =  0.0
+goal_spring =  1.0
+gravity =  Vector((0.0 0.0 -9.8100004196167))
+internal_compression_stiffness =  15.0
+internal_friction =  0.0
+internal_spring_max_diversion =  0.7853981852531433
+internal_spring_max_length =  0.0
+internal_spring_normal_check =  True
+internal_tension_stiffness =  15.0
+internal_tension_stiffness_max =  15.0
+mass =  0.30000001192092896
+pin_stiffness =  1.0
+pressure_factor =  1.0
+quality =  5
+rest_shape_key =  None
+sewing_force_max =  0.0
+shear_damping =  5.0
+shear_stiffness =  5.0
+shear_stiffness_max =  5.0
+shrink_max =  0.0
+shrink_min =  0.0
+target_volume =  0.0
+tension_damping =  5.0
+tension_stiffness =  15.0
+tension_stiffness_max =  15.0
+time_scale =  1.0
+uniform_pressure_force =  0.0
+use_dynamic_mesh =  False
+use_internal_springs =  False
+use_pressure =  False
+use_pressure_volume =  False
+use_sewing_springs =  False
+vertex_group_bending = 
+
+vertex_group_intern = 
+
+vertex_group_mass = 
+
+vertex_group_pressure = 
+
+vertex_group_shear_stiffness = 
+
+vertex_group_shrink = 
+
+vertex_group_structural_stiffness = 
+
+voxel_cell_size =  0.10000000149011612
