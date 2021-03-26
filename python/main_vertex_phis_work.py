@@ -13,15 +13,21 @@ import bpy
 # Переход на первый кадр
 bpy.context.scene.frame_current = bpy.context.scene.frame_start
 
+# Гравитация -0,01, чтобы плоскоть медленне падала
+bpy.context.scene.gravity[2] = -0.01
+
 # В данном класе создаётся сцена для тестировния алгоритма физики ткани
 class SetUp():
     def __init__(self):
+        # запускаем создание сцены
         self.opening_scene()
 #        self.pipInstall("numba") # установка внешних пакетов
 
     def opening_scene(self):
         """
         Создаёт сцену с кубом и плоскостью
+        Накидывает на неё модификатор ткани и собирает все параметры
+        Следом вызывает функцию записи всех этих параметров в файл
         """
         # Пробуем взять данные о плоскости(объект)
         try:
@@ -37,8 +43,6 @@ class SetUp():
             bpy.ops.mesh.primitive_plane_add(size=2, enter_editmode=False, 
                                             align='WORLD', location=(0, 0, 1), 
                                             scale=(1, 1, 1))
-            
-#            bpy.ops.mesh.quads_convert_to_tris(quad_method='BEAUTY', ngon_method='BEAUTY')
 
             # Подразделяем для симуляции ткани
 #            bpy.ops.object.subdivision_set(level=5, relative=False)
@@ -238,8 +242,13 @@ class Phisic():
         # Засовываем данные о плоскости в переменную
         self.mesh_data = bpy.data.objects["Plane"].data
         self.mesh = bpy.data.objects["Plane"]
+        
+        # Засовываем данные о кубе в переменную
         self.cube = bpy.data.objects["Cube"]
         self.cube_data = bpy.data.objects["Cube"].data
+        
+#        Это список объектов в сцене, котороые поддерживают столкновение с тканью
+#        Нужен для просчёта с множеством предметов
 #        self.collisionOBJ = [bpy.data.objects[i] for i in len(bpy.data.objects)]
 #        self.collisionOBJ = 
         
@@ -259,27 +268,35 @@ class Phisic():
 #        if bpy.context.scene.frame_current == bpy.context.scene.frame_start:
 #            self.backupGet(backUp)
         def gravityCalc(scene):
+            
+            # Перебираем все точки плоскости и куба
+            # len(mesh_data.vertices) это колличество точек у данной геометрии
             for i in range(0, len(mesh_data.vertices)-1):
                 for o in range(0, len(cube_data.vertices)-1):
                     mesh_local = mesh_data.vertices[i].co
                     cube_local = cube_data.vertices[o].co
                     
+                    # пробуем обратиться ко второй точке, чтобы сделать отрезок
                     try:
                         mesh_local_second = mesh_data.vertices[i+1].co
                         cube_local_second = cube_data.vertices[o+1].co
                     except IndexError:
                         break                        
                     
+                    # Делаем транспонирование матриц, 
+                    # чтобы превратить локальные координаты и глобальные
                     mesh_global = mesh.matrix_world @ mesh_local
                     cube_global = cube.matrix_world @ cube_local
                     
                     mesh_global_second = mesh.matrix_world @ mesh_local_second
                     cube_global_second = cube.matrix_world @ cube_local_second
                     
+#                    Первая точка
                     global_x_mesh = mesh_global[0]
                     global_y_mesh = mesh_global[1]
                     global_z_mesh = mesh_global[2]
                     
+#                    Вторая точка и вместе они создают отрезок с которым мы работаем
                     global_x_mesh_second = mesh_global_second[0]
                     global_y_mesh_second = mesh_global_second[1]
                     global_z_mesh_second = mesh_global_second[2]
@@ -292,6 +309,7 @@ class Phisic():
                     global_y_cube_second = cube_global_second[1]
                     global_z_cube_second = cube_global_second[2]
                     
+                    # Флаг пересечений, где True = пересекаются
                     flag = self.cross(global_x_mesh, global_y_mesh, global_z_mesh,
                                  global_x_mesh_second, global_y_mesh_second, global_z_mesh_second,
                                  global_x_cube, global_y_cube, global_z_cube,
@@ -307,25 +325,31 @@ class Phisic():
 #                            (global_y_mesh - global_y_cube) >= 0.405 and 
 #                            (global_z_mesh - global_z_cube) >= 0.405)
 
-                    distance_min = 0.00005
-#                    x, y, z = self.lenOfTwoPoints(global_x_mesh, global_y_mesh, global_z_mesh,
-#                                                  global_x_cube, global_y_cube, global_z_cube)
+                    # Расстояние между объектами
+                    distance_min = 0.0005
+                    
+                    # Расстояние между точками
+                    x, y, z = self.lenOfTwoPoints(global_x_mesh, global_y_mesh, global_z_mesh,
+                                                  global_x_cube, global_y_cube, global_z_cube)
 #                    print("distance = ", distance)
 #                    print("distance = ", distance > 0.4)
-                    if (flag):
-                        print("first flag = ", flag)
+
+                    #Делаем проверку на расстояние между точками и если они не пересекаются, то опускаем дальше
+                    if (x > distance_min and y > distance_min and z > distance_min):
                         for newCoor in mesh_data.vertices:
                             newCoor.co[0] += (bpy.context.scene.gravity[0] / bpy.context.scene.render.fps)
                             newCoor.co[1] += (bpy.context.scene.gravity[1] / bpy.context.scene.render.fps)
                             newCoor.co[2] += (bpy.context.scene.gravity[2] / bpy.context.scene.render.fps)
                     else:
-                        print("second flag = ", flag)
+#                        print("flag = ", flag)
+                        # Если есть пересечения, то возвращаем назад
                         if flag:
                             for newCoor in mesh_data.vertices:
                                 newCoor.co[0] -= (bpy.context.scene.gravity[0] / bpy.context.scene.render.fps)
                                 newCoor.co[1] -= (bpy.context.scene.gravity[1] / bpy.context.scene.render.fps)
                                 newCoor.co[2] -= (bpy.context.scene.gravity[2] / bpy.context.scene.render.fps)
                         else:
+                            # Если нет пересечений, но в следующем кадре они есть, то стоим на месте
                             for newCoor in mesh_data.vertices:
 #                                print("newCoor = ", newCoor.co)
                                 newCoor.co[0] += 0
@@ -334,7 +358,11 @@ class Phisic():
                         
         return gravityCalc
     
-    def crossing(self, x1, y1, z1, x2, y2, z2, x3, y3, z3, x4, y4, z4, distance_min = 0.15):
+    def lenOfTwoPoints(self, x1, y1, z1, x2, y2, z2, distance_min = 0.15):
+        """
+        Определяем расстояние между точками
+        Не подходит для данной реализации(
+        """
         a = (abs(x1) - abs(x2))**2
         b = (abs(y1) - abs(y2))**2
         c = (abs(z1) - abs(z2))**2
@@ -370,6 +398,9 @@ class Phisic():
         return True
         
     def backupGet(self, backUp):
+        """
+        Тут мы переносим все точки из бэкапа в нынешнюю геометрию
+        """
         for newVert in self.mesh_data.vertices:
             for oldVert in backUp:
 #                print("newVert.co.x: ", newVert.co.x)
@@ -379,9 +410,16 @@ class Phisic():
                 newVert.co.z = oldVert[2]
     
     def collisionOBJ(self):
+        """
+        Собираем список всех объектов в сцене и проверяем их 
+        на способность к обработке столкновений
+        """
         pass
 
 def backupSet():
+    """
+    Тут мы делаем бэкап перед запуском симуляции
+    """
     mesh_data = bpy.data.objects["Plane"].data
     
     backupVert = []
@@ -391,9 +429,15 @@ def backupSet():
     return backupVert
     
 if __name__ == "__main__":
+    
+    # Создание сцены
     setup = SetUp()
+    
+    # Создание бэкапа
     backUp = backupSet()
+    
+    # Запуск симуляции
     phisic = Phisic(backUp)
 
-    # Запуск симуляции
+    # Запуск анимации
     bpy.ops.screen.animation_play(reverse=False, sync=False)
