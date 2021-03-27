@@ -129,8 +129,8 @@ dmypy.json
 .pyre/
 
 # Blender files
-.blend
-.blend1
+*.blend
+*.blend1
 
 # Visual Studio Code # 
 .vscode/
