@@ -1,7 +1,7 @@
 """
 Файл запускать только в blender 2.93.x, в рабочей области "Scripting"!
 
-В данном файле происходит запуск файлов создания сцены и запуска симуляции
+Задача данного файла – подключение к blender, настройка UI, регистрации аддона.
 """
 
 bl_info = {
@@ -15,6 +15,16 @@ bl_info = {
     "doc_url": "",
     "category": "System",
 }
+
+# ------------------------------------------------------------------------
+#    UI
+# ------------------------------------------------------------------------
+
+
+
+# ------------------------------------------------------------------------
+#    Registration
+# ------------------------------------------------------------------------
 
 # импортируем API для работы с blender
 import bpy
@@ -30,15 +40,17 @@ if not dir in sys.path:
 
 # импорт файлов с функциями
 import setup
-import physics
-  
+import physic
+
+def register():  
+    rig_prefs.register()
+    rig_functions.register()    
+    
+
+def unregister():   
+    rig_prefs.unregister()
+    rig_functions.unregister()
+    
+
 if __name__ == "__main__":
-    # Переход на первый кадр
-    bpy.context.scene.frame_current = bpy.context.scene.frame_start
-
-    setup.SetUp()
-    backUp = physics.backupSet()
-    physics.Physics(backUp)
-
-    # Запуск симуляции
-    bpy.ops.screen.animation_play(reverse=False, sync=False)
+    register()
