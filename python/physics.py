@@ -57,21 +57,27 @@ class Physics():
                     for obj_vert_data in cube_data:
                         # о - одна вершина из всех, что есть в объекте столкновения
                         for o in range(0, len(obj_vert_data.vertices)-1):
+                            # 1-я вершина из отрезка
                             mesh_local = mesh_data.vertices[i].co
                             cube_local = obj_vert_data.vertices[o].co
                             
+                            # попытка обратиться к 2-ой вершине из отрезка
+                            # работает если кол-во точек чётно
                             try:
                                 mesh_local_second = mesh_data.vertices[i+1].co
                                 cube_local_second = obj_vert_data.vertices[o+1].co
                             except IndexError:
                                 break                        
                             
+                            # глобализация координат первой вершины
                             mesh_global = mesh.matrix_world @ mesh_local
                             cube_global = obj_vert.matrix_world @ cube_local
                             
+                            # глобализация координат второй вершины
                             mesh_global_second = mesh.matrix_world @ mesh_local_second
                             cube_global_second = obj_vert.matrix_world @ cube_local_second
                             
+                            # [0] - x, [1] - y, [2] - z
                             global_x_mesh = mesh_global[0]
                             global_y_mesh = mesh_global[1]
                             global_z_mesh = mesh_global[2]
@@ -98,13 +104,11 @@ class Physics():
                         #    print("Z = ",  global_z_mesh - global_z_cube)
                             distance_min = 0.00005
                             if (flag):
-                                # print("first flag = ", flag)
                                 for newCoor in mesh_data.vertices:
                                     newCoor.co[0] += (bpy.context.scene.gravity[0] / bpy.context.scene.render.fps)
                                     newCoor.co[1] += (bpy.context.scene.gravity[1] / bpy.context.scene.render.fps)
                                     newCoor.co[2] += (bpy.context.scene.gravity[2] / bpy.context.scene.render.fps)
                             else:
-                                # print("second flag = ", flag)
                                 if flag:
                                     for newCoor in mesh_data.vertices:
                                         newCoor.co[0] -= (bpy.context.scene.gravity[0] / bpy.context.scene.render.fps)
@@ -112,7 +116,6 @@ class Physics():
                                         newCoor.co[2] -= (bpy.context.scene.gravity[2] / bpy.context.scene.render.fps)
                                 else:
                                     for newCoor in mesh_data.vertices:
-        #                                print("newCoor = ", newCoor.co)
                                         newCoor.co[0] += 0
                                         newCoor.co[1] += 0
                                         newCoor.co[2] += 0
@@ -124,10 +127,6 @@ class Physics():
         b = (abs(y1) - abs(y2))**2
         c = (abs(z1) - abs(z2))**2
 #        d = (a+b+c)**0.5
-#        print("a = ", a)
-#        print("b = ", b)
-#        print("c = ", c)
-#        print("d = ", d)
         return a, b, c
 
     def cross(self, x1, y1, z1, x2, y2, z2, x3, y3, z3, x4, y4, z4, distance_min = 0.15):
@@ -186,8 +185,10 @@ def backupSet():
     """
     Создание бэкапа 
     """
+
     mesh_data = bpy.data.objects["Plane"].data
     
+    # список всех вершин изначального меша ткани
     backupVert = []
     for NumVert in range(0, len(mesh_data.vertices)-1):
         backupVert.append(mesh_data.vertices[NumVert].co)
