@@ -4,6 +4,22 @@
 Задача данного файла – подключение к blender, настройка UI, регистрации аддона.
 """
 
+# импортируем API для работы с blender
+import bpy
+import sys
+import os
+
+# Добавляем папку с проектом в поле зрения blender
+dir = os.path.dirname(bpy.data.filepath)
+if not dir in sys.path:
+    sys.path.append(dir)
+    sys.path.append(dir + "\\python")
+    print(sys.path)
+
+# импорт файлов с функциями
+import setup
+import physic
+
 bl_info = {
     "name": "GPUCloth",
     "author": "PorisulkiP",
@@ -26,31 +42,13 @@ bl_info = {
 #    Registration
 # ------------------------------------------------------------------------
 
-# импортируем API для работы с blender
-import bpy
-import sys
-import os
+def register():
+    bpy.utils.register_class(setup.SetUp)
+    bpy.utils.register_class(physics.Physics)
 
-# Добавляем папку с проектом в поле зрения blender
-dir = os.path.dirname(bpy.data.filepath)
-if not dir in sys.path:
-    sys.path.append(dir)
-    sys.path.append(dir + "\\python")
-    print(sys.path)
-
-# импорт файлов с функциями
-import setup
-import physic
-
-def register():  
-    rig_prefs.register()
-    rig_functions.register()    
-    
-
-def unregister():   
-    rig_prefs.unregister()
-    rig_functions.unregister()
-    
+def unregister():
+    bpy.utils.unregister_class(setup.SetUp)
+    bpy.utils.unregister_class(physics.Physics)
 
 if __name__ == "__main__":
     register()
