@@ -21,7 +21,7 @@ class SetUp():
     def __init__(self):
         # запускаем создание сцены
         self.opening_scene()
-#        self.pipInstall("numba") # установка внешних пакетов
+        # self.pipInstall("numba") # установка внешних пакетов
 
     def opening_scene(self):
         """
@@ -43,18 +43,6 @@ class SetUp():
             bpy.ops.mesh.primitive_plane_add(size=2, enter_editmode=False, 
                                             align='WORLD', location=(0, 0, 1), 
                                             scale=(1, 1, 1))
-
-            # Подразделяем для симуляции ткани
-#            bpy.ops.object.subdivision_set(level=5, relative=False)
-            
-            # Изменяем подразделение на "простое"
-#            bpy.context.object.modifiers["Subdivision"].subdivision_type = 'SIMPLE'
-            
-            # Применяем модификатор
-#            bpy.ops.object.modifier_apply(modifier="Subdivision")
-            
-            # Сглаживаем плоскость
-#            bpy.ops.object.shade_smooth()
 
             # Назначаем на плоскость физику ткани
             bpy.ops.object.modifier_add(type='CLOTH')
@@ -221,9 +209,9 @@ class SetUp():
         value.append("voxel_cell_size = ")
         value.append(self.clothSettings.voxel_cell_size)
 
-        file = open('C:\\Users\\alex1\\Desktop\\CUDACloth\\clothSettings.txt','w')
-        file.write(str(value).replace("]", "").replace("[", "").replace(", '", "\n").replace("'", "").replace(",", "")) 
-        file.close()
+#        file = open('C:\\Users\\alex1\\Desktop\\CUDACloth\\clothSettings.txt','w')
+#        file.write(str(value).replace("]", "").replace("[", "").replace(", '", "\n").replace("'", "").replace(",", "")) 
+#        file.close()
         
     def pipInstall(self, pack):
         """
@@ -246,16 +234,8 @@ class Phisic():
         # Засовываем данные о кубе в переменную
         self.cube = bpy.data.objects["Cube"]
         self.cube_data = bpy.data.objects["Cube"].data
-        
-#        Это список объектов в сцене, котороые поддерживают столкновение с тканью
-#        Нужен для просчёта с множеством предметов
-#        self.collisionOBJ = [bpy.data.objects[i] for i in len(bpy.data.objects)]
-#        self.collisionOBJ = 
-        
+
         self.backUp = backUp
-#        self.backupGet(backUp)
-        
-#        print(self.collisionOBJ)
 
         bpy.app.handlers.frame_change_pre.clear() 
         bpy.app.handlers.frame_change_pre.append(self.physicsCalculation(self.mesh_data, self.cube_data, self.mesh, self.cube, self.backUp))
@@ -265,8 +245,6 @@ class Phisic():
         Данная функция вызывается каждый кадр.
         запускает ещё несколько функция для расчёта физики
         '''
-#        if bpy.context.scene.frame_current == bpy.context.scene.frame_start:
-#            self.backupGet(backUp)
         def gravityCalc(scene):
             
             # Перебираем все точки плоскости и куба
@@ -291,12 +269,12 @@ class Phisic():
                     mesh_global_second = mesh.matrix_world @ mesh_local_second
                     cube_global_second = cube.matrix_world @ cube_local_second
                     
-#                    Первая точка
+                    # Первая точка
                     global_x_mesh = mesh_global[0]
                     global_y_mesh = mesh_global[1]
                     global_z_mesh = mesh_global[2]
                     
-#                    Вторая точка и вместе они создают отрезок с которым мы работаем
+                    # торая точка и вместе они создают отрезок с которым мы работаем
                     global_x_mesh_second = mesh_global_second[0]
                     global_y_mesh_second = mesh_global_second[1]
                     global_z_mesh_second = mesh_global_second[2]
@@ -314,16 +292,6 @@ class Phisic():
                                  global_x_mesh_second, global_y_mesh_second, global_z_mesh_second,
                                  global_x_cube, global_y_cube, global_z_cube,
                                  global_x_cube_second, global_y_cube_second, global_z_cube_second)
-                    
-#                    print("X = ",  global_x_mesh - global_x_cube)
-#                    print("Y = ",  global_y_mesh - global_y_cube)
-#                    print("Z = ",  global_z_mesh - global_z_cube)
-#                    
-#                    print("Debug = ",  global_z_mesh - global_z_cube)
-
-#                        (abs(global_x_mesh - global_x_cube) >= 0.405 and 
-#                            (global_y_mesh - global_y_cube) >= 0.405 and 
-#                            (global_z_mesh - global_z_cube) >= 0.405)
 
                     # Расстояние между объектами
                     distance_min = 0.0005
@@ -331,8 +299,6 @@ class Phisic():
                     # Расстояние между точками
                     x, y, z = self.lenOfTwoPoints(global_x_mesh, global_y_mesh, global_z_mesh,
                                                   global_x_cube, global_y_cube, global_z_cube)
-#                    print("distance = ", distance)
-#                    print("distance = ", distance > 0.4)
 
                     #Делаем проверку на расстояние между точками и если они не пересекаются, то опускаем дальше
                     if (x > distance_min and y > distance_min and z > distance_min):
@@ -341,7 +307,6 @@ class Phisic():
                             newCoor.co[1] += (bpy.context.scene.gravity[1] / bpy.context.scene.render.fps)
                             newCoor.co[2] += (bpy.context.scene.gravity[2] / bpy.context.scene.render.fps)
                     else:
-#                        print("flag = ", flag)
                         # Если есть пересечения, то возвращаем назад
                         if flag:
                             for newCoor in mesh_data.vertices:
@@ -351,11 +316,9 @@ class Phisic():
                         else:
                             # Если нет пересечений, но в следующем кадре они есть, то стоим на месте
                             for newCoor in mesh_data.vertices:
-#                                print("newCoor = ", newCoor.co)
                                 newCoor.co[0] += 0
                                 newCoor.co[1] += 0
-                                newCoor.co[2] += 0
-                        
+                                newCoor.co[2] += 0                        
         return gravityCalc
     
     def lenOfTwoPoints(self, x1, y1, z1, x2, y2, z2, distance_min = 0.15):
@@ -367,10 +330,6 @@ class Phisic():
         b = (abs(y1) - abs(y2))**2
         c = (abs(z1) - abs(z2))**2
 #        d = (a+b+c)**0.5
-#        print("a = ", a)
-#        print("b = ", b)
-#        print("c = ", c)
-#        print("d = ", d)
         return a, b, c
 
     def cross(self, x1, y1, z1, x2, y2, z2, x3, y3, z3, x4, y4, z4, distance_min = 0.15):
@@ -403,8 +362,6 @@ class Phisic():
         """
         for newVert in self.mesh_data.vertices:
             for oldVert in backUp:
-#                print("newVert.co.x: ", newVert.co.x)
-#                print("oldVert[0]: ", oldVert[0])
                 newVert.co.x = oldVert[0]
                 newVert.co.y = oldVert[1]
                 newVert.co.z = oldVert[2]

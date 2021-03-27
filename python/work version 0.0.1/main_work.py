@@ -26,11 +26,12 @@ dir = os.path.dirname(bpy.data.filepath)
 if not dir in sys.path:
     sys.path.append(dir)
     sys.path.append(dir + "\\python")
+    sys.path.append(dir + "\\python" + "\\work version 0.0.1")
     print(sys.path)
 
 # импорт файлов с функциями
-import setup
-import physics
+import setup_work as setup
+import physics_work as physics
   
 if __name__ == "__main__":
     # Переход на первый кадр
