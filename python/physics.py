@@ -24,16 +24,12 @@ class Physics():
         self.backUp = backUp
 
         # Собираем все объекты в сцене, способные к столкновению
-        self.obj, self.obj_data = self.collisionOBJ()
+        self.collision_objects, self.collision_objects_data = self.collisionOBJ()
 
         bpy.app.handlers.frame_change_pre.clear() 
-        bpy.app.handlers.frame_change_pre.append(self.physicsCalculation(self.mesh_data, 
-                                                                         self.obj_data, 
-                                                                         self.mesh, 
-                                                                         self.obj, 
-                                                                         self.backUp))        
+        bpy.app.handlers.frame_change_pre.append(self.physicsCalculation())        
 
-    def physicsCalculation(self, mesh_data, cube_data, mesh, cube, backUp):
+    def physicsCalculation(self):
         """
         Данная функция вызывается каждый кадр.
         запускает ещё несколько функция для расчёта физики
@@ -41,8 +37,8 @@ class Physics():
         mesh - объект, с симуляциет ткани
         mesh_data - данные об объекте, с симуляциет ткани
 
-        cube - объект(ы) столкновения
-        cube_data -  данные об объек(те)тах, столкновения
+        collision_objects - объект(ы) столкновения
+        collision_objects_data -  данные об объек(те)тах, столкновения
 
         backUp - бэкап ткани до симуляции
         """
@@ -50,32 +46,32 @@ class Physics():
 #            self.backupGet(backUp)
         def gravityCalc(scene):
             # i - одна вершина из всех, что есть в объекте, с симуляциет ткани
-            for i in range(0, len(mesh_data.vertices)-1):
+            for i in range(0, len(self.mesh_data.vertices)-1):
                 # obj_vert - меш из списка объектов столкновений
-                for obj_vert in cube:
+                for obj_vert in self.collision_objects:
                     # obj_vert - данные об меше из списка объектов столкновений
-                    for obj_vert_data in cube_data:
+                    for obj_vert_data in self.collision_objects_data:
                         # о - одна вершина из всех, что есть в объекте столкновения
                         for o in range(0, len(obj_vert_data.vertices)-1):
                             # 1-я вершина из отрезка
-                            mesh_local = mesh_data.vertices[i].co
-                            cube_local = obj_vert_data.vertices[o].co
+                            mesh_local = self.mesh_data.vertices[i].co
+                            collision_objects_local = obj_vert_data.vertices[o].co
                             
                             # попытка обратиться к 2-ой вершине из отрезка
                             # работает если кол-во точек чётно
                             try:
-                                mesh_local_second = mesh_data.vertices[i+1].co
-                                cube_local_second = obj_vert_data.vertices[o+1].co
+                                mesh_local_second = self.mesh_data.vertices[i+1].co
+                                collision_objects_local_second = obj_vert_data.vertices[o+1].co
                             except IndexError:
                                 break                        
                             
                             # глобализация координат первой вершины
-                            mesh_global = mesh.matrix_world @ mesh_local
-                            cube_global = obj_vert.matrix_world @ cube_local
+                            mesh_global = self.mesh.matrix_world @ mesh_local
+                            collision_objects_global = obj_vert.matrix_world @ collision_objects_local
                             
                             # глобализация координат второй вершины
-                            mesh_global_second = mesh.matrix_world @ mesh_local_second
-                            cube_global_second = obj_vert.matrix_world @ cube_local_second
+                            mesh_global_second = self.mesh.matrix_world @ mesh_local_second
+                            collision_objects_global_second = obj_vert.matrix_world @ collision_objects_local_second
                             
                             # [0] - x, [1] - y, [2] - z
                             global_x_mesh = mesh_global[0]
@@ -86,36 +82,36 @@ class Physics():
                             global_y_mesh_second = mesh_global_second[1]
                             global_z_mesh_second = mesh_global_second[2]
                             
-                            global_x_cube = cube_global[0]
-                            global_y_cube = cube_global[1]
-                            global_z_cube = cube_global[2]
+                            global_x_collision_objects = collision_objects_global[0]
+                            global_y_collision_objects = collision_objects_global[1]
+                            global_z_collision_objects = collision_objects_global[2]
                             
-                            global_x_cube_second = cube_global_second[0]
-                            global_y_cube_second = cube_global_second[1]
-                            global_z_cube_second = cube_global_second[2]
+                            global_x_collision_objects_second = collision_objects_global_second[0]
+                            global_y_collision_objects_second = collision_objects_global_second[1]
+                            global_z_collision_objects_second = collision_objects_global_second[2]
                             
                             flag = self.cross(global_x_mesh, global_y_mesh, global_z_mesh,
                                         global_x_mesh_second, global_y_mesh_second, global_z_mesh_second,
-                                        global_x_cube, global_y_cube, global_z_cube,
-                                        global_x_cube_second, global_y_cube_second, global_z_cube_second)
+                                        global_x_collision_objects, global_y_collision_objects, global_z_collision_objects,
+                                        global_x_collision_objects_second, global_y_collision_objects_second, global_z_collision_objects_second)
                             
-                        #    print("X = ",  global_x_mesh - global_x_cube)
-                        #    print("Y = ",  global_y_mesh - global_y_cube)
-                        #    print("Z = ",  global_z_mesh - global_z_cube)
+                        #    print("X = ",  global_x_mesh - global_x_collision_objects)
+                        #    print("Y = ",  global_y_mesh - global_y_collision_objects)
+                        #    print("Z = ",  global_z_mesh - global_z_collision_objects)
                             distance_min = 0.00005
                             if (flag):
-                                for newCoor in mesh_data.vertices:
+                                for newCoor in self.mesh_data.vertices:
                                     newCoor.co[0] += (bpy.context.scene.gravity[0] / bpy.context.scene.render.fps)
                                     newCoor.co[1] += (bpy.context.scene.gravity[1] / bpy.context.scene.render.fps)
                                     newCoor.co[2] += (bpy.context.scene.gravity[2] / bpy.context.scene.render.fps)
                             else:
                                 if flag:
-                                    for newCoor in mesh_data.vertices:
+                                    for newCoor in self.mesh_data.vertices:
                                         newCoor.co[0] -= (bpy.context.scene.gravity[0] / bpy.context.scene.render.fps)
                                         newCoor.co[1] -= (bpy.context.scene.gravity[1] / bpy.context.scene.render.fps)
                                         newCoor.co[2] -= (bpy.context.scene.gravity[2] / bpy.context.scene.render.fps)
                                 else:
-                                    for newCoor in mesh_data.vertices:
+                                    for newCoor in self.mesh_data.vertices:
                                         newCoor.co[0] += 0
                                         newCoor.co[1] += 0
                                         newCoor.co[2] += 0
