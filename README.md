@@ -1,5 +1,5 @@
 <h1 align="center">GPUCloth</h1>
-<h2 align="center">Cloth simulation for Blender 2.93.x with CUDA</h2>
+<h2 align="center">Cloth simulation for Blender 2.93.x with CUDA support</h2>
 
 <h3 align="center">(in development)</h2>
 
