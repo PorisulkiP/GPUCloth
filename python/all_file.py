@@ -34,8 +34,15 @@ if not dir in sys.path:
 def loadDLL():
     """
     Здась происходит загрузка DLL файла сгенерированного из cuda файла
-    """    
-    lib = cdll.LoadLibrary(r"C:\\path\\to\\our.dll")
+    """
+    try:
+        lib = cdll.LoadLibrary(r"C:\Users\alex1\Desktop\CUDACloth\С\Main\x64\Release\main.dll")
+    except OSError:
+        try:
+            lib = cdll.LoadLibrary(r"C:\\Windows\\System32\\msvcrt.dll")   
+            lib.printf(b"From dll with love!\n")
+        except OSError:
+            print("Не удаётся установить соединение с системными библиотеками")
 
 def isCUDAAvailable():
     try:
@@ -48,14 +55,13 @@ def isCUDAAvailable():
 class Physics():
     def __init__(self, backUp):
         # Создаём атрибуты плоскости
-        self.mesh_data = bpy.data.objects["Plane"].data
         self.mesh = bpy.data.objects["Plane"]
 
         # Создаём атрибут бэкапа
         self.backUp = backUp        
 
         # Собираем все объекты в сцене, способные к столкновению
-        self.collision_objects, self.collision_objects_data = self.collisionOBJ()
+        self.collision_objects = self.collisionOBJ()
 
         bpy.app.handlers.frame_change_pre.clear()
         bpy.app.handlers.frame_change_pre.append(self.physicsCalculation())
@@ -66,10 +72,9 @@ class Physics():
         запускает ещё несколько функция для расчёта физики
 
         mesh - объект, с симуляциет ткани
-        mesh_data - данные об объекте, с симуляциет ткани
+        mesh.data - данные об объекте, с симуляциет ткани
 
         collision_objects - объект(ы) столкновения
-        collision_objects_data -  данные об объек(те)тах, столкновения
 
         backUp - бэкап ткани до симуляции
         """
@@ -80,32 +85,30 @@ class Physics():
             flagNum = 0
             flags = []
             # i - одна вершина из всех, что есть в объекте, с симуляциет ткани
-            for i in range(0, len(self.mesh_data.vertices)-1):
+            for i in range(0, len(self.mesh.data.vertices)-1):
                 # obj_vert - меш из списка объектов столкновений
                 for obj_vert  in self.collision_objects:
-                    # obj_vert - данные об меше из списка объектов столкновений
-                    for obj_vert_data in self.collision_objects_data:
-                        # о - одна вершина из всех, что есть в объекте столкновения
-                        for o in range(0, len(obj_vert_data.vertices)-1):
-                            # 1-я вершина из отрезка
-                            mesh_local = self.mesh_data.vertices[i].co
-                            collision_objects_local = obj_vert_data.vertices[o].co
+                    # о - одна вершина из всех, что есть в объекте столкновения
+                    for o in range(0, len(obj_vert.data.vertices)-1):
+                        # 1-я вершина из отрезка
+                        mesh_local = self.mesh.data.vertices[i].co
+                        collision_objects_local = obj_vert.data.vertices[o].co
 
-                            # попытка обратиться к 2-ой вершине из отрезка
-                            # работает если кол-во точек чётно
-                            try:
-                                mesh_local_second = self.mesh_data.vertices[i+1].co
-                                collision_objects_local_second = obj_vert_data.vertices[o+1].co
-                            except IndexError:
-                                break
-                            
-                            # глобализация координат первой вершины
-                            mesh_global = self.mesh.matrix_world @ mesh_local
-                            collision_objects_global = obj_vert.matrix_world @ collision_objects_local
+                        # попытка обратиться к 2-ой вершине из отрезка
+                        # работает если кол-во точек чётно
+                        try:
+                            mesh_local_second = self.mesh.data.vertices[i+1].co
+                            collision_objects_local_second = obj_vert.data.vertices[o+1].co
+                        except IndexError:
+                            break
+                        
+                        # глобализация координат первой вершины
+                        mesh_global = self.mesh.matrix_world @ mesh_local
+                        collision_objects_global = obj_vert.matrix_world @ collision_objects_local
 
-                            # глобализация координат второй вершины
-                            mesh_global_second = self.mesh.matrix_world @ mesh_local_second
-                            collision_objects_global_second = obj_vert.matrix_world @ collision_objects_local_second
+                        # глобализация координат второй вершины
+                        mesh_global_second = self.mesh.matrix_world @ mesh_local_second
+                        collision_objects_global_second = obj_vert.matrix_world @ collision_objects_local_second
 
 #                            print("Вершина ткани номер = ", i, "-", i+1)
 #                            print("Вершина куба номер = ", o, "-", o+1)
@@ -115,75 +118,75 @@ class Physics():
 #                            print("collision_objects_global = ", collision_objects_global[0:3])
 #                            print("collision_objects_global_second = ", collision_objects_global_second[0:3])
 
-                            # [0] - x, [1] - y, [2] - z
-                            global_x_mesh = mesh_global[0]
-                            global_y_mesh = mesh_global[1]
-                            global_z_mesh = mesh_global[2]
+                        # [0] - x, [1] - y, [2] - z
+                        global_x_mesh = mesh_global[0]
+                        global_y_mesh = mesh_global[1]
+                        global_z_mesh = mesh_global[2]
 
-                            global_x_mesh_second = mesh_global_second[0]
-                            global_y_mesh_second = mesh_global_second[1]
-                            global_z_mesh_second = mesh_global_second[2]
+                        global_x_mesh_second = mesh_global_second[0]
+                        global_y_mesh_second = mesh_global_second[1]
+                        global_z_mesh_second = mesh_global_second[2]
 
-                            global_x_collision_objects = collision_objects_global[0]
-                            global_y_collision_objects = collision_objects_global[1]
-                            global_z_collision_objects = collision_objects_global[2]
+                        global_x_collision_objects = collision_objects_global[0]
+                        global_y_collision_objects = collision_objects_global[1]
+                        global_z_collision_objects = collision_objects_global[2]
 
-                            global_x_collision_objects_second = collision_objects_global_second[0]
-                            global_y_collision_objects_second = collision_objects_global_second[1]
-                            global_z_collision_objects_second = collision_objects_global_second[2]
+                        global_x_collision_objects_second = collision_objects_global_second[0]
+                        global_y_collision_objects_second = collision_objects_global_second[1]
+                        global_z_collision_objects_second = collision_objects_global_second[2]
 
-                            # print("global_x_mesh(x1) = ", global_x_mesh)
-                            # print("global_y_mesh(y1) = ", global_y_mesh)
-                            # print("global_z_mesh(z1) = ", global_z_mesh)
+                        # print("global_x_mesh(x1) = ", global_x_mesh)
+                        # print("global_y_mesh(y1) = ", global_y_mesh)
+                        # print("global_z_mesh(z1) = ", global_z_mesh)
 
-                            # print("global_x_mesh_second(x2) = ",
-                            #       global_x_mesh_second)
-                            # print("global_y_mesh_second(y2) = ",
-                            #       global_y_mesh_second)
-                            # print("global_z_mesh_second(z2) = ",
-                            #       global_z_mesh_second)
+                        # print("global_x_mesh_second(x2) = ",
+                        #       global_x_mesh_second)
+                        # print("global_y_mesh_second(y2) = ",
+                        #       global_y_mesh_second)
+                        # print("global_z_mesh_second(z2) = ",
+                        #       global_z_mesh_second)
 
-                            # print("global_x_collision_objects(x3) = ",
-                            #       global_x_collision_objects)
-                            # print("global_y_collision_objects(y3) = ",
-                            #       global_y_collision_objects)
-                            # print("global_z_collision_objects(z3) = ",
-                            #       global_z_collision_objects)
+                        # print("global_x_collision_objects(x3) = ",
+                        #       global_x_collision_objects)
+                        # print("global_y_collision_objects(y3) = ",
+                        #       global_y_collision_objects)
+                        # print("global_z_collision_objects(z3) = ",
+                        #       global_z_collision_objects)
 
-                            # print("global_x_collision_objects_second(x4) = ",
-                            #       global_x_collision_objects_second)
-                            # print("global_y_collision_objects_second(y4) = ",
-                            #       global_y_collision_objects_second)
-                            # print("global_z_collision_objects_second(z4) = ",
-                            #       global_z_collision_objects_second)
+                        # print("global_x_collision_objects_second(x4) = ",
+                        #       global_x_collision_objects_second)
+                        # print("global_y_collision_objects_second(y4) = ",
+                        #       global_y_collision_objects_second)
+                        # print("global_z_collision_objects_second(z4) = ",
+                        #       global_z_collision_objects_second)
 
-                            flags.append(self.cross(global_x_mesh, global_y_mesh, global_z_mesh,
-                                                    global_x_mesh_second, global_y_mesh_second, global_z_mesh_second,
-                                                    global_x_collision_objects, global_y_collision_objects, global_z_collision_objects,
-                                                    global_x_collision_objects_second, global_y_collision_objects_second, global_z_collision_objects_second))
+                        flags.append(self.cross(global_x_mesh, global_y_mesh, global_z_mesh,
+                                                global_x_mesh_second, global_y_mesh_second, global_z_mesh_second,
+                                                global_x_collision_objects, global_y_collision_objects, global_z_collision_objects,
+                                                global_x_collision_objects_second, global_y_collision_objects_second, global_z_collision_objects_second))
 
 #                            print(flags[flagNum])
-                            flagNum += 1
-                            # print("X = ",  global_x_mesh - global_x_collision_objects)
-                            # print("Y = ",  global_y_mesh - global_y_collision_objects)
-                            # print("Z = ",  global_z_mesh - global_z_collision_objects)
-                            # distance_min = 0.00005
+                        flagNum += 1
+                        # print("X = ",  global_x_mesh - global_x_collision_objects)
+                        # print("Y = ",  global_y_mesh - global_y_collision_objects)
+                        # print("Z = ",  global_z_mesh - global_z_collision_objects)
+                        # distance_min = 0.00005
 
             # print("flags = [] = ", flags)
 #            print("flags.count(True) = ", flags.count(True))
             if (flags.count(True) == 0):
-                for newCoor in self.mesh_data.vertices:
+                for newCoor in self.mesh.data.vertices:
                     newCoor.co[0] += (bpy.context.scene.gravity[0] / bpy.context.scene.render.fps)
                     newCoor.co[1] += (bpy.context.scene.gravity[1] / bpy.context.scene.render.fps)
                     newCoor.co[2] += (bpy.context.scene.gravity[2] / bpy.context.scene.render.fps)
             else:
                 # if flag:
-                #     for newCoor in self.mesh_data.vertices:
+                #     for newCoor in self.mesh.data.vertices:
                 #         newCoor.co[0] -= (bpy.context.scene.gravity[0] / bpy.context.scene.render.fps)
                 #         newCoor.co[1] -= (bpy.context.scene.gravity[1] / bpy.context.scene.render.fps)
                 #         newCoor.co[2] -= (bpy.context.scene.gravity[2] / bpy.context.scene.render.fps)
                 # else:
-                for newCoor in self.mesh_data.vertices:
+                for newCoor in self.mesh.data.vertices:
                     newCoor.co[0] += 0
                     newCoor.co[1] += 0
                     newCoor.co[2] += 0
@@ -260,18 +263,11 @@ class Physics():
         """
         Установка координат для точек из бэкапа
         """
-        
-        for newVert in self.mesh_data.vertices:            
+        for newVert in self.mesh.data.vertices:            
             for oldVert in backUp:
-                print("newVert.co.x = ", newVert.co.x)
-                print("newVert.co.y = ", newVert.co.y)
-                print("newVert.co.z = ", newVert.co.z)
                 newVert.co.x = oldVert[0]
                 newVert.co.y = oldVert[1]
                 newVert.co.z = oldVert[2]
-                print("newVert.co.x = ", newVert.co.x)
-                print("newVert.co.y = ", newVert.co.y)
-                print("newVert.co.z = ", newVert.co.z)
                 break
 
     def collisionOBJ(self):
@@ -288,23 +284,21 @@ class Physics():
             except KeyError:
                 pass
 
-        collisionOBJ_data = [element.data for element in collision]
         collisionOBJ = [element for element in collision]
 
-        return collisionOBJ, collisionOBJ_data
+        return collisionOBJ
 
 def backupSet():
     """
     Создание бэкапа 
     """
-    mesh_data = bpy.data.objects["Plane"].data
+    mesh = bpy.data.objects["Plane"].data
 
     # список всех вершин изначального меша ткани
     backupVert = []
-    for NumVert in range(0, len(mesh_data.vertices)):
-        print(mesh_data.vertices[NumVert].co[0:3])
-        backupVert.append(mesh_data.vertices[NumVert].co)
-
+    for NumVert in range(0, len(mesh.vertices)):
+        # print(mesh.vertices[NumVert].co[0:3])
+        backupVert.append(mesh.vertices[NumVert].co)
     
     return backupVert
 
@@ -321,7 +315,6 @@ class SetUp():
         """
         # Пробуем взять данные о плоскости(объект)
         try:
-            self.mesh_data = bpy.data.objects["Plane"].data
             self.mesh = bpy.data.objects["Plane"]
             # KeyError это стандартное исключение, так что просто создаём всё,
             # что нам нужно для дальнейшей работы
@@ -529,11 +522,12 @@ class SetUp():
         subprocess.call([sys.exec_prefix + '\\bin\\python.exe', '-m', 'pip', 'install', 'numba'])
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":    
     # Переход на первый кадр
     bpy.context.scene.frame_current = bpy.context.scene.frame_start
 
     # isCUDAAvailable()
+    # loadDLL()
 
     SetUp()
     backUp = backupSet()
