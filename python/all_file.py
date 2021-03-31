@@ -17,11 +17,16 @@ bl_info = {
 }
 
 # импортируем API для работы с blender
-import bpy
+# import bpy
 import sys
 import os
-from ctypes import *
 import numpy
+from ctypes import cdll
+
+# dirname = os.path.dirname(__file__)
+# filename = os.path.join((dirname[::-1][dirname[::-1].index("/"):][::-1]),"С\\main\\x64\\Release\\main.dll")
+# lib = cdll.LoadLibrary(filename)
+# lib.fibonacci_init(10, 50)
 
 # Добавляем папку с проектом в поле зрения blender
 dir = os.path.dirname(bpy.data.filepath)
@@ -35,14 +40,15 @@ def loadDLL():
     """
     Здась происходит загрузка DLL файла сгенерированного из cuda файла
     """
+    from ctypes import cdll
     try:
-        lib = cdll.LoadLibrary(r"C:\Users\alex1\Desktop\CUDACloth\С\Main\x64\Release\main.dll")
+        dirname = os.path.dirname(__file__)
+        filename = os.path.join((dirname[::-1][dirname[::-1].index("\\"):][::-1]), 
+                                "С\\main\\x64\\Release\\main.dll")
+        lib = cdll.LoadLibrary(filename)
+        lib.fibonacci_init(10, 50)
     except OSError:
-        try:
-            lib = cdll.LoadLibrary(r"C:\\Windows\\System32\\msvcrt.dll")   
-            lib.printf(b"From dll with love!\n")
-        except OSError:
-            print("Не удаётся установить соединение с системными библиотеками")
+        print("Не удаётся установить соединение с библиотекой")
 
 def isCUDAAvailable():
     try:
@@ -50,7 +56,7 @@ def isCUDAAvailable():
         import pycuda.autoinit
         from pycuda.compiler import SourceModule
     except ModuleNotFoundError:
-        pass
+        print("Технология CUDA не поддерживается на данном устройстве")
 
 class Physics():
     def __init__(self, backUp):
@@ -72,7 +78,6 @@ class Physics():
         запускает ещё несколько функция для расчёта физики
 
         mesh - объект, с симуляциет ткани
-        mesh.data - данные об объекте, с симуляциет ткани
 
         collision_objects - объект(ы) столкновения
 
@@ -526,8 +531,8 @@ if __name__ == "__main__":
     # Переход на первый кадр
     bpy.context.scene.frame_current = bpy.context.scene.frame_start
 
-    # isCUDAAvailable()
-    # loadDLL()
+    isCUDAAvailable()
+    loadDLL()
 
     SetUp()
     backUp = backupSet()
