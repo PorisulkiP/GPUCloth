@@ -1,1 +1,0 @@
-C:\Users\alex1\Desktop\CUDACloth\С\main\x64\Release\main.dll
