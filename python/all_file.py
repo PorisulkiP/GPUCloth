@@ -40,11 +40,11 @@ def loadDLL():
     try:
         dirname = os.path.dirname(__file__)
         # Для VS Code
-        filename = os.path.join((dirname[::-1][dirname[::-1].index("/"):][::-1]), 
-                                "С\\main\\x64\\Release\\main.dll")
-        # Для Blender
-        # filename = os.path.join((dirname[::-1][dirname[::-1].index("\\"):][::-1]), 
+        # filename = os.path.join((dirname[::-1][dirname[::-1].index("/"):][::-1]), 
         #                         "С\\main\\x64\\Release\\main.dll")
+        # Для Blender
+        filename = os.path.join((dirname[::-1][dirname[::-1].index("\\"):][::-1]), 
+                                "С\\main\\x64\\Release\\main.dll")
         lib = cdll.LoadLibrary(filename)
         lib.print_info()
     except OSError:

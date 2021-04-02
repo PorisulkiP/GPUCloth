@@ -135,3 +135,7 @@ dmypy.json
 # Visual Studio Code # 
 .vscode/
 .vscode/settings.json
+
+# Visual Studio # 
+.vs/
+x64/
