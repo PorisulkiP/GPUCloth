@@ -17,24 +17,20 @@ bl_info = {
 }
 
 # импортируем API для работы с blender
-# import bpy
+import bpy
 import sys
 import os
 import numpy
 from ctypes import cdll
 
-# dirname = os.path.dirname(__file__)
-# filename = os.path.join((dirname[::-1][dirname[::-1].index("/"):][::-1]),"С\\main\\x64\\Release\\main.dll")
-# lib = cdll.LoadLibrary(filename)
-# lib.fibonacci_init(10, 50)
-
 # Добавляем папку с проектом в поле зрения blender
-dir = os.path.dirname(bpy.data.filepath)
-if not dir in sys.path:
-    sys.path.append(dir)
-    sys.path.append(dir + "\\python")
-    sys.path.append(dir + "\\python" + "\\work version 0.0.1")
-    # print(sys.path)
+def importForDebugg():
+    dir = os.path.dirname(bpy.data.filepath)
+    if not dir in sys.path:
+        sys.path.append(dir)
+        sys.path.append(dir + "\\python")
+        sys.path.append(dir + "\\python" + "\\work version 0.0.1")
+        # print(sys.path)
 
 def loadDLL():
     """
@@ -43,10 +39,14 @@ def loadDLL():
     from ctypes import cdll
     try:
         dirname = os.path.dirname(__file__)
-        filename = os.path.join((dirname[::-1][dirname[::-1].index("\\"):][::-1]), 
+        # Для VS Code
+        filename = os.path.join((dirname[::-1][dirname[::-1].index("/"):][::-1]), 
                                 "С\\main\\x64\\Release\\main.dll")
+        # Для Blender
+        # filename = os.path.join((dirname[::-1][dirname[::-1].index("\\"):][::-1]), 
+        #                         "С\\main\\x64\\Release\\main.dll")
         lib = cdll.LoadLibrary(filename)
-        lib.fibonacci_init(10, 50)
+        lib.print_info()
     except OSError:
         print("Не удаётся установить соединение с библиотекой")
 
@@ -528,11 +528,14 @@ class SetUp():
 
 
 if __name__ == "__main__":    
+    # Проверка работоспособности CUDA
+    isCUDAAvailable()
+
+    # Проверка dll для запуска симуляции 
+    loadDLL()
+
     # Переход на первый кадр
     bpy.context.scene.frame_current = bpy.context.scene.frame_start
-
-    isCUDAAvailable()
-    loadDLL()
 
     SetUp()
     backUp = backupSet()
