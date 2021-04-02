@@ -3,7 +3,6 @@
 
 В данном файле происходит запуск файлов создания сцены и запуска симуляции
 """
-
 bl_info = {
     "name": "GPUCloth",
     "author": "PorisulkiP",
@@ -18,10 +17,9 @@ bl_info = {
 
 # импортируем API для работы с blender
 import bpy
-import sys
 import os
-import numpy
-from ctypes import cdll
+import sys
+import numpy as np
 
 # Добавляем папку с проектом в поле зрения blender
 def importForDebugg():
@@ -32,6 +30,7 @@ def importForDebugg():
         sys.path.append(dir + "\\python" + "\\work version 0.0.1")
         # print(sys.path)
 
+
 def loadDLL():
     """
     Здась происходит загрузка DLL файла сгенерированного из cuda файла
@@ -40,17 +39,23 @@ def loadDLL():
     try:
         dirname = os.path.dirname(__file__)
         # Для VS Code
-        # filename = os.path.join((dirname[::-1][dirname[::-1].index("/"):][::-1]), 
+        # filename = os.path.join((dirname[::-1][dirname[::-1].index("/"):][::-1]),
         #                         "С\\main\\x64\\Release\\main.dll")
         # Для Blender
-        filename = os.path.join((dirname[::-1][dirname[::-1].index("\\"):][::-1]), 
+        filename = os.path.join((dirname[::-1][dirname[::-1].index("\\"):][::-1]),
                                 "С\\main\\x64\\Release\\main.dll")
         lib = cdll.LoadLibrary(filename)
         lib.print_info()
     except OSError:
-        print("Не удаётся установить соединение с библиотекой")
+        print("Не удаётся установить соединение с DLL файлом")
+
 
 def isCUDAAvailable():
+    """
+    Пробуем импортировать PyCuda для проверки поддержки данной технологии
+    Надо исправить, потому что у человека может быть просто не установлен пакет
+    для питона
+    """
     try:
         import pycuda.driver as cuda
         import pycuda.autoinit
@@ -58,13 +63,17 @@ def isCUDAAvailable():
     except ModuleNotFoundError:
         print("Технология CUDA не поддерживается на данном устройстве")
 
+
 class Physics():
     def __init__(self, backUp):
         # Создаём атрибуты плоскости
         self.mesh = bpy.data.objects["Plane"]
+        self.mass = 0.3
+        self.gravity = bpy.context.scene.gravity
+        self.fps = bpy.context.scene.render.fps
 
         # Создаём атрибут бэкапа
-        self.backUp = backUp        
+        self.backUp = backUp
 
         # Собираем все объекты в сцене, способные к столкновению
         self.collision_objects = self.collisionOBJ()
@@ -83,16 +92,16 @@ class Physics():
 
         backUp - бэкап ткани до симуляции
         """
-        
-        def gravityCalc(scene):            
-#            if (bpy.context.scene.frame_current == bpy.context.scene.frame_start):
-#                self.backupGet(backUp)
+
+        def gravityCalc(scene):
+            #            if (bpy.context.scene.frame_current == bpy.context.scene.frame_start):
+            #                self.backupGet(backUp)
             flagNum = 0
-            flags = []
+            flags = np.array([])
             # i - одна вершина из всех, что есть в объекте, с симуляциет ткани
             for i in range(0, len(self.mesh.data.vertices)-1):
                 # obj_vert - меш из списка объектов столкновений
-                for obj_vert  in self.collision_objects:
+                for obj_vert in self.collision_objects:
                     # о - одна вершина из всех, что есть в объекте столкновения
                     for o in range(0, len(obj_vert.data.vertices)-1):
                         # 1-я вершина из отрезка
@@ -106,7 +115,7 @@ class Physics():
                             collision_objects_local_second = obj_vert.data.vertices[o+1].co
                         except IndexError:
                             break
-                        
+
                         # глобализация координат первой вершины
                         mesh_global = self.mesh.matrix_world @ mesh_local
                         collision_objects_global = obj_vert.matrix_world @ collision_objects_local
@@ -119,7 +128,7 @@ class Physics():
 #                            print("Вершина куба номер = ", o, "-", o+1)
 #                            print("mesh_global = ", mesh_global[0:3])
 #                            print("mesh_global_second = ", mesh_global_second[0:3])
-#                           
+#
 #                            print("collision_objects_global = ", collision_objects_global[0:3])
 #                            print("collision_objects_global_second = ", collision_objects_global_second[0:3])
 
@@ -179,11 +188,25 @@ class Physics():
 
             # print("flags = [] = ", flags)
 #            print("flags.count(True) = ", flags.count(True))
-            if (flags.count(True) == 0):
+            if (True):
                 for newCoor in self.mesh.data.vertices:
-                    newCoor.co[0] += (bpy.context.scene.gravity[0] / bpy.context.scene.render.fps)
-                    newCoor.co[1] += (bpy.context.scene.gravity[1] / bpy.context.scene.render.fps)
-                    newCoor.co[2] += (bpy.context.scene.gravity[2] / bpy.context.scene.render.fps)
+                    # print("mass = ", self.mass)
+                    # print("gravity_x = ", self.gravity[0])
+                    # print("gravity_y = ", self.gravity[1])
+                    # print("gravity_z = ", self.gravity[2])
+                    # print("acceleration_x = ",
+                    #       self.acceleration(newCoor.co)[0])
+                    # print("acceleration_y = ",
+                    #       self.acceleration(newCoor.co)[1])
+                    # print("acceleration_z = ",
+                    #       self.acceleration(newCoor.co)[2])
+                    # print("newCoor.co[2] = ", ((self.mass*self.gravity[2] - self.acceleration(newCoor.co)[2]) / self.fps))
+                    newCoor.co[0] += ((self.mass*self.gravity[0] -
+                                       self.acceleration(newCoor.co)[0]) / self.fps)
+                    newCoor.co[1] += ((self.mass*self.gravity[1] -
+                                       self.acceleration(newCoor.co)[1]) / self.fps)
+                    newCoor.co[2] += ((self.mass*self.gravity[2] -
+                                       self.acceleration(newCoor.co)[2]) / self.fps)
             else:
                 # if flag:
                 #     for newCoor in self.mesh.data.vertices:
@@ -197,16 +220,43 @@ class Physics():
                     newCoor.co[2] += 0
         return gravityCalc
 
-    def crossing(self, x1, y1, z1, x2, y2, z2, x3, y3, z3, x4, y4, z4, distance_min=0.15):
+    def lenOfTwoPoints(self, x1, y1, z1, x2, y2, z2, x3, y3, z3, x4, y4, z4, distance_min=0.15):
         a = (abs(x1) - abs(x2))**2
         b = (abs(y1) - abs(y2))**2
         c = (abs(z1) - abs(z2))**2
-#        d = (a+b+c)**0.5
-        return a, b, c
+        d = (a+b+c)**0.5
+        return a, b, c, d
+
+    def velocity(self, a):
+        """
+        Возвращает скорость точки, используя её массу и гравитацию в сцене
+        V = S/t
+        S = a - a_second
+        t = 1/fps
+        """
+        V = np.array([((a[i] - (a[i] + (self.mass * self.gravity[i] / self.fps))) / (1 / self.fps)) 
+                        for i in range(0, len(a))])
+        return V
+
+    def acceleration(self, a):
+        """
+        Функция возвращает ускорение для одной точки,
+        в виде массива по 3 коордиинатам
+        a = (V1-V2)/t
+        t = 1/fps
+        """
+        V1 = self.velocity(a)
+        V2 = np.array([((a[i] + (self.mass * self.gravity[i] / self.fps)) -
+                        (a[i] + (self.mass * self.gravity[i] / self.fps)**2)) / (1  /self.fps)
+                        for i in range(0, len(a))])
+
+        a = np.array([(V1[i] - V2[i]) / (1/self.fps)
+                      for i in range(0, len(a))])
+        return a
 
     def cross(self, x1, y1, z1, x2, y2, z2, x3, y3, z3, x4, y4, z4, distance_min=0.15):
         """
-        Задача данной функции определить пересечения векторов двух точке,
+        Задача данной функции – определить пересечения векторов двух точек,
         т.е. найти пересечения вершин, чтобы геометрия не пересекалась друг с другом
         Пераметр distance_min задаётся в настройках ткани во вкладке Collision ==> Object collision 
         ==> Distanse и по умолчанию равен 0.15
@@ -246,16 +296,16 @@ class Physics():
 #                print("n1 = ", n)
         else:
             if ((y3-y4) <= 0):
-#                print("y3-y4 = ", y3-y4)
+                #                print("y3-y4 = ", y3-y4)
                 return False
             if ((y3-y4) <= distance_min):
-#                print("y3-y4 = ", y3-y4)
+                #                print("y3-y4 = ", y3-y4)
                 return True
             else:
-#                print("y3-y4 = ", y3-y4)
+                #                print("y3-y4 = ", y3-y4)
                 n = (y3-y1)/(y3-y4)
 #                print("n2 = ", n)
-        
+
         dot_0 = x3 + (x4 - x3) * n
         dot_1 = y3 + (y4 - y3) * n
         dot_2 = z3 + (z4 - z3) * n
@@ -268,7 +318,7 @@ class Physics():
         """
         Установка координат для точек из бэкапа
         """
-        for newVert in self.mesh.data.vertices:            
+        for newVert in self.mesh.data.vertices:
             for oldVert in backUp:
                 newVert.co.x = oldVert[0]
                 newVert.co.y = oldVert[1]
@@ -279,19 +329,20 @@ class Physics():
         """
         Данная функция возвращает массив объектов с которыми пересекается ткань
         """
-        numOfOBJ = [bpy.data.objects[element]
-                    for element in range(0, len(bpy.data.objects))]
-        collision = []
+        numOfOBJ = np.array([bpy.data.objects[element]
+                    for element in range(0, len(bpy.data.objects))])
+        collision = np.array([])
         for col in numOfOBJ:
             try:
                 col.modifiers['Collision'].settings.use == True
-                collision.append(col)
+                np.append(collision, col)
             except KeyError:
                 pass
 
-        collisionOBJ = [element for element in collision]
+        collisionOBJ = np.array([element for element in collision])
 
         return collisionOBJ
+
 
 def backupSet():
     """
@@ -304,7 +355,7 @@ def backupSet():
     for NumVert in range(0, len(mesh.vertices)):
         # print(mesh.vertices[NumVert].co[0:3])
         backupVert.append(mesh.vertices[NumVert].co)
-    
+
     return backupVert
 
 
@@ -328,28 +379,28 @@ class SetUp():
         except KeyError:
             print("Scene creating!")
             # Создаём плоскость
-            bpy.ops.mesh.primitive_plane_add(size=2, enter_editmode=False, 
-                                            align='WORLD', location=(0, 0, 1), 
-                                            scale=(1, 1, 1))
-            
+            bpy.ops.mesh.primitive_plane_add(size=2, enter_editmode=False,
+                                             align='WORLD', location=(0, 0, 1),
+                                             scale=(1, 1, 1))
+
 #            bpy.ops.mesh.quads_convert_to_tris(quad_method='BEAUTY', ngon_method='BEAUTY')
 
             # Подразделяем для симуляции ткани
 #            bpy.ops.object.subdivision_set(level=5, relative=False)
-            
+
             # Изменяем подразделение на "простое"
 #            bpy.context.object.modifiers["Subdivision"].subdivision_type = 'SIMPLE'
-            
+
             # Применяем модификатор
 #            bpy.ops.object.modifier_apply(modifier="Subdivision")
-            
+
             # Сглаживаем плоскость
 #            bpy.ops.object.shade_smooth()
 
             # Назначаем на плоскость физику ткани
             bpy.ops.object.modifier_add(type='CLOTH')
             bpy.context.object.modifiers["Cloth"].collision_settings.use_self_collision = True
-            
+
             # И записываем в файл
             self.fill_val_cloth_seettings()
 
@@ -357,30 +408,31 @@ class SetUp():
             bpy.ops.object.modifier_remove(modifier="Cloth")
 
             # Создаём куб на который будет падать ткань
-            bpy.ops.mesh.primitive_cube_add(size=2, enter_editmode=False, 
-                                        align='WORLD', location=(0, 0, 0), scale=(0.8, 0.8, 0.8))
+            bpy.ops.mesh.primitive_cube_add(size=2, enter_editmode=False,
+                                            align='WORLD', location=(0, 0, 0), scale=(0.8, 0.8, 0.8))
             # Уменьшает куб
             bpy.ops.transform.resize(value=(0.5, 0.5, 0.5))
-            
+
             # Назначаем его объектом столкновения
             bpy.ops.object.modifier_add(type='COLLISION')
-            
+
             print("Scene created!")
 
     def fill_val_cloth_seettings(self):
         """
         Данная функция записывает значения параметров физики ткани в отдельный файл
-        
+
         В будущем должна вызываться каждый раз, когда пользователь нажимает на 'Bake on GPU'
         """
-        
-        self.clothSettings_list = dir(bpy.data.objects["Plane"].modifiers['Cloth'].settings) # список параметров
+
+        self.clothSettings_list = dir(
+            bpy.data.objects["Plane"].modifiers['Cloth'].settings)  # список параметров
         self.clothSettings = bpy.data.objects["Plane"].modifiers['Cloth'].settings
-        
-        value = []
+
+        value = np.array([])
         value.append("air_damping = ")
         value.append(self.clothSettings.air_damping)
-        
+
         value.append("bending damping = ")
         value.append(self.clothSettings.bending_damping)
         value.append("bending model = ")
@@ -389,40 +441,40 @@ class SetUp():
         value.append(self.clothSettings.bending_stiffness)
         value.append("bending stiffness max = ")
         value.append(self.clothSettings.bending_stiffness_max)
-        
+
         value.append("collider friction = ")
         value.append(self.clothSettings.collider_friction)
-        
+
         value.append("density target = ")
         value.append(self.clothSettings.compression_damping)
-        
+
         value.append("fluid_density = ")
         value.append(self.clothSettings.fluid_density)
-        
+
         value.append("goal_default = ")
         value.append(self.clothSettings.goal_default)
-        
+
         value.append("goal_friction = ")
         value.append(self.clothSettings.goal_friction)
-        
+
         value.append("goal_max = ")
         value.append(self.clothSettings.goal_max)
-        
+
         value.append("goal_min = ")
         value.append(self.clothSettings.goal_min)
-        
+
         value.append("goal_spring = ")
         value.append(self.clothSettings.goal_spring)
-        
+
         value.append("gravity = ")
         value.append(self.clothSettings.gravity)
-        
+
         value.append("internal_compression_stiffness = ")
         value.append(self.clothSettings.internal_compression_stiffness)
-        
+
         value.append("internal_friction = ")
         value.append(self.clothSettings.internal_friction)
-        
+
         value.append("internal_spring_max_diversion = ")
         value.append(self.clothSettings.internal_spring_max_diversion)
         value.append("internal_spring_max_length = ")
@@ -435,29 +487,29 @@ class SetUp():
         value.append(self.clothSettings.internal_tension_stiffness_max)
         value.append("mass = ")
         value.append(self.clothSettings.mass)
-        
+
         value.append("pin_stiffness = ")
         value.append(self.clothSettings.pin_stiffness)
-        
+
         value.append("pressure_factor = ")
         value.append(self.clothSettings.pressure_factor)
-        
+
         value.append("quality = ")
         value.append(self.clothSettings.quality)
-        
+
         value.append("rest_shape_key = ")
         value.append(self.clothSettings.rest_shape_key)
-        
+
         value.append("sewing_force_max = ")
         value.append(self.clothSettings.sewing_force_max)
-        
+
         value.append("shear_damping = ")
         value.append(self.clothSettings.shear_damping)
         value.append("shear_stiffness = ")
         value.append(self.clothSettings.shear_stiffness)
         value.append("shear_stiffness_max = ")
         value.append(self.clothSettings.shear_stiffness_max)
-        
+
         value.append("shrink_max = ")
         value.append(self.clothSettings.shrink_max)
         value.append("shrink_min = ")
@@ -465,34 +517,34 @@ class SetUp():
 
         value.append("target_volume = ")
         value.append(self.clothSettings.target_volume)
-        
+
         value.append("tension_damping = ")
         value.append(self.clothSettings.tension_damping)
         value.append("tension_stiffness = ")
         value.append(self.clothSettings.tension_stiffness)
         value.append("tension_stiffness_max = ")
         value.append(self.clothSettings.tension_stiffness_max)
-        
+
         value.append("time_scale = ")
         value.append(self.clothSettings.time_scale)
-        
+
         value.append("uniform_pressure_force = ")
         value.append(self.clothSettings.uniform_pressure_force)
-        
+
         value.append("use_dynamic_mesh = ")
         value.append(self.clothSettings.use_dynamic_mesh)
-        
+
         value.append("use_internal_springs = ")
         value.append(self.clothSettings.use_internal_springs)
-        
+
         value.append("use_pressure = ")
         value.append(self.clothSettings.use_pressure)
         value.append("use_pressure_volume = ")
         value.append(self.clothSettings.use_pressure_volume)
-        
+
         value.append("use_sewing_springs = ")
         value.append(self.clothSettings.use_sewing_springs)
-        
+
         value.append("vertex_group_bending = ")
         value.append(self.clothSettings.vertex_group_bending)
         value.append("vertex_group_intern = ")
@@ -507,14 +559,16 @@ class SetUp():
         value.append(self.clothSettings.vertex_group_shrink)
         value.append("vertex_group_structural_stiffness = ")
         value.append(self.clothSettings.vertex_group_structural_stiffness)
-        
+
         value.append("voxel_cell_size = ")
         value.append(self.clothSettings.voxel_cell_size)
 
-        file = open('C:\\Users\\alex1\\Desktop\\CUDACloth\\clothSettings.txt','w')
-        file.write(str(value).replace("]", "").replace("[", "").replace(", '", "\n").replace("'", "").replace(",", "")) 
+        file = open(
+            'C:\\Users\\alex1\\Desktop\\CUDACloth\\clothSettings.txt', 'w')
+        file.write(str(value).replace("]", "").replace("[", "").replace(
+            ", '", "\n").replace("'", "").replace(",", ""))
         file.close()
-        
+
     def pipInstall(self, pack):
         """
         В blender не так просто установить какой-либо пакет,
@@ -523,15 +577,17 @@ class SetUp():
         """
         import sys
         import subprocess
-        subprocess.call([sys.exec_prefix + '\\bin\\python.exe', '-m', 'ensurepip'])
-        subprocess.call([sys.exec_prefix + '\\bin\\python.exe', '-m', 'pip', 'install', 'numba'])
+        subprocess.call(
+            [sys.exec_prefix + '\\bin\\python.exe', '-m', 'ensurepip'])
+        subprocess.call([sys.exec_prefix + '\\bin\\python.exe',
+                         '-m', 'pip', 'install', 'numba'])
 
 
-if __name__ == "__main__":    
+if __name__ == "__main__":
     # Проверка работоспособности CUDA
     isCUDAAvailable()
 
-    # Проверка dll для запуска симуляции 
+    # Проверка dll для запуска симуляции
     loadDLL()
 
     # Переход на первый кадр
