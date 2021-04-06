@@ -3,10 +3,6 @@
 
 В данном файле происходит запуск файлов создания сцены и запуска симуляции
 """
-import numpy as np
-import sys
-import os
-import bpy
 bl_info = {
     "name": "GPUCloth",
     "author": "PorisulkiP",
@@ -20,10 +16,13 @@ bl_info = {
 }
 
 # импортируем API для работы с blender
+import bpy
+
+import numpy as np
+import sys
+import os
 
 # Добавляем папку с проектом в поле зрения blender
-
-
 def importForDebugg():
     dir = os.path.dirname(bpy.data.filepath)
     if not dir in sys.path:
@@ -67,8 +66,8 @@ def isCUDAAvailable():
 
 
 class Physics():
-    def __init__(self, backUp):
-        print("Запуск")
+    def __init__(self):
+        # print("Запуск")
         # Создаём атрибуты плоскости
         self.mesh = bpy.data.objects["Plane"]
         self.mass = 0.3
@@ -76,7 +75,8 @@ class Physics():
         self.fps = bpy.context.scene.render.fps
 
         # Создаём атрибут бэкапа
-        self.backUp = backUp
+        # self.backUp = backUp
+        # print("__init__ backUp = ", self.backUp[:4][:3])
 
         # Собираем все объекты в сцене, способные к столкновению
         self.collision_objects = self.collisionOBJ()
@@ -94,7 +94,7 @@ class Physics():
         collision_objects - объект(ы) столкновения
 
         backUp - бэкап ткани до симуляции
-        """
+        """        
         def gravityCalc(scene):
             """
             Функция вычисляет, насколько должна переместиться точка,
@@ -105,6 +105,9 @@ class Physics():
             """
             flagNum = 0
             flags = []
+
+            # if bpy.context.scene.frame_current == bpy.context.scene.frame_start:
+            #     backupGet(self.backUp)        
 
             # i - одна вершина из всех, что есть в объекте, с симуляциет ткани
             for i in range(0, len(self.mesh.data.vertices)-1):
@@ -137,34 +140,24 @@ class Physics():
 
                         # [0] - x, [1] - y, [2] - z
                         flags.append(self.cross(mesh_global, collision_objects_global,
-                                               [mesh_global[0] - mesh_global_second[0],
-                                                mesh_global[1] - mesh_global_second[1],
-                                                mesh_global[2] - mesh_global_second[2]],
-                                               [collision_objects_global[0] - collision_objects_global_second[0],
-                                                collision_objects_global[1] - collision_objects_global_second[1],
-                                                collision_objects_global[2] - collision_objects_global_second[2]]))
-                        # print("flags[flagNum] = ", flags[flagNum])
+                                               mesh_global_second, collision_objects_global_second))
+                        print("flags[flagNum] = ", flags[flagNum])
+                        
                         flagNum += 1
-
-            if ([i for i in flags].count(True) == 0):
+            # print("flags = ", flags)
+            # [i for i in flags].count(True) == 0
+            print("True in flags = ", True in flags)
+            if (True in flags):
                 for newCoor in self.mesh.data.vertices:
-                    # print("mass = ", self.mass)
-                    # print("gravity_x = ", self.gravity[0])
-                    # print("gravity_y = ", self.gravity[1])
-                    # print("gravity_z = ", self.gravity[2])
-                    # print("acceleration_x = ",
-                    #       self.acceleration(newCoor.co)[0])
-                    # print("acceleration_y = ",
-                    #       self.acceleration(newCoor.co)[1])
-                    # print("acceleration_z = ",
-                    #       self.acceleration(newCoor.co)[2])
-                    # print("newCoor.co[2] = ", ((self.mass*self.gravity[2] - self.acceleration(newCoor.co)[2]) / self.fps))
-                    newCoor.co[0] += ((self.mass * (self.gravity[0] -
+                    # newCoor.co.x += ((self.mass * (self.gravity[0] -
+                    #                                 self.acceleration(newCoor.co))) / self.fps)
+                    # newCoor.co.y += ((self.mass * (self.gravity[1] -
+                    #                                 self.acceleration(newCoor.co))) / self.fps)
+                    newCoor.co.z += ((self.mass * (self.gravity[2] -
                                                     self.acceleration(newCoor.co))) / self.fps)
-                    newCoor.co[1] += ((self.mass * (self.gravity[1] -
-                                                    self.acceleration(newCoor.co))) / self.fps)
-                    newCoor.co[2] += ((self.mass * (self.gravity[2] -
-                                                    self.acceleration(newCoor.co))) / self.fps)
+                    newCoor.co.x += self.gravity[0] / self.fps
+                    newCoor.co.y += self.gravity[1] / self.fps
+                    # newCoor.co.z += self.gravity[2] / self.fps
             else:
                 # if flag:
                 #     for newCoor in self.mesh.data.vertices:
@@ -198,9 +191,8 @@ class Physics():
         S = a - a_second
         t = 1/fps
         """
-        V = (self.lenOfTwoPoints(a, [(a[0] + (self.mass * self.gravity[0] / self.fps)),
-                                     (a[1] + (self.mass * self.gravity[1] / self.fps)),
-                                     (a[2] + (self.mass * self.gravity[2] / self.fps))]) / (1 / self.fps))
+        V = (self.lenOfTwoPoints(a, [(a[i] + (self.mass * self.gravity[i] / self.fps))
+                                     for i in range(0, 3)]) / (1 / self.fps))
         # print("V = ", V)
         return V
 
@@ -212,12 +204,10 @@ class Physics():
         t = 1/fps
         """
         V1 = self.velocity(a)
-        V2 = self.lenOfTwoPoints([(a[0] + (self.mass * self.gravity[0] / self.fps)),
-                                  (a[1] + (self.mass * self.gravity[1] / self.fps)),
-                                  (a[2] + (self.mass * self.gravity[2] / self.fps))],
-                                 [(a[0] + (self.mass * self.gravity[0] / self.fps)**2),
-                                  (a[1] + (self.mass * self.gravity[1] / self.fps)**2),
-                                  (a[2] + (self.mass * self.gravity[2] / self.fps)**2)]) / (1 / self.fps)
+        V2 = self.lenOfTwoPoints([(a[i] + (self.mass * self.gravity[i] / self.fps))
+                                  for i in range(0, 3)],
+                                 [(a[i] + (self.mass * self.gravity[i] / self.fps)**2)
+                                  for i in range(0, 3)]) / (1 / self.fps)
 
         a = (V1 - V2) / (1 / self.fps)
         # print("a = ", a)
@@ -231,56 +221,23 @@ class Physics():
         ==> Distanse и по умолчанию равен 0.15
         Находится по формуле вычисления точек пересечения прямых в пространстве.
         """
-        # print("a = ", a)
-        # print("b = ", b)
-        # print("c = ", c)
-        # print("d = ", d)
+        
+        # Версия с a-b и b-c
+        collisionX = a[0] + self.lenOfTwoPoints(a, b) >= b[0] and b[0] + self.lenOfTwoPoints(b, c) >= c[0]
+        collisionY = a[1] + self.lenOfTwoPoints(a, b) >= b[1] and b[1] + self.lenOfTwoPoints(b, c) >= c[1]
+        collisionZ = a[2] + self.lenOfTwoPoints(a, b) >= b[2] and b[2] + self.lenOfTwoPoints(b, c) >= c[2]
 
-        # vector - направляющие векторы прямых segment
-        vector = np.array([
-                            [c[1], -c[0], 0],
-                            [0, c[2], -c[0]],
-                            [d[1], -d[0], 0],
-                            [0, d[2], -d[0]]
-                         ])
-                         
-        # segment - прямые
-        segment = np.array([
-                            c[1] * a[0] - c[0] * a[1],
-                            c[2] * a[1] - c[1] * a[2],
-                            d[1] * b[0] - d[0] * b[1],
-                            d[2] * b[1] - d[1] * b[2]
-                         ])
+        # Версия с a-b и c-d
+        # collisionX = a[0] + self.lenOfTwoPoints(a, b) >= b[0] and c[0] + self.lenOfTwoPoints(c, d) >= d[0]
+        # collisionY = a[1] + self.lenOfTwoPoints(a, b) >= b[1] and c[1] + self.lenOfTwoPoints(c, d) >= d[1]
+        # collisionZ = a[2] + self.lenOfTwoPoints(a, b) >= b[2] and c[2] + self.lenOfTwoPoints(c, d) >= d[2]
 
-        # print("Запуск просчёта")
-        # print("vector = ", vector)
-        # print("segment = ", segment)
-
-        lstsq = np.linalg.lstsq(vector, segment, rcond=None)
-        answer = lstsq[0] # Решение задачи наименьших квадратов для системы уравнений 
-        residuals = lstsq[1] # Суммы "расстояний" для каждого столбца b - a*x.
-        rank = lstsq[2] # Ранг матрицы answer
-
-        # print("cross = ", answer[0:3]) 
-        # print("residuals = ", residuals) 
-        # print("rank = ", rank) 
-
-        if(answer.all()):            
-            return False
-        return True
-
-    def backupGet(self, backUp):
-        """
-        Установка координат для точек из бэкапа
-        """
-        for newVert in self.mesh.data.vertices:
-            for oldVert in backUp:
-                newVert.co.x = oldVert[0]
-                newVert.co.y = oldVert[1]
-                newVert.co.z = oldVert[2]
-                break
+        if collisionX and collisionY and collisionZ:
+            return True
+        return False
 
     def collisionOBJ(self):
+
         """
         Данная функция возвращает массив объектов с которыми пересекается ткань
         """
@@ -288,31 +245,50 @@ class Physics():
         numOfOBJ = np.array([bpy.data.objects[element]
                              for element in range(0, len(bpy.data.objects))])
 
-        # collisionOBJ - список объектов способных к столкновению
-        collisionOBJ = []
+        # collisionOBJs - список объектов способных к столкновению
+        collisionOBJs = []
         
         for col in numOfOBJ:            
             try:
                 col.modifiers['Collision'].settings.use == True
-                collisionOBJ.append(col)
+                collisionOBJs.append(col)
             except KeyError:
                 pass
 
-        return collisionOBJ
+        return collisionOBJs
+# 
+# 
+# def backupSet():
+#     """    Создание бэкапа     """    
+#     mesh = bpy.data.objects["Plane"].data
 
+#     mesh_g = bpy.data.objects["Plane"].matrix_world @ mesh_local
 
-def backupSet():
-    """    Создание бэкапа     """
-    
-    mesh = bpy.data.objects["Plane"].data
+#     # список всех вершин изначального меша ткани
+#     backupVert = []
+#     for NumVert in range(0, len(mesh.vertices)):
+#         print(mesh.vertices[NumVert].co[0:3])
+#         backupVert.append(mesh.vertices[NumVert].co)
+#     return backupVert
 
-    # список всех вершин изначального меша ткани
-    backupVert = []
-    for NumVert in range(0, len(mesh.vertices)):
-        # print(mesh.vertices[NumVert].co[0:3])
-        backupVert.append(mesh.vertices[NumVert].co)
+# def backupGet(backUp):
+#     """   Установка координат для точек из бэкапа   """
 
-    return backupVert
+#     mesh = bpy.data.objects["Plane"].data
+
+#     for i in range(0, len(mesh.vertices)):
+
+#         print("До = ", mesh.vertices[i].co[:3])
+#         print("backUp = ", backUp[i][:3])
+
+#         mesh.vertices[i].co.x = backUp[i][0]
+#         mesh.vertices[i].co.y = backUp[i][1]
+#         mesh.vertices[i].co.z = backUp[i][2]
+
+#         print("После = ",mesh.vertices[i].co[:3])
+#         print("После backUp = ", backUp[i][:3])
+#     print()
+#     Physics(backupSet())
 
 
 # В данном класе создаётся сцена для тестировния алгоритма физики ткани
@@ -541,17 +517,17 @@ class SetUp():
 
 if __name__ == "__main__":
     # Проверка работоспособности CUDA
-    # isCUDAAvailable()
+    isCUDAAvailable()
 
     # Проверка dll для запуска симуляции
-    # loadDLL()
+    loadDLL()
 
     # Переход на первый кадр
     bpy.context.scene.frame_current = bpy.context.scene.frame_start
 
     SetUp()
-    backUp = backupSet()
-    Physics(backUp)
+    # backUp = backupSet()
+    Physics()
 
     # Запуск симуляции
     bpy.ops.screen.animation_play(reverse=False, sync=False)
