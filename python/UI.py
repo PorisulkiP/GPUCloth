@@ -1,32 +1,41 @@
+bl_info = {
+    'name': 'Creating GPUCloth',
+    'category': 'All'
+}
+ 
 import bpy
-
-class MessageBox(bpy.types.Operator):
-    bl_idname = "message.messagebox"
-    bl_label = ""
-
-    message = bpy.props.StringProperty(
-        name = "message",
-        description = "message",
-        default = ''
-    )
-
+ 
+class qualitySteps(bpy.types.Operator):
+    bl_idname = 'mesh.quality_steps'
+    bl_label = 'Quality Steps'
+    bl_options = {"REGISTER", "UNDO"}
+ 
     def execute(self, context):
-        self.report({'INFO'}, self.message)
-        print(self.message)
-        return {'FINISHED'}
-
-    def invoke(self, context, event):
-        return context.window_manager.invoke_props_dialog(self, width = 400)
-
+        print("Accept!")
+        return {"FINISHED"}
+ 
+class panel1(bpy.types.Panel):
+    bl_idname = "CLOTH_PT_Cloth"
+    bl_label = "GPUCloth"
+    bl_space_type = "PROPERTIES"
+    bl_region_type = "WINDOW"
+    bl_category = "GPUCloth"
+ 
     def draw(self, context):
-        self.layout.label(self.message)
-        self.layout.label("")
+        self.layout.operator("mesh.quality_steps", text="Quality Steps")
+ 
+#       split = layout.split() # frame
+#       col = split.column(aligh=True) # Elements on frame
+#       col.operator('mesh.quality_steps', text="", icon="") # element
+#       col.operator('mesh.quality_steps', text="", icon="") # element
 
-def register():
-    bpy.utils.register_class(MessageBox)
-
-def unregister():
-    bpy.utils.unregister_class(MessageBox)
-
-if __name__ == "__main__":
+def register() :
+    bpy.utils.register_class(qualitySteps)
+    bpy.utils.register_class(panel1)
+ 
+def unregister() :
+    bpy.utils.unregister_class(qualitySteps)
+    bpy.utils.unregister_class(panel1)
+ 
+if __name__ == "__main__" :
     register()
