@@ -6,7 +6,8 @@
 import numpy as np
 import sys
 import os
-import bpy
+import _bpy as bpy
+
 bl_info = {
     "name": "GPUCloth",
     "author": "PorisulkiP",
