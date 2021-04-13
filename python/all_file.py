@@ -282,17 +282,21 @@ class Point:
 
     def set_coo(self, position:int, new_coo:list) -> None:
         ''' Добавленик к существующим координатам значений '''
-        new_coo = mathutils.Vector(new_coo) 
-        # print('new_coo = ',new_coo)
-        # print('self.__coordinates_of_point = ',self.__coordinates_of_point)
+        new_coo = mathutils.Vector(new_coo)
         self.__coordinates_of_point[position] += new_coo
         bpy.data.objects["Plane"].data.vertices[position].co += new_coo
 
     def set_backUp(self, backUp:list) -> None:
         ''' Устновка координат точек из бэкапа '''
         print("\n\nЗапуск бэкапа\n\n")
-        for i in range(0, self.number_of_points-1):
+        print("number_of_points = ",self.number_of_points)
+        print("__coordinates_of_point = ",self.__coordinates_of_point)
+        print("backUp = ",backUp)
+        print("co = ",bpy.data.objects["Plane"].data.vertices[0].co)
+        for i in range(0, self.number_of_points):
             self.__coordinates_of_point[i] = backUp[i]
+            print("backUp[i] = ",backUp[i])
+            
             bpy.data.objects["Plane"].data.vertices[i].co = backUp[i]
 
     def set_is_collide(self, position:int, is_collide:bool) -> None:
