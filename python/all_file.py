@@ -137,16 +137,16 @@ class Point:
     def __init__(self):
 
         # Этот вариант более подходящий, но выполняется слишком долго :(
-        self.__vert_append = Points(velocity, acceleration, is_collide) 
+        self.__vert_append = [Points(velocity, acceleration, is_collide) 
                                      for velocity in self.velocity_of_point 
                                      for acceleration in self.acceleration_of_point 
-                                     for is_collide in self.is_collide_of_point
+                                     for is_collide in self.is_collide_of_point]
 
         self.__coordinates_of_point = [bpy.data.objects["Plane"].matrix_world @ 
                                         bpy.data.objects["Plane"].data.vertices[i].co 
                                         for i in range(0, self.number_of_points)]
 
-        print("__vert_append = ", self.__vert_append, "__coordinates_of_point = ", self.__coordinates_of_point, sep="\n")
+        # print("__vert_append = ", self.__vert_append, "__coordinates_of_point = ", self.__coordinates_of_point, sep="\n")
 
     # def __del__(self):
     #     del self.__vert_append
@@ -223,11 +223,11 @@ class Point:
     
     def get_velocity(self, position:int) -> list:
         ''' Возвращает скорость каждой точки '''
-        return self.__vert_append[position][0]
+        return self.__vert_append[position].velocity
     
     def get_acceleration(self, position:int) -> list:
         ''' Возвращает ускорение каждой точки '''
-        return self.__vert_append[position][1]
+        return self.__vert_append[position].acceleration
         
     def get_coo(self, position:int) -> list:
         ''' Возвращает список координат конкретной точки '''
@@ -235,7 +235,7 @@ class Point:
     
     def get_is_collide(self, position:int) -> bool:
         ''' Возвращает факт пересейчения каждой точки '''
-        return self.__vert_append[position][2]
+        return self.__vert_append[position].is_collide
  
     @property   
     def all_append(self) -> list:
@@ -274,11 +274,11 @@ class Point:
     # поскольку property не даёт передавать больше одного параметра
     def set_velocity(self, position:int, velocity:list) -> None:
         ''' Устновка скорости для конкретных точек '''
-        self.__vert_append[position][0] = velocity
+        self.__vert_append[position]._replace(velocity=velocity)
     
     def set_acceleration(self, position:int, acceleration:list) -> None:
         ''' Установка ускорения для конкретных точек '''
-        self.__vert_append[position][1] = acceleration
+        self.__vert_append[position]._replace(acceleration=acceleration)
 
     def set_coo(self, position:int, new_coo:list) -> None:
         ''' Добавленик к существующим координатам значений '''
@@ -290,17 +290,14 @@ class Point:
 
     def set_backUp(self, backUp:list) -> None:
         ''' Устновка координат точек из бэкапа '''
-        print("\n\nfdobkmfdobkmfdbkmfdk\n\n")
+        print("\n\nЗапуск бэкапа\n\n")
         for i in range(0, self.number_of_points-1):
-            # print('back = ', backUp)
-            # print('self.__coordinates_of_point[i] = ', self.__coordinates_of_point[i])
-            # print('bpy.data.objects["Plane"].data.vertices[i].co = ', bpy.data.objects["Plane"].data.vertices[i].co)
             self.__coordinates_of_point[i] = backUp[i]
             bpy.data.objects["Plane"].data.vertices[i].co = backUp[i]
 
     def set_is_collide(self, position:int, is_collide:bool) -> None:
         ''' Установка параметра столкновения '''
-        self.__vert_append[position][2]._replace(is_collide=is_collide)
+        self.__vert_append[position]._replace(is_collide=is_collide)
 
 class Physics(Point):
     def __init__(self, vertexes_of_cloth:Point, backUp:Point.creating_backUp):
