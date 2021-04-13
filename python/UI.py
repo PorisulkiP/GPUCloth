@@ -25,7 +25,11 @@ from bpy.types import (Panel,
 #    --- Properties for UI ---
 
 class GPUCloth_Settings(PropertyGroup):
-
+    '''
+    This class defines the values ​​of each input. 
+    We can change them by referring to specific variables corresponding to a given input.
+    There is also a description for each input.
+    '''
     my_bool_object_coll : BoolProperty(
         name="Enable or Disable",
         description="A bool property",
@@ -144,6 +148,10 @@ class GPUCloth_Settings(PropertyGroup):
 #    --- GPUCloth in Properties window ---
 
 class UV_PT_GPUCloth(Panel):
+    '''
+    This is a main (parent) Panel on T-panel. 
+    The main interface and nested panels of the created fabric are assembled here.
+    '''
     bl_idname = "UV_PT_GPUCloth"
     bl_label = "GPUCloth"
     bl_category = "My Category"
@@ -165,9 +173,13 @@ class UV_PT_GPUCloth(Panel):
         col_1.label(text="Speed Multiplier")
         col_2.prop(mytool, "my_float_speed", text="")
         col_1.label(text="Air Viscosity")
-        col_2.prop(mytool, "my_float_air", text=""))
+        col_2.prop(mytool, "my_float_air", text="")
         
 class UV_PT_GPUCloth_ObjColl(Panel):
+    '''
+    This is a child Panel on GPUCloth.
+    This panel is checkbox.
+    '''
     bl_idname = "UV_PT_GPUCloth_ObjColl"
     bl_label = ""
     bl_parent_id = "UV_PT_GPUCloth"
@@ -202,6 +214,10 @@ class UV_PT_GPUCloth_ObjColl(Panel):
             col_2.enabled = True
 
 class UV_PT_GPUCloth_SelfColl(Panel):
+    '''
+    This is a child Panel on GPUCloth.
+    This panel is checkbox.
+    '''
     bl_idname = "UV_PT_GPUCloth_SelfColl"
     bl_label = ""
     bl_parent_id = "UV_PT_GPUCloth"
