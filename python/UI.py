@@ -5,7 +5,7 @@ bl_info = {
     "version": (0, 0, 1),
     "blender": (2, 93, 0),
 }
- 
+
 import bpy
 
 from bpy.props import (StringProperty,
@@ -21,7 +21,6 @@ from bpy.types import (Panel,
                        AddonPreferences,
                        PropertyGroup,
                        )
- 
 
 #    --- Properties for UI ---
 
@@ -32,12 +31,16 @@ class GPUCloth_Settings(PropertyGroup):
         description="A bool property",
         default = False
         )
-        
+
+    Object_Collizions = bpy.context.scene.my_tool.my_bool_object_coll
+     
     my_bool_self_coll : BoolProperty(
         name="Enable or Disable",
         description="A bool property",
         default = False
         )
+    
+    Self_Collizions = bpy.context.scene.my_tool.my_bool_self_coll
 
     my_int : IntProperty(
         name = "Set a value",
@@ -47,6 +50,8 @@ class GPUCloth_Settings(PropertyGroup):
         max = 100
         )
 
+    # Object_Collizions = bpy.context.scene.my_tool.my_bool_object_coll
+
     my_float_vertex : FloatProperty(
         name = "Vertex Mass",
         description = "The mass of each vertex on the cloth material",
@@ -54,6 +59,8 @@ class GPUCloth_Settings(PropertyGroup):
         min = 0.001,
         max = 30.0
         )
+
+    Vertex_Mass = bpy.context.scene.my_tool.my_float_vertex
 
     my_float_speed : FloatProperty(
         name = "Speed Multiplier",
@@ -63,6 +70,8 @@ class GPUCloth_Settings(PropertyGroup):
         max = 30.0
         )
 
+    Speed_Multiplier = bpy.context.scene.my_tool.my_float_speed
+
     my_float_air : FloatProperty(
         name = "Air Viscosity",
         description = "Air has some thickness which slows falling things down",
@@ -71,6 +80,8 @@ class GPUCloth_Settings(PropertyGroup):
         max = 30.0
         )
 
+    Air_Viscosity = bpy.context.scene.my_tool.my_float_air
+    
     my_float_distance : FloatProperty(
         name = "Minimal Distance",
         description = "The distance another object must get to the cloth for the simulation to repel the cloth out of the way",
@@ -79,6 +90,8 @@ class GPUCloth_Settings(PropertyGroup):
         max = 30.0
         ) 
         
+    Minimal_Distance = bpy.context.scene.my_tool.my_float_distance
+    
     my_float_distance_self : FloatProperty(
         name = "Self Minimal Distance",
         description = "The distance another object must get to the cloth for the simulation to repel the cloth out of the way",
@@ -87,6 +100,8 @@ class GPUCloth_Settings(PropertyGroup):
         max = 30.0
         ) 
     
+    Self_Minimal_Distance = bpy.context.scene.my_tool.my_float_distance_self
+
     my_float_friction : FloatProperty(
         name = "Friction",
         description = "A coefficient for how slippery the cloth is when it collides with itself",
@@ -94,6 +109,8 @@ class GPUCloth_Settings(PropertyGroup):
         min = 0.001,
         max = 30.0
         ) 
+
+    Friction = bpy.context.scene.my_tool.my_float_friction
 
     my_float_impulse : FloatProperty(
         name = "Impulse Clamp",
@@ -103,6 +120,9 @@ class GPUCloth_Settings(PropertyGroup):
         max = 30.0
         ) 
 
+    Impulse_Clamp = bpy.context.scene.my_tool.my_float_impulse
+    
+
     my_float_impulse_self : FloatProperty(
         name = "Self Impulse Clamp",
         description = "Prevents explosions in tight and complicated collision situations by restricting the amount of movement after a collision.",
@@ -111,11 +131,15 @@ class GPUCloth_Settings(PropertyGroup):
         max = 30.0
         ) 
 
+    Self_Impulse_Clamp = bpy.context.scene.my_tool.my_float_impulse_self
+
     my_string : StringProperty(
         name = "Set a value",
         description = "A string property",
         default = "None"
         )
+
+    # Self_Impulse_Clamp = bpy.context.scene.my_tool.my_float_impulse_self
 
 #    --- GPUCloth in Properties window ---
 
@@ -141,8 +165,8 @@ class UV_PT_GPUCloth(Panel):
         col_1.label(text="Speed Multiplier")
         col_2.prop(mytool, "my_float_speed", text="")
         col_1.label(text="Air Viscosity")
-        col_2.prop(mytool, "my_float_air", text="")
-        layout.operator("wm.hello_world")
+        col_2.prop(mytool, "my_float_air", text=""))
+        
 class UV_PT_GPUCloth_ObjColl(Panel):
     bl_idname = "UV_PT_GPUCloth_ObjColl"
     bl_label = ""
@@ -221,6 +245,8 @@ classes = (
     UV_PT_GPUCloth_ObjColl,
     UV_PT_GPUCloth_SelfColl,
 )
+
+print(GPUCloth_Settings.Object_Collizions)
 
 def register():
     from bpy.utils import register_class
