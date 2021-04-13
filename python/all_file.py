@@ -68,16 +68,16 @@ class SetUp:
                                              align='WORLD', location=(0, 0, 1),
                                              scale=(1, 1, 1))
 
-            # bpy.ops.mesh.quads_convert_to_tris(quad_method='BEAUTY', ngon_method='BEAUTY')
+            bpy.ops.mesh.quads_convert_to_tris(quad_method='BEAUTY', ngon_method='BEAUTY')
 
             # Подразделяем для симуляции ткани
-            # bpy.ops.object.subdivision_set(level=3, relative=False)
+            bpy.ops.object.subdivision_set(level=3, relative=False)
 
             # Изменяем подразделение на "простое"
-            # bpy.context.object.modifiers["Subdivision"].subdivision_type = 'SIMPLE'
+            bpy.context.object.modifiers["Subdivision"].subdivision_type = 'SIMPLE'
 
             # Применяем модификатор
-            # bpy.ops.object.modifier_apply(modifier="Subdivision")
+            bpy.ops.object.modifier_apply(modifier="Subdivision")
 
             # Создаём куб на который будет падать ткань
             bpy.ops.mesh.primitive_cube_add(size=2, enter_editmode=False,
@@ -250,7 +250,7 @@ class Point:
 
     @property
     def all_coord(self) -> list:
-        ''' Возвращает список всех доступных координат'''
+        ''' Возвращает список всех доступных координат '''
         return self.__coordinates_of_point
 
     @property
@@ -290,6 +290,7 @@ class Point:
 
     def set_backUp(self, backUp:list) -> None:
         ''' Устновка координат точек из бэкапа '''
+<<<<<<< HEAD
         print("\n\nЗапуск бэкапа\n\n")
         print("number_of_points = ",self.number_of_points)
         print("__coordinates_of_point = ",self.__coordinates_of_point)
@@ -299,6 +300,10 @@ class Point:
             self.__coordinates_of_point[i] = backUp[i]
             print("backUp[i] = ",backUp[i])
             
+=======
+        for i in range(0, self.number_of_points-1):
+            self.__coordinates_of_point[i] = backUp[i]            
+>>>>>>> 207e1431014a50e0d94e9d236817e127e7d47972
             bpy.data.objects["Plane"].data.vertices[i].co = backUp[i]
 
     def set_is_collide(self, position:int, is_collide:bool) -> None:
@@ -345,10 +350,11 @@ class Physics(Point):
             flag_num = 0
             flags = []
             if bpy.context.scene.frame_current == bpy.context.scene.frame_start:
-                self.mesh.set_backUp(self.backUp)
+                pass
+                # self.mesh.set_backUp(self.backUp)
 
             # i - одна вершина из всех, что есть в объекте, с симуляциет ткани
-            for i in range(0, len(self.mesh)-1):
+            for i in range(0, self.mesh.number_of_points-1):
 
                 # obj_vert - меш из списка объектов столкновений
                 for obj_vert in self.collision_objects:
@@ -403,22 +409,49 @@ class Physics(Point):
             collisionY = a[1] > b[1]
             collisionZ = a[2] < b[2]
             if (collisionX and collisionY and collisionZ):
-                # self.mesh.set_is_collide(num_a, True)
+                self.mesh.set_is_collide(num_a, True)
                 return True
         return False
 
-    def cloth_deformation(self):
-        ''' Здесь производится деформация ткнани '''
-        for num in range(0, len(self.mesh)):
-            acceleration = self.mesh.get_acceleration(num)
-            # res = [self.mesh.get_coo(num)[i] + ((self.mesh.mass * (self.gravity[i] - acceleration[i])) / self.fps)
-            #          for i in range(0, 3)]
-            res = [((self.mesh.mass * (self.gravity[i] - acceleration[i])) / self.fps)
-                     for i in range(0, 3)]
-            self.mesh.set_coo(num, res)
+    def cloth_deformation(self) -> list:
+        ''' 
+        Здесь производится деформация ткнани 
 
-    def collisionOBJ(self):
+        Силы - 
+
+        Пружинные силы(Spring forces) -
+
+        Гравитация(Gravity)- 
+
+        Затухание(Damping) - 
+
+        Вязкая жидкость(Viscous fluid) - 
+        '''
+
+        cloth_matrix = np.array([[]])
+        for i in range(0, self.mesh.number_of_points-1):
+            if i%2==0:
+                print("self.mesh.all_coord[i] = ", self.mesh.all_coord[i])
+                np.append(cloth_matrix, self.mesh.all_coord[i], axis = 0)  
+            else:
+                print("self.mesh.all_coord[i] = ", self.mesh.all_coord[i])
+                np.append(cloth_matrix, self.mesh.all_coord[i], axis = 1)
+        print("cloth_matrix = ", cloth_matrix)
+
+                
+
+        print(cloth_matrix)
+
+        # for num in range(0, len(self.mesh)):
+        #     acceleration = self.mesh.get_acceleration(num)
+        #     res = [((self.mesh.mass * (self.gravity[i] - acceleration[i])) / self.fps)
+        #              for i in range(0, 3)]
+        #     self.mesh.set_coo(num, res)
+
+    @staticmethod
+    def collisionOBJ() -> list:
         ''' Возвращает массив объектов с которыми пересекается ткань '''
+
         # num_of_OBJ - объекты сцены
         num_of_OBJ = np.array([bpy.data.objects[element]
                              for element in range(0, len(bpy.data.objects))])
