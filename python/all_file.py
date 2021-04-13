@@ -15,7 +15,7 @@
 __repr__ - должен быть написан так, чтобы РАЗРАБОТЧИК смог получить всю нужную ему информацию
 __str__ - должен быть написан так, чтобы ПОЛЬЗОВАТЛЬ смог понять информацию о классе и его данных
 
-Почему у переменой __vertG два подчёркивания?
+Почему у переменой __vert_append два подчёркивания?
 это нужно для защиты переменной от внешнего воздействия, т.к благодаря __ переменная стала приватной
 
 Что за знак @?
@@ -106,7 +106,7 @@ class SetUp:
 
 SetUp()
 
-Points = collections.namedtuple('Point', ['velocity', 'acceleration', 'coordinates', 'is_collide'])
+Points = collections.namedtuple('Points', ['velocity', 'acceleration', 'is_collide'])
 
 class Point:
     '''
@@ -116,8 +116,8 @@ class Point:
     mass_of_point - масса каждой точки
     [0] velocity_of_point - скорость каждой точки
     [1] acceleration_of_point - ускорение каждой точки
-    [2] coordinates_of_point - координаты каждой точки
-    [3] is_collide - сталкивается ли точка с другими объектами
+    __coordinates_of_point - координаты каждой точки
+    [2] is_collide - сталкивается ли точка с другими объектами
 
     :Point.get all()[0] = [0.003, 0.001, 0.002] - масса всех точек
     :Point.get all()[0][0] = 0.003
@@ -127,39 +127,40 @@ class Point:
     mass_of_point = 0.3 / number_of_points
     velocity_of_point  = [[0,0,0]] * number_of_points
     acceleration_of_point  = [[0,0,0]] * number_of_points
-    # coordinates_of_point  = [bpy.data.objects["Plane"].data.vertices[i].co for i in range(0, number_of_points)]
-    coordinates_of_point  = [bpy.data.objects["Plane"].matrix_world @ bpy.data.objects["Plane"].data.vertices[i].co for i in range(0, number_of_points)]
     is_collide_of_point  = [False] * number_of_points
-
+    
     distance_min = 0.0001
 
-    __slots__ = ['__vertG', '__xyz']
+    __slots__ = ['__vert_append', '__xyz', '__coordinates_of_point']
 
     # , number_of_points, mass_of_point, velocity, acceleration, coordinates, is_collide
     def __init__(self):
 
         # Этот вариант более подходящий, но выполняется слишком долго :(
-        # self.__vertG = [Points(velocity, acceleration, coordinates) 
-        #                         for velocity in self.velocity for acceleration in self.acceleration 
-        #                         for coordinates in self.coordinates]
+        self.__vert_append = Points(velocity, acceleration, is_collide) 
+                                     for velocity in self.velocity_of_point 
+                                     for acceleration in self.acceleration_of_point 
+                                     for is_collide in self.is_collide_of_point
 
-        self.__vertG = Points([v for v in self.velocity_of_point], 
-                              [a for a in self.acceleration_of_point], 
-                              [coo for coo in self.coordinates_of_point],
-                              [col for col in self.is_collide_of_point])
-        
-        # print("__vertG = ", self.__vertG, "number_of_points = ", self.number_of_points, sep="\n")
+        self.__coordinates_of_point = [bpy.data.objects["Plane"].matrix_world @ 
+                                        bpy.data.objects["Plane"].data.vertices[i].co 
+                                        for i in range(0, self.number_of_points)]
+
+        print("__vert_append = ", self.__vert_append, "__coordinates_of_point = ", self.__coordinates_of_point, sep="\n")
+
+    # def __del__(self):
+    #     del self.__vert_append
 
     def __len__(self) -> int:
         ''' Возвращяет кол-во точек на ткани'''
         return self.number_of_points
 
-    # def __repr__(self):
-    #     return 'Point: ' % (self.__vertG)
+    def __repr__(self):
+        return 'All properties of points: ' % self.__vert_append
 
     def __getiitem__(self, position:int) -> list:
         ''' Возвращает параметры конкретной точки'''
-        return self.__vertG[position]
+        return self.__vert_append[position]
 
     # ------------------------------------------------------------------------
     #    CALCULATIONS
@@ -167,11 +168,11 @@ class Point:
  
     def __add_masses(self, position1:int, position2:int) -> float:
         ''' Складывает массы двух точек'''
-        return __vertG[position1][0] + __vertG[position2][0]
+        return __vert_append[position1][0] + __vert_append[position2][0]
 
     def __subtract_masses(self, position1:int, position2:int) -> float:
         ''' Вычитает массы двух точек'''
-        return __vertG[position1][0] - __vertG[position2][0]
+        return __vert_append[position1][0] - __vert_append[position2][0]
     
     def find_momentum(self, position1:int) -> list:
         ''' 
@@ -211,8 +212,8 @@ class Point:
         a = (V1-V2)/t
         t = 1/fps
         '''
-        V1 = self.velocity(a)
-        V2 = self.velocity(self.velocity(a))
+        V1 = self.find_velocity(a)
+        V2 = self.find_velocity(self.find_velocity(a))
         a = [(V1[i] - V2[i])/(60/self.fps) for i in range(0, 3)]
         return a
 
@@ -221,28 +222,49 @@ class Point:
     # ------------------------------------------------------------------------
     
     def get_velocity(self, position:int) -> list:
-        return self.__vertG[0][position]
+        ''' Возвращает скорость каждой точки '''
+        return self.__vert_append[position][0]
     
     def get_acceleration(self, position:int) -> list:
-        return self.__vertG[1][position]
+        ''' Возвращает ускорение каждой точки '''
+        return self.__vert_append[position][1]
         
     def get_coo(self, position:int) -> list:
-        return self.__vertG[2][position]
+        ''' Возвращает список координат конкретной точки '''
+        return self.__coordinates_of_point[position]
     
-    def get_is_collide(self, position:int) -> None:
-        return self.__vertG[3][position] 
+    def get_is_collide(self, position:int) -> bool:
+        ''' Возвращает факт пересейчения каждой точки '''
+        return self.__vert_append[position][2]
  
     @property   
-    def all(self):
-        return self.__vertG
+    def all_append(self) -> list:
+        ''' Возвращает все дополнения для точек'''
+        return self.__vert_append
 
     @property 
     def mass(self) -> float:
+        ''' Возвращает массу точек '''
         return self.mass_of_point
 
     @property
-    def get_all_coo(self):
-        return self.__vertG[2]
+    def all_coord(self) -> list:
+        ''' Возвращает список всех доступных координат'''
+        return self.__coordinates_of_point
+
+    @property
+    def creating_backUp(self) -> list:
+        ''' Создаёт бэкап точек с ткани'''
+        return [self.all_coord[i] for i in range(0, self.number_of_points-1)]
+
+    @property
+    def num_of_points(self) -> int:
+        ''' 
+        Возвращает число точек на ткани
+        
+        :self.mesh.num_of_points >> 8 
+        '''
+        return self.number_of_points
 
     # ------------------------------------------------------------------------
     #    SETTERS
@@ -250,69 +272,45 @@ class Point:
 
     # Не удалось выставить сеттеры с помощью property, 
     # поскольку property не даёт передавать больше одного параметра
-
     def set_velocity(self, position:int, velocity:list) -> None:
-        self.__vertG[0][position] = velocity
+        ''' Устновка скорости для конкретных точек '''
+        self.__vert_append[position][0] = velocity
     
     def set_acceleration(self, position:int, acceleration:list) -> None:
-        self.__vertG[1][position] = acceleration
+        ''' Установка ускорения для конкретных точек '''
+        self.__vert_append[position][1] = acceleration
 
     def set_coo(self, position:int, new_coo:list) -> None:
-        new_coo = mathutils.Vector(new_coo)
-        self.__vertG[2][position] += new_coo
-        bpy.data.objects["Plane"].data.vertices[position].co.xyz += new_coo
+        ''' Добавленик к существующим координатам значений '''
+        new_coo = mathutils.Vector(new_coo) 
+        # print('new_coo = ',new_coo)
+        # print('self.__coordinates_of_point = ',self.__coordinates_of_point)
+        self.__coordinates_of_point[position] += new_coo
+        bpy.data.objects["Plane"].data.vertices[position].co += new_coo
+
+    def set_backUp(self, backUp:list) -> None:
+        ''' Устновка координат точек из бэкапа '''
+        print("\n\nfdobkmfdobkmfdbkmfdk\n\n")
+        for i in range(0, self.number_of_points-1):
+            # print('back = ', backUp)
+            # print('self.__coordinates_of_point[i] = ', self.__coordinates_of_point[i])
+            # print('bpy.data.objects["Plane"].data.vertices[i].co = ', bpy.data.objects["Plane"].data.vertices[i].co)
+            self.__coordinates_of_point[i] = backUp[i]
+            bpy.data.objects["Plane"].data.vertices[i].co = backUp[i]
 
     def set_is_collide(self, position:int, is_collide:bool) -> None:
-        self.__vertG[3][position] = is_collide
-
-class BackUp(Point):
-    def __init__(self, mesh:Point):
-        self.mesh = mesh
-        self.backUp = []
-
-    def __del__(self):
-        'Пока на объект есть хоть одна ссылка, то бэкап будет существовать'
-        # print("Удаление бэкапа", self.mesh)
-        del self.mesh
-        del self.backUp
-
-    def backupSet(self) -> list:
-        ''' Создание бэкапа
-        Возвразает список координат в виде двухмерного массива
-
-        :BackUp.backupSet() >>  [[0, 1.2356, 0.001235], [0,0,0], ...]
-        '''    
-        # список всех вершин изначального меша ткани
-        backUp = []
-        for NumVert in range(0, len(self.mesh.vertices)):
-            # print(self.mesh.vertices[NumVert].co[0:3])
-            backUp.append(self.mesh.vertices[NumVert].co)
-        return backUp
-
-    def backupGet(self) -> None:
-        '''  Установка координат из бэкапа   '''
-        for i in range(0, len(self.mesh.vertices)):
-
-            # print("До = ", self.mesh.vertices[i].co[:3])
-            # print("backUp = ", backUp[i][:3])
-
-            self.mesh.vertices[i].co.x = backUp[i][0]
-            self.mesh.vertices[i].co.y = backUp[i][1]
-            self.mesh.vertices[i].co.z = backUp[i][2]
-
-            # print("После = ",self.mesh.vertices[i].co[:3])
-            # print("После backUp = ", backUp[i][:3])
+        ''' Установка параметра столкновения '''
+        self.__vert_append[position][2]._replace(is_collide=is_collide)
 
 class Physics(Point):
-    def __init__(self, vertexes_of_cloth:Point):
+    def __init__(self, vertexes_of_cloth:Point, backUp:Point.creating_backUp):
         # Создаём атрибуты сцены для дальнейших вычислений
         self.gravity = bpy.context.scene.gravity
         self.fps = bpy.context.scene.render.fps      
         self.mesh = vertexes_of_cloth
 
         # Создаём атрибут бэкапа
-        # self.backUp = backUp
-        # print("__init__ backUp = ", self.backUp[:4][:3])
+        self.backUp = backUp
 
         # Собираем все объекты в сцене, способные к столкновению
         self.collision_objects = self.collisionOBJ()
@@ -341,10 +339,11 @@ class Physics(Point):
             Р - вес / m - масса / g - гравитация
             Р = m(g-a)
             '''
-            flagNum = 0
+            flag_num = 0
             flags = []
-            # if bpy.context.scene.frame_current == bpy.context.scene.frame_start:
-            #     backupGet(self.backUp)   
+            if bpy.context.scene.frame_current == bpy.context.scene.frame_start:
+                self.mesh.set_backUp(self.backUp)
+
             # i - одна вершина из всех, что есть в объекте, с симуляциет ткани
             for i in range(0, len(self.mesh)-1):
 
@@ -359,18 +358,18 @@ class Physics(Point):
 
                         # [0] - x, [1] - y, [2] - z
                         flags.append(self.cross(self.mesh.get_coo(i), global_col_point, i))
-                        flagNum += 1
+                        flag_num += 1
 
             # print("True in flags = ", True in flags)
             if not(True in flags):
                 self.cloth_deformation()
             else:
                 # if (True in flags):
-                #     for newCoor in self.mesh.get_all_coo:
+                #     for newCoor in self.mesh.all_coord:
                 #         for i in range(0, 3):  
                 #             newCoor[i] -= (self.gravity[i] / (60 / self.fps))
                 # else:
-                for newCoor in self.mesh.get_all_coo:
+                for newCoor in self.mesh.all_coord:
                     for i in range(0, 3):  
                         newCoor[i] += 0
         return gravityCalc
@@ -394,35 +393,37 @@ class Physics(Point):
         ==> Distanse и по умолчанию равен 0.15
         Находится по формуле вычисления точек пересечения прямых в пространстве.
         '''
-         # Версия с a-b и c-d
+        # Версия с a-b и c-d
+        # print(a, b, sep="\n")
         if (self.lenOfTwoPoints(a, b) >= distance_min):
             collisionX = a[0] < b[0]
             collisionY = a[1] > b[1]
             collisionZ = a[2] < b[2]
             if (collisionX and collisionY and collisionZ):
-                self.mesh.set_is_collide(num_a, True)
+                # self.mesh.set_is_collide(num_a, True)
                 return True
         return False
 
     def cloth_deformation(self):
+        ''' Здесь производится деформация ткнани '''
         for num in range(0, len(self.mesh)):
             acceleration = self.mesh.get_acceleration(num)
+            # res = [self.mesh.get_coo(num)[i] + ((self.mesh.mass * (self.gravity[i] - acceleration[i])) / self.fps)
+            #          for i in range(0, 3)]
             res = [((self.mesh.mass * (self.gravity[i] - acceleration[i])) / self.fps)
                      for i in range(0, 3)]
             self.mesh.set_coo(num, res)
 
     def collisionOBJ(self):
-        '''
-        Данная функция возвращает массив объектов с которыми пересекается ткань
-        '''
-        # numOfOBJ - объекты сцены
-        numOfOBJ = np.array([bpy.data.objects[element]
+        ''' Возвращает массив объектов с которыми пересекается ткань '''
+        # num_of_OBJ - объекты сцены
+        num_of_OBJ = np.array([bpy.data.objects[element]
                              for element in range(0, len(bpy.data.objects))])
 
         # collisionOBJs - список объектов способных к столкновению
         collisionOBJs = []
         
-        for col in numOfOBJ:            
+        for col in num_of_OBJ:            
             try:
                 col.modifiers['Collision'].settings.use
                 collisionOBJs.append(col)
@@ -480,13 +481,13 @@ if __name__ == "__main__":
     # Переход на первый кадр
     bpy.context.scene.frame_current = bpy.context.scene.frame_start
 
-    # 
     cloth = Point()
-    # print( '\n', "p.get_all()[0][0] = ",p.get_all()[0][0], '\n')
-    backUp = BackUp(cloth).backUp
-    sim = Physics(cloth)
-
-    sim.start_sim()
+    backUp = cloth.creating_backUp
+    print(backUp)
+    sim = Physics(cloth, backUp)
 
     # Запуск симуляции
+    sim.start_sim()
+
+    # Запуск анимации
     bpy.ops.screen.animation_play(reverse=False, sync=False)
