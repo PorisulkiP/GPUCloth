@@ -154,6 +154,7 @@ class Point:
     def __len__(self) -> int:
         ''' Возвращяет кол-во точек на ткани'''
         return self.number_of_points
+       
 
     def __repr__(self):
         return 'All properties of points: ' % self.__vert_append
@@ -255,7 +256,8 @@ class Point:
     @property
     def creating_backUp(self) -> list:
         ''' Создаёт бэкап точек с ткани'''
-        return [self.all_coord[i] for i in range(0, self.number_of_points-1)]
+        
+        return [self.all_coord[i] for i in range(0, self.number_of_points)]
 
     @property
     def num_of_points(self) -> int:
@@ -292,7 +294,7 @@ class Point:
         print("number_of_points = ",self.number_of_points)
         print("__coordinates_of_point = ",self.__coordinates_of_point)
         print("backUp = ",backUp)
-        print("co = ",bpy.data.objects["Plane"].data.vertices[0].co)
+        print("pointCo" ,bpy.data.objects["Plane"].data.vertices[0].co)
         for i in range(0, self.number_of_points):
             self.__coordinates_of_point[i] = backUp[i]
             print("backUp[i] = ",backUp[i])
