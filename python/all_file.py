@@ -20,6 +20,8 @@ __str__ - должен быть написан так, чтобы ПОЛЬЗОВ
 
 Что за знак @?
 Это PEP 465. Его задача – перемножить матрицы
+
+
 '''
 
 bl_info = {
@@ -147,9 +149,6 @@ class Point:
                                         for i in range(0, self.number_of_points)]
 
         # print("__vert_append = ", self.__vert_append, "__coordinates_of_point = ", self.__coordinates_of_point, sep="\n")
-
-    # def __del__(self):
-    #     del self.__vert_append
 
     def __len__(self) -> int:
         ''' Возвращяет кол-во точек на ткани'''
@@ -414,25 +413,24 @@ class Physics(Point):
         Вязкая жидкость(Viscous fluid) - 
         '''
 
-        cloth_matrix = np.array([[]])
-        for i in range(0, self.mesh.number_of_points-1):
-            if i%2==0:
-                print("self.mesh.all_coord[i] = ", self.mesh.all_coord[i])
-                np.append(cloth_matrix, self.mesh.all_coord[i], axis = 0)  
-            else:
-                print("self.mesh.all_coord[i] = ", self.mesh.all_coord[i])
-                np.append(cloth_matrix, self.mesh.all_coord[i], axis = 1)
-        print("cloth_matrix = ", cloth_matrix)
+        # cloth_matrix = np.array([[
+        #                     [
+        #                         [i]
+        #                     ]
+        #                ] for i in self.mesh.all_coord])
 
-                
+        # np.reshape(cloth_matrix, (self.mesh.number_of_points/,-1))
 
-        print(cloth_matrix)
 
-        # for num in range(0, len(self.mesh)):
-        #     acceleration = self.mesh.get_acceleration(num)
-        #     res = [((self.mesh.mass * (self.gravity[i] - acceleration[i])) / self.fps)
-        #              for i in range(0, 3)]
-        #     self.mesh.set_coo(num, res)
+
+        # print("cloth_matrix = \n", cloth_matrix[:3])
+
+
+        for num in range(0, len(self.mesh)):
+            acceleration = self.mesh.get_acceleration(num)
+            res = [((self.mesh.mass * (self.gravity[i] - acceleration[i])) / self.fps)
+                     for i in range(0, 3)]
+            self.mesh.set_coo(num, res)
 
     @staticmethod
     def collisionOBJ() -> list:
@@ -505,11 +503,11 @@ if __name__ == "__main__":
 
     cloth = Point()
     backUp = cloth.creating_backUp
-    print(backUp)
+    # print(backUp)
     sim = Physics(cloth, backUp)
 
     # Запуск симуляции
     sim.start_sim()
 
     # Запуск анимации
-    bpy.ops.screen.animation_play(reverse=False, sync=False)
+    # bpy.ops.screen.animation_play(reverse=False, sync=False)
