@@ -114,47 +114,46 @@ class Point:
     '''
     Класс реализуется по шаблону "Стратегия"
     Суть класса в усовершенствовании базовых точек из блендера, для более точной симуляции ткани
-    number_of_points - кол-во точек на ткани
-    mass_of_point - масса каждой точки
-    [0] velocity_of_point - скорость каждой точки
-    [1] acceleration_of_point - ускорение каждой точки
-    __coordinates_of_point - координаты каждой точки
-    [2] is_collide - сталкивается ли точка с другими объектами
+    _meshResolution  - кол-во точек на ткани
+    __vertexMass - масса каждой точки
+    [0] vertexVelocity - скорость каждой точки
+    [1] vertexAcceleration - ускорение каждой точки
+    __vertexPosition - координаты каждой точки
+    [2] vertex_Is_collide - сталкивается ли точка с другими объектами
 
     :Point.get all()[0] = [0.003, 0.001, 0.002] - масса всех точек
     :Point.get all()[0][0] = 0.003
     '''
-    number_of_points = len(bpy.data.objects["Plane"].data.vertices)
+    _meshResolution  = len(bpy.data.objects["Plane"].data.vertices)
 
-    mass_of_point = 0.3 / number_of_points
-    velocity_of_point  = [[0,0,0]] * number_of_points
-    acceleration_of_point  = [[0,0,0]] * number_of_points
-    is_collide_of_point  = [False] * number_of_points
+    __vertexMass = 0.3 / _meshResolution 
+    __vertexVelocity  = [[0,0,0]] * _meshResolution 
+    __vertexAcceleration  = [[0,0,0]] * _meshResolution 
+    __vertexIsCollide  = [False] * _meshResolution 
     
     distance_min = 0.0001
 
-    __slots__ = ['__vert_append', '__xyz', '__coordinates_of_point']
+    __slots__ = ['__vert_append', '__xyz', '__vertexPosition']
 
-    # , number_of_points, mass_of_point, velocity, acceleration, coordinates, is_collide
+    # , _meshResolution , __vertexMass, velocity, acceleration, coordinates, is_collide
     def __init__(self):
 
         # Этот вариант более подходящий, но выполняется слишком долго :(
         self.__vert_append = [Points(velocity, acceleration, is_collide) 
-                                     for velocity in self.velocity_of_point 
-                                     for acceleration in self.acceleration_of_point 
-                                     for is_collide in self.is_collide_of_point]
+                                     for velocity in self.__vertexVelocity 
+                                     for acceleration in self.__vertexAcceleration 
+                                     for is_collide in self.__vertexIsCollide]
 
-        self.__coordinates_of_point = [bpy.data.objects["Plane"].matrix_world @ 
+        self.__vertexPosition = [bpy.data.objects["Plane"].matrix_world @ 
                                         bpy.data.objects["Plane"].data.vertices[i].co 
-                                        for i in range(0, self.number_of_points)]
+                                        for i in range(0, self._meshResolution)]
 
-        # print("__vert_append = ", self.__vert_append, "__coordinates_of_point = ", self.__coordinates_of_point, sep="\n")
+        # print("__vert_append = ", self.__vert_append, "__vertexPosition = ", self.__vertexPosition, sep="\n")
 
     def __len__(self) -> int:
         ''' Возвращяет кол-во точек на ткани'''
-        return self.number_of_points
+        return self._meshResolution 
        
-
     def __repr__(self):
         return 'All properties of points: ' % self.__vert_append
 
@@ -181,7 +180,7 @@ class Point:
         
         :find_momentum(i) >> [0, 1.2356, 0.001235]
         '''
-        return [self.mass_of_point * self.get_acceleration(position1) 
+        return [self.__vertexMass * self.get_acceleration(position1) 
                 for i in range(0, 3)]
 
     def find_distance(self, position1:int, position2:int) -> float:
@@ -201,7 +200,7 @@ class Point:
         S = a - a_second
         t = 1/fps
         '''
-        V = [self.get_coo(i) - self.get_coo(i) - (self.gravity[i]/(60/self.fps)) for i in range(0, 3)]
+        V = [self.get_position(i) - self.get_position(i) - (self.gravity[i]/(60/self.fps)) for i in range(0, 3)]
         # print("V = ", V)
         return V
 
@@ -229,9 +228,9 @@ class Point:
         ''' Возвращает ускорение каждой точки '''
         return self.__vert_append[position].acceleration
         
-    def get_coo(self, position:int) -> list:
+    def get_position(self, position:int) -> list:
         ''' Возвращает список координат конкретной точки '''
-        return self.__coordinates_of_point[position]
+        return self.__vertexPosition[position]
     
     def get_is_collide(self, position:int) -> bool:
         ''' Возвращает факт пересейчения каждой точки '''
@@ -245,27 +244,26 @@ class Point:
     @property 
     def mass(self) -> float:
         ''' Возвращает массу точек '''
-        return self.mass_of_point
+        return self.__vertexMass
 
     @property
     def all_coord(self) -> list:
         ''' Возвращает список всех доступных координат '''
-        return self.__coordinates_of_point
+        return self.__vertexPosition
 
     @property
     def creating_backUp(self) -> list:
         ''' Создаёт бэкап точек с ткани'''
-        
-        return [self.all_coord[i] for i in range(0, self.number_of_points)]
+        return [self.all_coord[i] for i in range(0, self._meshResolution )]
 
     @property
-    def num_of_points(self) -> int:
+    def meshResolution(self) -> int:
         ''' 
         Возвращает число точек на ткани
         
-        :self.mesh.num_of_points >> 8 
+        :self.mesh._meshResolution >> 8 
         '''
-        return self.number_of_points
+        return self._meshResolution 
 
     # ------------------------------------------------------------------------
     #    SETTERS
@@ -284,25 +282,20 @@ class Point:
     def set_coo(self, position:int, new_coo:list) -> None:
         ''' Добавленик к существующим координатам значений '''
         new_coo = mathutils.Vector(new_coo)
-        self.__coordinates_of_point[position] += new_coo
+        self.__vertexPosition[position] += new_coo
         bpy.data.objects["Plane"].data.vertices[position].co += new_coo
 
     def set_backUp(self, backUp:list) -> None:
         ''' Устновка координат точек из бэкапа '''
-<<<<<<< HEAD
         print("\n\nЗапуск бэкапа\n\n")
-        print("number_of_points = ",self.number_of_points)
-        print("__coordinates_of_point = ",self.__coordinates_of_point)
-        print("backUp = ",backUp)
-        print("pointCo" ,bpy.data.objects["Plane"].data.vertices[0].co)
-        for i in range(0, self.number_of_points):
-            self.__coordinates_of_point[i] = backUp[i]
+        print("meshResolution  = ", self.meshResolution)
+        print("vertexPosition = ", self.__vertexPosition)
+        print("backUp = ", backUp)
+        print("pointCo" , bpy.data.objects["Plane"].data.vertices[0].co)
+        for i in range(0, self.meshResolution ):
+            self.vertexPosition[i] = backUp[i]
             print("backUp[i] = ",backUp[i])
             
-=======
-        for i in range(0, self.number_of_points-1):
-            self.__coordinates_of_point[i] = backUp[i]            
->>>>>>> 207e1431014a50e0d94e9d236817e127e7d47972
             bpy.data.objects["Plane"].data.vertices[i].co = backUp[i]
 
     def set_is_collide(self, position:int, is_collide:bool) -> None:
@@ -353,7 +346,7 @@ class Physics(Point):
                 # self.mesh.set_backUp(self.backUp)
 
             # i - одна вершина из всех, что есть в объекте, с симуляциет ткани
-            for i in range(0, self.mesh.number_of_points-1):
+            for i in range(0, self.mesh.meshResolution -1):
 
                 # obj_vert - меш из списка объектов столкновений
                 for obj_vert in self.collision_objects:
@@ -365,7 +358,7 @@ class Physics(Point):
                         global_col_point = obj_vert.matrix_world @ obj_vert.data.vertices[o].co
 
                         # [0] - x, [1] - y, [2] - z
-                        flags.append(self.cross(self.mesh.get_coo(i), global_col_point, i))
+                        flags.append(self.cross(self.mesh.get_position(i), global_col_point, i))
                         flag_num += 1
 
             # print("True in flags = ", True in flags)
@@ -412,39 +405,50 @@ class Physics(Point):
                 return True
         return False
 
-    def cloth_deformation(self) -> list:
+    def cloth_deformation(self, K = 2, Cd = 0.0007) -> list:
         ''' 
         Здесь производится деформация ткнани 
 
-        Силы - 
+        Пружинные силы(Spring forces) - при заданной пружине, 
+        соединяющей две частицы, расположенные в точках p и q, 
+        с жесткостью K и длиной покоя L0, сила пружины, действующая на p.
 
-        Пружинные силы(Spring forces) -
+        K - это vec3, где K [0] , K [1] и K [2] обозначают жесткость всех структурных, 
+                                        сдвигающих и изгибающих пружин, соответственно.
+        L - вычисляем через функция len_of_two_points
 
-        Гравитация(Gravity)- 
+        F(spring) = K*(L0−abs(p−q))*(p−q/abs(p−q)).
 
-        Затухание(Damping) - 
+        Гравитация(Gravity) - self.gravity
 
-        Вязкая жидкость(Viscous fluid) - 
+        Затухание(Damping) - типа трения о воздух
+
+        F(Damping) = -Cd * V.
+        Cd - это коэффициент силы сопротивления движению
+        хз, где его взять, так что пусть это будет 0.0007
+
+        Вязкая жидкость(Viscous fluid) - чтобы справиться с вязким поведением ткани, 
+                    мы предполагаем, что каждая частица со скоростью v выталкивается 
+                    воображаемой вязкой жидкостью.
+
+    
         '''
 
-        # cloth_matrix = np.array([[
-        #                     [
-        #                         [i]
-        #                     ]
-        #                ] for i in self.mesh.all_coord])
+        cloth_matrix = np.array([[
+                            [
+                                [i]
+                            ]
+                       ] for i in self.mesh.all_coord])
 
-        # np.reshape(cloth_matrix, (self.mesh.number_of_points/,-1))
+        np.reshape(cloth_matrix, (round(self.mesh.meshResolution / 2) ,-1))
 
+        print("cloth_matrix = \n", cloth_matrix[:3])
 
-
-        # print("cloth_matrix = \n", cloth_matrix[:3])
-
-
-        for num in range(0, len(self.mesh)):
-            acceleration = self.mesh.get_acceleration(num)
-            res = [((self.mesh.mass * (self.gravity[i] - acceleration[i])) / self.fps)
-                     for i in range(0, 3)]
-            self.mesh.set_coo(num, res)
+        # for num in range(0, len(self.mesh)):
+        #     acceleration = self.mesh.get_acceleration(num)
+        #     res = [((self.mesh.mass * (self.gravity[i] - acceleration[i])) / self.fps)
+        #              for i in range(0, 3)]
+        #     self.mesh.set_coo(num, res)
 
     @staticmethod
     def collisionOBJ() -> list:
