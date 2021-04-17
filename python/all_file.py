@@ -22,29 +22,29 @@ __str__ - должен быть написан так, чтобы ПОЛЬЗОВ
 Это PEP 465. Его задача – перемножить матрицы
 
 
+Виды пружин:
+-пружины сжатия/растяжения;         (STRUCTURAL)
+-пружины кручения;                  (SHEAR)
+-пружины изгиба.                    (BEND)
+
 '''
 
 bl_info = {
     "name": "GPUCloth",
-    "author": "PorisulkiP",
-    "version": (0, 0, 1),
+    "author": "PorisulkiP, GoldBath, Vi, Victus",
+    "version": (0, 1, 0),
     "blender": (2, 93, 0),
     "location": "",
     "warning": "",
     "description": "Cloth simulation on GPU",
-    "doc_url": "",
+    "doc_url": "https://github.com/PorisulkiP/GPUCloth",
     "category": "System",
 }
 
 # импортируем API для работы с blender
 import bpy
 import numpy as np
-import sys
-import os
-import collections
-import mathutils
-import time
-# import sympy
+import sys, os, math, collections, mathutils, time
 
 # В данном класе создаётся сцена для тестировния алгоритма физики ткани
 class SetUp:
@@ -129,14 +129,18 @@ class Point:
     __vertexMass = 0.3 / _meshResolution 
     __vertexVelocity  = [[0,0,0]] * _meshResolution 
     __vertexAcceleration  = [[0,0,0]] * _meshResolution 
-    __vertexIsCollide  = [False] * _meshResolution 
+    __vertexIsCollide  = [False] * _meshResolution
+
+    # Длинна ткани по x и по y
+    _sim_u = int(_meshResolution**0.5) # Горизонталь
+    _sim_v = int(_meshResolution**0.5) # Вертикаль
     
     distance_min = 0.0001
 
-    __slots__ = ['__vert_append', '__xyz', '__vertexPosition']
+    # __slots__ = ['__vert_append', '__xyz', '__vertexPosition']
 
-    # , _meshResolution , __vertexMass, velocity, acceleration, coordinates, is_collide
     def __init__(self):
+        super().__init__()
 
         # Этот вариант более подходящий, но выполняется слишком долго :(
         self.__vert_append = [Points(velocity, acceleration, is_collide) 
@@ -162,102 +166,58 @@ class Point:
         return self.__vert_append[position]
 
     # ------------------------------------------------------------------------
-    #    CALCULATIONS
-    # ------------------------------------------------------------------------
- 
-    def __add_masses(self, position1:int, position2:int) -> float:
-        ''' Складывает массы двух точек'''
-        return __vert_append[position1][0] + __vert_append[position2][0]
-
-    def __subtract_masses(self, position1:int, position2:int) -> float:
-        ''' Вычитает массы двух точек'''
-        return __vert_append[position1][0] - __vert_append[position2][0]
-    
-    def find_momentum(self, position1:int) -> list:
-        ''' 
-        Возвращает список значений, который является импульсом точки.
-        Номер является осью, а значение силой импульса по конкретной оси.
-        
-        :find_momentum(i) >> [0, 1.2356, 0.001235]
-        '''
-        return [self.__vertexMass * self.get_acceleration(position1) 
-                for i in range(0, 3)]
-
-    def find_distance(self, position1:int, position2:int) -> float:
-        ''' 
-        Находим расскояние между двух точек,
-        через формулу определение длинны вектора
-        '''
-        __xyz = [(b[i] - a[i])**2 for i in range(0, 3)]
-
-        return (__xyz[0] + __xyz[1] + __xyz[2])**0.5
-
-    def find_velocity(self, position1:int) -> list:
-        '''
-        Возвращает скорость точки, 
-        используя её массу и гравитацию в сцене
-        V = S/t
-        S = a - a_second
-        t = 1/fps
-        '''
-        V = [self.get_position(i) - self.get_position(i) - (self.gravity[i]/(60/self.fps)) for i in range(0, 3)]
-        # print("V = ", V)
-        return V
-
-    def find_acceleration(self, position1:int) -> list:
-        '''
-        Функция возвращает ускорение для одной точки,
-        в виде массива по 3 коордиинатам
-        a = (V1-V2)/t
-        t = 1/fps
-        '''
-        V1 = self.find_velocity(a)
-        V2 = self.find_velocity(self.find_velocity(a))
-        a = [(V1[i] - V2[i])/(60/self.fps) for i in range(0, 3)]
-        return a
-
-    # ------------------------------------------------------------------------
     #    GETTERS
     # ------------------------------------------------------------------------
+
     
     def get_velocity(self, position:int) -> list:
-        ''' Возвращает скорость каждой точки '''
+        ''' Возвращает список(list) скорости каждой точки '''
         return self.__vert_append[position].velocity
     
     def get_acceleration(self, position:int) -> list:
-        ''' Возвращает ускорение каждой точки '''
+        ''' Возвращает список(list) ускорения каждой точки '''
         return self.__vert_append[position].acceleration
         
     def get_position(self, position:int) -> list:
-        ''' Возвращает список координат конкретной точки '''
+        ''' Возвращает список(list) координат конкретной точки '''
         return self.__vertexPosition[position]
     
     def get_is_collide(self, position:int) -> bool:
-        ''' Возвращает факт пересейчения каждой точки '''
+        ''' Возвращает факт(bool) пересейчения каждой точки '''
         return self.__vert_append[position].is_collide
- 
+
+    @property 
+    def get_sim_u(self) -> int:
+        ''' Возвращает кол-во(int) точек по горизонтали '''
+        return self._sim_u
+
+    @property 
+    def get_sim_v(self) -> int:
+        ''' Возвращает кол-во(int) точек по вертикали '''
+        return self._sim_v
+
     @property   
     def all_append(self) -> list:
-        ''' Возвращает все дополнения для точек'''
+        ''' Возвращает список(list) всех свойств точек'''
         return self.__vert_append
 
     @property 
     def mass(self) -> float:
-        ''' Возвращает массу точек '''
+        ''' Возвращает массу(float) точек '''
         return self.__vertexMass
 
     @property
-    def all_coord(self) -> list:
-        ''' Возвращает список всех доступных координат '''
+    def get_all_coord(self) -> list:
+        ''' Возвращает список(list) всех доступных координат '''
         return self.__vertexPosition
 
     @property
     def creating_backUp(self) -> list:
-        ''' Создаёт бэкап точек с ткани'''
-        return [self.all_coord[i] for i in range(0, self._meshResolution )]
+        ''' Возвращает список(list) бэкап точек '''
+        return [self.get_all_coord[i] for i in range(0, self._meshResolution )]
 
     @property
-    def meshResolution(self) -> int:
+    def get_meshResolution(self) -> int:
         ''' 
         Возвращает число точек на ткани
         
@@ -282,17 +242,23 @@ class Point:
     def set_coo(self, position:int, new_coo:list) -> None:
         ''' Добавленик к существующим координатам значений '''
         new_coo = mathutils.Vector(new_coo)
+        self.__vertexPosition[position] = new_coo
+        bpy.data.objects["Plane"].data.vertices[position].co = new_coo
+
+    def add_coo(self, position:int, new_coo:list) -> None:
+        ''' Добавленик к существующим координатам значений '''
+        new_coo = mathutils.Vector(new_coo)
         self.__vertexPosition[position] += new_coo
         bpy.data.objects["Plane"].data.vertices[position].co += new_coo
 
     def set_backUp(self, backUp:list) -> None:
         ''' Устновка координат точек из бэкапа '''
         print("\n\nЗапуск бэкапа\n\n")
-        print("meshResolution  = ", self.meshResolution)
+        print("meshResolution  = ", self.get_meshResolution)
         print("vertexPosition = ", self.__vertexPosition)
         print("backUp = ", backUp)
         print("pointCo" , bpy.data.objects["Plane"].data.vertices[0].co)
-        for i in range(0, self.meshResolution ):
+        for i in range(0, self.get_meshResolution ):
             self.vertexPosition[i] = backUp[i]
             print("backUp[i] = ",backUp[i])
             
@@ -302,25 +268,207 @@ class Point:
         ''' Установка параметра столкновения '''
         self.__vert_append[position]._replace(is_collide=is_collide)
 
-class Physics(Point):
-    def __init__(self, vertexes_of_cloth:Point, backUp:Point.creating_backUp):
+
+class Collision:
+    def __init__(self):
+        super().__init__()
+        # num_of_OBJ - объекты сцены
+        self.__num_of_OBJ = np.array([bpy.data.objects[element]
+                             for element in range(0, len(bpy.data.objects))])
+
+        # collisionOBJs - список объектов способных к столкновению
+        self.__collisionOBJs = []
+
+        # clothOBJs - список объектов способных к столкновению
+        self.__clothOBJs = []
+
+    def __collisionOBJ(self) -> None:
+        ''' Добавляет в массив объекты, с которыми пересекается ткань '''
+        for col in self.__num_of_OBJ:            
+            try:
+                col.modifiers['Collision'].settings.use
+                self.__collisionOBJs.append(col)
+            except KeyError:
+                pass
+
+    def __clothOBJ(self) -> None:
+        ''' Добавляет в массив объекты, на которых накинут можификатор ткани '''
+        for clo in self.__num_of_OBJ:            
+            try:
+                clo.modifiers['GPUCloth'].settings.use
+                self.__clothOBJs.append(clo)
+            except KeyError:
+                pass
+
+    def get_collide_obj(self) -> list:
+        ''' Возвращает массив объектов с которыми может столкнуться ткань '''
+        self.__collisionOBJ()
+        return self.__collisionOBJs
+
+    def get_gpu_cloth_obj(self) -> list:
+        ''' Возвращает массив объектов, на которых накинут можификатор ткани  '''
+        self.__clothOBJ()
+        return self.__clothOBJs
+
+
+class Spring:
+    '''
+    Класс пружины(нитки, но не совсем)
+    pos_a: первая позиция
+    pos_b: вторая позиция
+    ks: постоянная пружины
+    kd: типа, отклонение от постоянной, но это не точно...
+    rest_length(l0): длина пружины в покое
+    STIFFNESS: жёсткость
+    '''
+    STIFFNESS = 1
+
+    def __init__(self, a, b, ks, kd, rest_length, spring_type):
+        self.pos_a = a
+        self.pos_b = b
+        self.ks = ks
+        self.kd = kd
+        self.rest_length = rest_length
+        self.spring_type = spring_type
+
+    def __repr__(self):
+        return f'''\nSpring: \n
+                    Current position: {self.pos_a}\n
+                    Previous position: {self.pos_b}\n
+                    ks: {self.ks}\n
+                    kd: {self.kd}\n
+                    Rest length: {self.rest_length}\n
+                    Spring type: {self.spring_type}\n       
+                '''
+
+
+class Accurate:
+    def __init__(self, stepSize = 1):
+        super().__init__()
+        # h - кол-во шагов, т.е stepSize
+        self.h = stepSize
+
+    def _solved_equation(self, xi, yi):
+        '''  '''
+        return (xi**2-xi)/yi
+
+    def _next_y(self, xi, yi):
+        """
+        Считает y[i+1] следующим образом:
+            y[i+1] = f(x[i+1])
+        P.S.
+        Функция вынесена таким образом, чтобы в след. методах (классах)
+        можно было просто перегрузить ее и получить новый метод не дублируя код.
+        :param xi: x[i]
+        :param yi: y[i]
+        :return: y[i+1]
+        """
+        return self._solved_equation(xi)
+
+    def calculate(self, x0, y0, xf):
+        """
+        Вычисляет значения на промежуте [x0;xf] с шагом h выражения f
+        :param x0:
+        :param y0:
+        :param xf:
+        :return: список значений приближения для промежутка [x0;xf]
+        """
+        ys = []
+        xs = np.arange(x0 + self.h, xf + self.h, self.h)  # вектор всех значений x
+        y = y0
+        for x in xs:
+            ys.append(y)
+            y = self._next_y(x, y)
+        return ys
+
+
+class Euler(Accurate):
+    def _next_y(self, xi, yi):
+        """
+        Считает y[i+1] исходя из x[i] и y[i] следующим образом:
+            y[i+1] = y[i] + h * f(xi, yi)
+        :param xi: x[i]
+        :param yi: y[i]
+        :return: y[i+1]
+        """
+        return yi + self.h * self._solved_equation(xi, yi)
+
+
+class RungeKutta(Euler):
+    def _next_y(self, xi, yi):
+        """
+        Считает y[i+1] исходя из x[i] и y[i] следующим образом:
+            y[i+1] = y[i] + h/6 * (k1 + 2k2+ 2k3 + k4)
+            k1 = f(xi, yi)
+            k2 = f(xi + h/2, yi + h/2 * k1)
+            k3 = f(xi + h/2, yi + h/2 * k2)
+            k4 = f(xi + h, yi + h * k3)
+        :param xi: x[i]
+        :param yi: y[i]
+        :return: y[i+1]
+        """
+        h2 = self.h / 2
+        k1 = self._solved_equation(xi, yi)
+        k2 = self._solved_equation(xi + h2, yi + h2 * k1)
+        k3 = self._solved_equation(xi + h2, yi + h2 * k2)
+        k4 = self._solved_equation(xi + self.h, yi + self.h * k3)
+        return yi + (self.h / 6) * (k1 + 2 * k2 + 2 * k3 + k4)
+
+
+class Physics(RungeKutta, Point, Collision):
+   
+    STRUCTURAL_SPRING_TYPE = 0
+    SHEAR_SPRING_TYPE = 1
+    BEND_SPRING_TYPE = 2
+
+    DEFAULT_DAMPING = -0.0125
+    VERTEX_SIZE = 4
+    VERTEX_SIZE_HALF = 2.0
+
+    # ks - постоянная пружины (Коэффициент упругости)
+    KS_STRUCTURAL = 50.75
+    KD_STRUCTURAL = -0.25
+
+    KS_SHEAR = 50.75
+    KD_SHEAR = -0.25
+
+    KS_BEND = 50.95
+    KD_BEND = -0.25
+
+    def __init__(self, vertexes_of_cloth:Point, 
+                        backUp:Point.creating_backUp):
+        super().__init__()
+
         # Создаём атрибуты сцены для дальнейших вычислений
         self.gravity = bpy.context.scene.gravity
-        self.fps = bpy.context.scene.render.fps      
+        self.fps = bpy.context.scene.render.fps
+         
         self.mesh = vertexes_of_cloth
+
+        # Так же dt(дельта t) это и есть TIME_STEP
+        self.TIME_STEP = 1.0 / self.fps
+
+        # Создание экземпляра метод Рунге-Кутты
+        self.kutt = RungeKutta()
 
         # Создаём атрибут бэкапа
         self.backUp = backUp
 
-        # Собираем все объекты в сцене, способные к столкновению
-        self.collision_objects = self.collisionOBJ()
+        # Создаём переменную где хранятся все связи(нитки, но не совсем) ткани
+        self.springs = []
+        self.vertices_last = []
 
-    def start_sim(self):
+        # Собираем все объекты в сцене, способные к столкновению
+        self.collision = Collision()
+        self.collision_objects = self.collision.get_collide_obj()
+        self.gpu_cloth = self.collision.get_gpu_cloth_obj()
+
+    def start_sim(self) -> None:
         ''' Функция запускает просчёты перед показом каждого кадра '''
         bpy.app.handlers.frame_change_pre.clear()
-        bpy.app.handlers.frame_change_pre.append(self.physicsCalculation())
+        bpy.app.handlers.frame_change_pre.append(self.сalculation(self.TIME_STEP))
 
-    def physicsCalculation(self):
+    def сalculation(self, dt) -> None:
         '''
         Данная функция вызывается каждый кадр.
         запускает ещё несколько функция для расчёта физики
@@ -331,7 +479,7 @@ class Physics(Point):
 
         backUp - бэкап ткани до симуляции
         '''
-        def gravityCalc(scene):
+        def checkCollision(scene):
             '''
             Функция вычисляет, насколько должна переместиться точка,
             при заданной массе, гравитации и ускорении
@@ -341,12 +489,10 @@ class Physics(Point):
             '''
             flag_num = 0
             flags = []
-            if bpy.context.scene.frame_current == bpy.context.scene.frame_start:
-                pass
-                # self.mesh.set_backUp(self.backUp)
-
+            # if bpy.context.scene.frame_current == bpy.context.scene.frame_start:
+            #     self.mesh.set_backUp(self.backUp)
             # i - одна вершина из всех, что есть в объекте, с симуляциет ткани
-            for i in range(0, self.mesh.meshResolution -1):
+            for i in range(0, self.mesh.get_meshResolution-1):
 
                 # obj_vert - меш из списка объектов столкновений
                 for obj_vert in self.collision_objects:
@@ -363,19 +509,25 @@ class Physics(Point):
 
             # print("True in flags = ", True in flags)
             if not(True in flags):
-                self.cloth_deformation()
+                self.preparation()
+                self.ComputeForces(dt)
+                self.IntegrateVerlet(dt)
             else:
                 # if (True in flags):
-                #     for newCoor in self.mesh.all_coord:
+                #     for newCoor in self.mesh.get_all_coord:
                 #         for i in range(0, 3):  
                 #             newCoor[i] -= (self.gravity[i] / (60 / self.fps))
                 # else:
-                for newCoor in self.mesh.all_coord:
+                for newCoor in self.mesh.get_all_coord:
                     for i in range(0, 3):  
                         newCoor[i] += 0
-        return gravityCalc
+        return checkCollision
 
-    def lenOfTwoPoints(self, a, b):
+    def add_spring(self, a, b, ks, kd, spring_type):
+        s = Spring(a, b, ks, kd, a - b, spring_type)
+        self.springs.append(s)
+
+    def lenOfTwoPoints(self, a, b) -> float:
         '''
         Находим расскояние между двух точек,
         через формулу определение длинны вектора
@@ -385,6 +537,35 @@ class Physics(Point):
         z = (b[2] - a[2])**2
 
         return (x+y+z)**0.5
+
+    def get_momentum(self, position1:int) -> list:
+        ''' 
+        Возвращает список значений, который является импульсом точки.
+        Номер является осью, а значение силой импульса по конкретной оси.
+        
+        :find_momentum(i) >> [0, 1.2356, 0.001235]
+        '''
+        return [self.__vertexMass * self.get_acceleration(position1) 
+                for i in range(0, 3)]
+
+    def get_Vertlet_velocity(self, v_i, v_i_last, dt) -> list:
+        '''
+        С помощью интеграции верлета находим дифференциал скорости
+        '''
+        return [(v_i[i] - v_i_last[i]) / float(dt) for i in range(0, 3)]
+
+    def get_Vertlet_acceleration(self, v_i, v_i_last, dt) -> list:
+        '''
+        Функция возвращает ускорение для одной точки,
+        в виде массива по 3 коордиинатам
+        a = (V1-V2)/t
+        t = 1/fps
+        '''
+        V1 = self.get_Vertlet_velocity(v_i, v_i_last, dt)
+        V2 = self.get_Vertlet_velocity(self.get_Vertlet_velocity(v_i, v_i_last, dt))
+        a = [(V1[i] - V2[i])/(60/self.fps) for i in range(0, 3)]
+        return a
+
 
     def cross(self, a, b, num_a, distance_min = 0.1) -> bool:
         '''
@@ -404,6 +585,141 @@ class Physics(Point):
                 self.mesh.set_is_collide(num_a, True)
                 return True
         return False
+
+    def preparation(self) -> None:
+        '''
+        Подготавливанем миллион данных для корректной работы симуляции
+
+        '''
+        # Добавляем позицию вершин в список.
+        # Из данных в этом списке будем высчитывать скорость методом Стёрмера — Верле
+        self.vertices_last = self.mesh.get_all_coord
+
+        # Добавление структурных пружин
+        # Горизонтальные точки
+        for i in range(0, self.mesh.get_sim_v):
+            for j in range(0, self.mesh.get_sim_u - 1):
+                self.add_spring((i * self.mesh.get_sim_u) + j, 
+                                (i * self.mesh.get_sim_u) + j + 1, 
+                                self.KS_STRUCTURAL, self.KD_STRUCTURAL, 
+                                self.STRUCTURAL_SPRING_TYPE)
+
+        # Вертикальные точки
+        for i in range(0, self.mesh.get_sim_u):
+            for j in range(0, self.mesh.get_sim_v - 1):
+                self.add_spring((j * self.mesh.get_sim_u) + i, 
+                                ((j + 1) * self.mesh.get_sim_u) + i, 
+                                self.KS_STRUCTURAL, self.KD_STRUCTURAL, 
+                                self.STRUCTURAL_SPRING_TYPE)
+
+        # Добавление сдвиговых пружин
+        for i in range(0, self.mesh.get_sim_v - 1):
+            for j in range(0, self.mesh.get_sim_u - 1):
+                self.add_spring( (i * self.mesh.get_sim_u) + j, 
+                                ((i + 1) * self.mesh.get_sim_u) + j + 1, 
+                                self.KS_SHEAR, self.KD_SHEAR, 
+                                self.SHEAR_SPRING_TYPE)
+                self.add_spring( ((i + 1) * self.mesh.get_sim_u) + j, 
+                                (i * self.mesh.get_sim_u) + j + 1, 
+                                self.KS_SHEAR, self.KD_SHEAR, 
+                                self.SHEAR_SPRING_TYPE)
+
+        # Добавление сдвигающих пружин по горизонтали
+        for i in range(0, self.mesh.get_sim_v ):
+            for j in range(0, self.mesh.get_sim_u - 2):
+                self.add_spring((i * self.mesh.get_sim_u) + j, 
+                                (i * self.mesh.get_sim_u) + j + 2, 
+                                self.KS_BEND, self.KD_BEND, 
+                                self.BEND_SPRING_TYPE)
+            self.add_spring((i * self.mesh.get_sim_u) + (self.mesh.get_sim_u - 3), 
+                            (i * self.mesh.get_sim_u) + (self.mesh.get_sim_u - 1), 
+                            self.KS_BEND, self.KD_BEND, self.BEND_SPRING_TYPE)
+
+        # Добавление сгибающихся пружин по вертикали
+        for i in range(0, self.mesh.get_sim_u):
+            for j in range(0, self.mesh.get_sim_v - 2):
+                self.add_spring((j * self.mesh.get_sim_u) + i, 
+                                ((j + 2) * self.mesh.get_sim_u) + i, 
+                                self.KS_BEND, self.KD_BEND, 
+                                self.BEND_SPRING_TYPE)
+            self.add_spring(((self.mesh.get_sim_v - 3) * self.mesh.get_sim_u) + i, 
+                            ((self.mesh.get_sim_v - 1) * self.mesh.get_sim_u) + i, 
+                            self.KS_BEND, self.KD_BEND, self.BEND_SPRING_TYPE)
+
+    def IntegrateVerlet(self, dt):
+        ''' 
+        Метод Стёрмера — Верле(Интеграция Верле)
+        https://ru.wikipedia.org/wiki/Метод_Стёрмера_—_Верле
+        
+        1.Вычисляются новые положения тел.
+        2.Для каждой связи удовлетворяется соответствующее ограничение, 
+          то есть расстояние между точками делается таким, каким оно должно быть.
+        3.Шаг 2 повторяется несколько раз, тем самым все условия удовлетворяются (разрешается система условий).
+        
+        '''
+        dt_2_mass = float(dt * dt) / float(self.mesh.mass)
+
+        for i in range(0, self.mesh.get_meshResolution):
+            buffer = self.mesh.get_position(i)[:]
+            force = [dt_2_mass * self.mesh.get_velocity(i)[xyz] 
+                    for xyz in range(0, 3)]
+
+            diff = [self.mesh.get_position(i)[xyz] - self.vertices_last[i][xyz]
+                    for xyz in range(0, 3)]
+
+            self.mesh.set_velocity(i, [self.mesh.get_velocity(i)[xyz] + diff[xyz] + force[xyz]
+                                       for xyz in range(0, 3)])
+
+            self.vertices_last[i] = buffer
+ 
+        if self.mesh.get_position(i)[1] < 0.0:
+            self.mesh.get_position(i)[1] = 0
+    
+    def ComputeForces(self, dt):
+        for i in range(0, self.mesh.get_meshResolution-1):
+            # Создаём локальную переменную для хранения скорости точки
+            vel = self.get_Vertlet_velocity(self.mesh.get_position(i), self.vertices_last[i], dt)
+
+            if i != 0 and i != self.mesh.get_sim_u:
+                self.mesh.get_velocity(i)[1] = 1000.0 * self.gravity[2] * float(self.mesh.mass) #y
+
+            self.mesh.set_velocity(i, [self.mesh.get_velocity(i)[xyz] + self.DEFAULT_DAMPING * vel[xyz]
+                                       for xyz in range(0, 3)])
+            
+        for i in range(0, len(self.springs)):
+            p_1 = self.mesh.get_position(self.springs[i].pos_a)[:]
+            p_1_last = self.vertices_last[self.springs[i].pos_a][:]
+            p_2 = self.mesh.get_position(self.springs[i].pos_b)[:]
+            p_2_last = self.vertices_last[self.springs[i].pos_b][:]
+
+            v_1 = self.get_Vertlet_velocity(p_1, p_1_last, dt)
+            v_2 = self.get_Vertlet_velocity(p_2, p_2_last, dt)
+
+            # Дельта импульса
+            delta_p = [p_1[xyz] - p_2[xyz] 
+                       for xyz in range(0, 3)] # p1 - p2
+
+            # Дельта скорости
+            delta_v = [v_1[xyz] - v_2[xyz] 
+                       for xyz in range(0, 3)] # v1 - v2
+
+            dist = math.sqrt(delta_p[0] * delta_p[0] + delta_p[1] * delta_p[1] +  delta_p[2] * delta_p[2])
+                             
+            left_term = -self.springs[i].ks * (dist - self.springs[i].rest_length)
+            right_term = self.springs[i].kd * ((delta_p[0] * delta_v[0] + delta_p[1] * delta_v[1] + delta_p[2] * delta_v[2]) / dist)
+            
+            spring_force = [(left_term + right_term) * (delta_p[xyz]/dist) 
+                            for xyz in range(0, 3)]
+
+            if self.springs[i].pos_a != 0 and self.springs[i].pos_a != self.mesh.get_sim_u:
+                self.mesh.set_velocity(self.springs[i].pos_b, 
+                                      [self.mesh.get_velocity(i)[xyz] + spring_force[xyz]
+                                       for xyz in range(0, 3)])
+
+            if self.springs[i].pos_b != 0 and self.springs[i].pos_b != self.mesh.get_sim_u:
+                self.mesh.set_velocity(self.springs[i].pos_b, 
+                                      [self.mesh.get_velocity(i)[xyz] - spring_force[xyz]
+                                       for xyz in range(0, 3)])
 
     def cloth_deformation(self, K = 2, Cd = 0.0007) -> list:
         ''' 
@@ -430,44 +746,30 @@ class Physics(Point):
         Вязкая жидкость(Viscous fluid) - чтобы справиться с вязким поведением ткани, 
                     мы предполагаем, что каждая частица со скоростью v выталкивается 
                     воображаемой вязкой жидкостью.
-
-    
         '''
 
-        cloth_matrix = np.array([[
-                            [
-                                [i]
-                            ]
-                       ] for i in self.mesh.all_coord])
+        cloth_matrix = np.array([
+                                    [i]
+                                    for i in self.mesh.get_all_coord
+                                ])
 
-        np.reshape(cloth_matrix, (round(self.mesh.meshResolution / 2) ,-1))
+        cloth_matrix = np.reshape(cloth_matrix, (int(self.mesh.get_meshResolution**0.5), int(self.mesh.get_meshResolution**0.5), 3))
 
-        print("cloth_matrix = \n", cloth_matrix[:3])
 
-        # for num in range(0, len(self.mesh)):
-        #     acceleration = self.mesh.get_acceleration(num)
-        #     res = [((self.mesh.mass * (self.gravity[i] - acceleration[i])) / self.fps)
-        #              for i in range(0, 3)]
-        #     self.mesh.set_coo(num, res)
+        structural_springs = np.array([[
+                [cloth_matrix[i][j], cloth_matrix[i][j+1]], 
+                [cloth_matrix[i][j], cloth_matrix[i+1][j]]
+              ] for i in range(0, np.shape(cloth_matrix)[0]-1) 
+                for j in range(0, np.shape(cloth_matrix)[1]-1)])
 
-    @staticmethod
-    def collisionOBJ() -> list:
-        ''' Возвращает массив объектов с которыми пересекается ткань '''
+        print(np.shape(structural_springs))
 
-        # num_of_OBJ - объекты сцены
-        num_of_OBJ = np.array([bpy.data.objects[element]
-                             for element in range(0, len(bpy.data.objects))])
+        print("structural_springs = \n", structural_springs)
 
-        # collisionOBJs - список объектов способных к столкновению
-        collisionOBJs = []
-        
-        for col in num_of_OBJ:            
-            try:
-                col.modifiers['Collision'].settings.use
-                collisionOBJs.append(col)
-            except KeyError:
-                pass
-        return collisionOBJs
+        for i in range(0, self.mesh.meshget_meshResolutionResolution-1):
+            for o in range(0, 2):
+                print(f'structural_springs{i}{o}{o} = ', structural_springs[i][o][o])
+                self.mesh.set_coo(i, [self.kutt._next_y(structural_springs[i][o][o][a], structural_springs[i][o][o][a]) for a in range(0, 3)])
 
 # Добавляем папку с проектом в поле зрения blender
 def importForDebugg():
@@ -519,12 +821,14 @@ if __name__ == "__main__":
     # Переход на первый кадр
     bpy.context.scene.frame_current = bpy.context.scene.frame_start
 
+    # Создания экземпляра класса точек ткани
     cloth = Point()
     backUp = cloth.creating_backUp
-    # print(backUp)
+
+    # Создание экземпляра класса физики
     sim = Physics(cloth, backUp)
 
-    # Запуск симуляции
+    # Запуск симуляции физики
     sim.start_sim()
 
     # Запуск анимации
