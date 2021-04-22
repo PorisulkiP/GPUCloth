@@ -1,3 +1,5 @@
 {
-    "python.pythonPath": "C:\\Program Files\\Python36\\python.exe"
+    "cmake.sourceDirectory": "${workspaceFolder}/.",
+    "python.pythonPath": "C:\\Program Files\\Python36\\python.exe",
+    "cmake.configureOnOpen": false
 }
