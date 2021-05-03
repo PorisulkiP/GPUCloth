@@ -65,21 +65,21 @@ class SetUp:
         except KeyError:
             print("Scene creating!")
             # Создаём плоскость
-            bpy.ops.primitive_plane_add(size=2, enter_editmode=False,
+            bpy.ops.mesh.primitive_plane_add(size=2, enter_editmode=False,
                                              align='WORLD', location=(0, 0, 1),
                                              scale=(1, 1, 1))
 
             # Подразделяем для симуляции ткани
-            bpy.ops.object.subdivision_set(level=2, relative=False)
+            # bpy.ops.object.subdivision_set(level=2, relative=False)
 
             # Изменяем подразделение на "простое"
-            bpy.context.object.modifiers["Subdivision"].subdivision_type = 'SIMPLE'
+            # bpy.context.object.modifiers["Subdivision"].subdivision_type = 'SIMPLE'
 
             # Применяем модификатор
-            bpy.ops.object.modifier_apply(modifier="Subdivision")
+            # bpy.ops.object.modifier_apply(modifier="Subdivision")
 
             # Создаём куб на который будет падать ткань
-            bpy.ops.primitive_cube_add(size=2, enter_editmode=False,
+            bpy.ops.mesh.primitive_cube_add(size=2, enter_editmode=False,
                                             align='WORLD', location=(0, 0, 0), scale=(0.8, 0.8, 0.8))
             # Уменьшает куб
             bpy.ops.transform.resize(value=(0.5, 0.5, 0.5))
@@ -230,11 +230,7 @@ class BackUp(Cloth):
     
     def set_backUp(self, backUp:list) -> None:
         ''' Устновка координат точек из бэкапа '''
-        for i in range(0, self.meshResolution):
-            # print('old = ', bpy.data.objects["Plane"].data.vertices[i].co)
-            # print('backUp[i] = ', backUp[i])
-            # print('new = ', bpy.data.objects["Plane"].data.vertices[i].co - bpy.data.objects["Plane"].data.vertices[i].co)
-            bpy.data.objects["Plane"].data.vertices[i].co = mathutils.Vector(backUp[i])
+        for i in range(0, self.meshResolution):bpy.data.objects["Plane"].data.vertices[i].co = mathutils.Vector(backUp[i])
     
     @property
     def creating_backUp(self) -> list:
@@ -351,7 +347,8 @@ class Physics(Cloth, Collision):
         self.backUp = BackUp.creating_backUp
 
         # Создаём переменную где хранятся все связи(нитки, но не совсем) ткани
-        self.vertices = []
+        self.protect_vertices = [] # точки которые не должны двигаться
+        self.vertices = [] 
         self.vertices_last = []
         self.springs = []
 
