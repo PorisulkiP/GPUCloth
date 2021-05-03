@@ -5,13 +5,13 @@
 ## Why GPUCloth?
 
 - Faster when standart cloth simulation
-- Use CUDA that's faster when OpenCL
+- Use CUDA that's faster when OpenCL for ~20%
 - If you buy NVIDIA graphic card why will not buy this addon?
 - If you have a graphics card from AMD, do not panic and do not leave, as soon as possible we will add support for OpenCL
 
 ## Development stage
 
-![Status of project](https://sun9-65.userapi.com/impg/5uUstxgQ6bYp4wHgtEuXrtOytzslSWQvFL8svQ/NxnooRXEXCU.jpg?size=1280x588&quality=96&sign=ab03d7abd022b7a29773e9075c9daee0&type=album)
+![Status of project](https://sun9-35.userapi.com/impg/p8_eD0PWLoVpB2BS552zZsEIPnHVTdpIizyUew/q8Uu5l-V23s.jpg?size=2560x1176&quality=96&sign=58b22f525f620fe60af00ef65fa130d5&type=album)
 
 ## Project setup
 
