@@ -36,7 +36,7 @@ class GPUCloth_Settings(PropertyGroup):
         default = False
         )
 
-    Object_Collizions = bpy.context.scene.my_tool.my_bool_object_coll
+#    Object_Collizions = bpy.context.scene.my_tool.my_bool_object_coll
      
     my_bool_self_coll : BoolProperty(
         name="Enable or Disable",
@@ -44,7 +44,7 @@ class GPUCloth_Settings(PropertyGroup):
         default = False
         )
     
-    Self_Collizions = bpy.context.scene.my_tool.my_bool_self_coll
+#    Self_Collizions = bpy.context.scene.my_tool.my_bool_self_coll
 
     my_int : IntProperty(
         name = "Set a value",
@@ -64,7 +64,7 @@ class GPUCloth_Settings(PropertyGroup):
         max = 30.0
         )
 
-    Vertex_Mass = bpy.context.scene.my_tool.my_float_vertex
+#    Vertex_Mass = bpy.context.scene.my_tool.my_float_vertex
 
     my_float_speed : FloatProperty(
         name = "Speed Multiplier",
@@ -74,7 +74,7 @@ class GPUCloth_Settings(PropertyGroup):
         max = 30.0
         )
 
-    Speed_Multiplier = bpy.context.scene.my_tool.my_float_speed
+#    Speed_Multiplier = bpy.context.scene.my_tool.my_float_speed
 
     my_float_air : FloatProperty(
         name = "Air Viscosity",
@@ -84,7 +84,7 @@ class GPUCloth_Settings(PropertyGroup):
         max = 30.0
         )
 
-    Air_Viscosity = bpy.context.scene.my_tool.my_float_air
+#    Air_Viscosity = bpy.context.scene.my_tool.my_float_air
     
     my_float_distance : FloatProperty(
         name = "Minimal Distance",
@@ -94,7 +94,7 @@ class GPUCloth_Settings(PropertyGroup):
         max = 30.0
         ) 
         
-    Minimal_Distance = bpy.context.scene.my_tool.my_float_distance
+#    Minimal_Distance = bpy.context.scene.my_tool.my_float_distance
     
     my_float_distance_self : FloatProperty(
         name = "Self Minimal Distance",
@@ -104,7 +104,7 @@ class GPUCloth_Settings(PropertyGroup):
         max = 30.0
         ) 
     
-    Self_Minimal_Distance = bpy.context.scene.my_tool.my_float_distance_self
+#    Self_Minimal_Distance = bpy.context.scene.my_tool.my_float_distance_self
 
     my_float_friction : FloatProperty(
         name = "Friction",
@@ -114,7 +114,7 @@ class GPUCloth_Settings(PropertyGroup):
         max = 30.0
         ) 
 
-    Friction = bpy.context.scene.my_tool.my_float_friction
+#    Friction = bpy.context.scene.my_tool.my_float_friction
 
     my_float_impulse : FloatProperty(
         name = "Impulse Clamp",
@@ -124,7 +124,7 @@ class GPUCloth_Settings(PropertyGroup):
         max = 30.0
         ) 
 
-    Impulse_Clamp = bpy.context.scene.my_tool.my_float_impulse
+#    Impulse_Clamp = bpy.context.scene.my_tool.my_float_impulse
     
 
     my_float_impulse_self : FloatProperty(
@@ -135,7 +135,7 @@ class GPUCloth_Settings(PropertyGroup):
         max = 30.0
         ) 
 
-    Self_Impulse_Clamp = bpy.context.scene.my_tool.my_float_impulse_self
+#    Self_Impulse_Clamp = bpy.context.scene.my_tool.my_float_impulse_self
 
     my_string : StringProperty(
         name = "Set a value",
@@ -261,8 +261,6 @@ classes = (
     UV_PT_GPUCloth_ObjColl,
     UV_PT_GPUCloth_SelfColl,
 )
-
-print(GPUCloth_Settings.Object_Collizions)
 
 def register():
     from bpy.utils import register_class
