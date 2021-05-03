@@ -29,6 +29,7 @@ __str__ - должен быть написан так, чтобы ПОЛЬЗОВ
 import bpy
 import numpy as np
 import sys, os, math, collections, mathutils, time
+from numba import jit, njit, cuda
 
 from bpy.props import (StringProperty,
                        BoolProperty,
@@ -113,8 +114,7 @@ class SetUp:
         import subprocess
         subprocess.call([sys.exec_prefix + '\\bin\\python.exe', '-m', 'ensurepip'])
         subprocess.call([sys.exec_prefix + '\\bin\\python.exe',
-                                            '-m', 'pip', 'install'
-                                            , 'numba'])
+                                            '-m', 'pip', 'install', pack])
 
 
 SetUp()
@@ -260,7 +260,7 @@ class Spring:
     pos_a: первая позиция
     pos_b: вторая позиция
     ks: постоянная пружины
-    kd: типа, отклонение от постоянной, но это не точно...
+    kd: коэффициент трения скольжения
     rest_length(l0): длина пружины в покое
     STIFFNESS: жёсткость
     '''
@@ -345,9 +345,11 @@ class Physics(Cloth, Collision):
     VERTEX_SIZE_HALF = 2.0
 
     # ks - постоянная пружины (Коэффициент упругости)
+    # Отвечает за растяжение, чем больше, тем длиннее связи
     KS_STRUCTURAL = 50.75
     KD_STRUCTURAL = -0.25
 
+    # Отвечает за кручение
     KS_SHEAR = 50.75
     KD_SHEAR = -0.25
 
@@ -368,10 +370,10 @@ class Physics(Cloth, Collision):
         self.last_coo = []
         self.springs = []
 
+        self.preparation()
+
     def start_sim(self) -> None:
         ''' Функция запускает просчёты перед показом каждого кадра '''
-        for i in range(0, self.meshResolution):
-            self.add_point(0, i)
         bpy.app.handlers.frame_change_pre.clear()
         bpy.app.handlers.frame_change_pre.append(self.сalculation())
 
@@ -401,15 +403,13 @@ class Physics(Cloth, Collision):
             print("True in flags = ", True in flags)
 
             if not(True in flags):
-                self.preparation()
                 self.ComputeForces()
                 self.IntegrateVerlet()
             else:
                 for i in range(0, self.meshResolution):
                     for num in self.vertices[i].global_position:
-                        for xyz in range(0, 3):  
-                            newCoor[xyz] += 0
-            print("\nvertices: \n", self.vertices)
+                        self.vertices[i].set_coo([self.vertices[i].local_position[xyz] + 0
+                                    for xyz in range(0, 3)])
         return checkCollision
 
         
@@ -435,36 +435,36 @@ class Physics(Cloth, Collision):
         # Версия с a-b и c-d
         # print(a, b, sep="\n")
 
-        """  void clothObjCollision(glm::vec3 Pos, glm::vec3& NextPos, 
-                                    unsigned int x, unsigned int y) {
+        """  
+            void clothObjCollision(glm::vec3 Pos, glm::vec3& NextPos, 
+                                        unsigned int x, unsigned int y) {
 
-            float r = 0.005f;
+                float r = 0.005f;
 
-            for (int i = 0; i < objVar.nTrig - 1; i++) {
-                //triangle strip
-                glm::vec3 A = readObjVbo(i + 0, objBuff, objIndBuff, objVar.vboStrdFlt, objVar.OffstPos);
-                glm::vec3 B = readObjVbo(i + 1 + (i + 1) % 2, objBuff, objIndBuff, objVar.vboStrdFlt, objVar.OffstPos);
-                glm::vec3 C = readObjVbo(i + 1 + i % 2, objBuff, objIndBuff, objVar.vboStrdFlt, objVar.OffstPos);
-                glm::vec3 n = objN[i];
+                for (int i = 0; i < objVar.nTrig - 1; i++) {
+                    //triangle strip
+                    glm::vec3 A = readObjVbo(i + 0, objBuff, objIndBuff, objVar.vboStrdFlt, objVar.OffstPos);
+                    glm::vec3 B = readObjVbo(i + 1 + (i + 1) % 2, objBuff, objIndBuff, objVar.vboStrdFlt, objVar.OffstPos);
+                    glm::vec3 C = readObjVbo(i + 1 + i % 2, objBuff, objIndBuff, objVar.vboStrdFlt, objVar.OffstPos);
+                    glm::vec3 n = objN[i];
 
-                if (sphrTrigCollision(Pos, NextPos, r, A, B, C, n)) {
-                    //fix the damping bug
-                    colFlag[x * fxVar.height + y] = true;
+                    if (sphrTrigCollision(Pos, NextPos, r, A, B, C, n)) {
+                        //fix the damping bug
+                        colFlag[x * fxVar.height + y] = true;
 
-                    float dn = getPerpDist(NextPos, r, A, n);
-                    NextPos += 1.01f * (-dn) * n;
-                    break;
-                }
-                else { 
-                    if (colFlag[x * fxVar.height + y]) { //check last frame collision
-                        writeToVBO(glm::vec3(0.0f), ppWriteBuff, x, y, fxVar.OffstVel);
+                        float dn = getPerpDist(NextPos, r, A, n);
+                        NextPos += 1.01f * (-dn) * n;
+                        break;
                     }
-                    colFlag[x * fxVar.height + y] = false;
+                    else { 
+                        if (colFlag[x * fxVar.height + y]) { //check last frame collision
+                            writeToVBO(glm::vec3(0.0f), ppWriteBuff, x, y, fxVar.OffstVel);
+                        }
+                        colFlag[x * fxVar.height + y] = false;
+                    }
                 }
-            }
-        }  """
-
-
+            }  
+        """
         if (self.lenOfTwoPoints(a, b) >= distance_min):
             collisionX = a[0] < b[0]
             collisionY = a[1] > b[1]
@@ -472,6 +472,7 @@ class Physics(Cloth, Collision):
             if (collisionX and collisionY and collisionZ):
                 return True
         return False
+
 
     def plane_collision(self) -> None:
         flags = []
@@ -493,32 +494,33 @@ class Physics(Cloth, Collision):
                     flag_num += 1
         return flags, flag_num
 
-
+    @jit(parallel = True)
     def add_point(self, objID, vId, velocity = [0,0,0], acceleration = [0,0,0], mass = 0.3, 
                                                             hasCollision = False) -> None:
         # Добавляем класс точки в список
         vert = Point(objID, vId, velocity, 
                         acceleration, mass, 
                         hasCollision)
-        # print(vert)
         self.vertices.append(vert)
-        # print(self.vertices)
 
     def add_spring(self, a, b, ks, kd, spring_type) -> None:
         # Добавляем класс пружин в список
         s = Spring(a, b, ks, kd, a - b, spring_type)
         self.springs.append(s)
 
+    @jit(parallel = True)
     def get_Vertlet_velocity(self, v_i:list, v_i_last:list) -> list:
-        '''
-        С помощью интеграции верлета находим дифференциал скорости
-        '''
+        ''' С помощью интеграции верлета находим дифференциал скорости '''
         return [(v_i[i] - v_i_last[i]) / self.dt for i in range(0, 3)]
 
     def preparation(self) -> None:
         '''
         Подготавливанем миллион данных для корректной работы симуляции
         '''
+
+        for i in range(0, self.meshResolution):
+            self.add_point(0, i)
+
         self.last_coo = [self.vertices[i].local_position for i in range(0, self.meshResolution)]
 
         # Добавление структурных пружин
@@ -588,8 +590,9 @@ class Physics(Cloth, Collision):
 
             buff = self.vertices[i].local_position
 
-            force = [dt_2_mass * self.vertices[i].V[xyz] 
+            force = [dt_2_mass * self.vertices[i].velocity[xyz] 
                     for xyz in range(0, 3)]
+            
             
             diff = [self.vertices[i].local_position[xyz] - self.last_coo[i][xyz]
                     for xyz in range(0, 3)]
@@ -598,7 +601,8 @@ class Physics(Cloth, Collision):
                                       for xyz in range(0, 3)])
 
             self.last_coo[i] = buff
-    
+
+
     def ComputeForces(self):
         '''
         Начинает просчёт сил действующих на точки
@@ -608,11 +612,11 @@ class Physics(Cloth, Collision):
             vel = self.get_Vertlet_velocity(self.vertices[i].local_position, self.last_coo[i])
 
             if i != 0 and i != self.cloth_wight:
-                self.vertices[i].velocity[1] = 1000 * self.GRAVITY[2] * float(self.vertices[i].mass) #y
+                self.vertices[i].velocity[2] = 10000.0 * self.GRAVITY[2] * float(self.vertices[i].mass) #y
 
-            self.vertices[i].velocity[0] = self.DEFAULT_DAMPING * vel[0]
-            self.vertices[i].velocity[1] = self.DEFAULT_DAMPING * vel[1]
-            self.vertices[i].velocity[2] = self.DEFAULT_DAMPING * vel[2]
+            self.vertices[i].velocity = [self.vertices[i].velocity[xyz] + \
+                                         self.DEFAULT_DAMPING * vel[xyz] 
+                                         for xyz in range(0, 3)]        
             
         for i in range(0, len(self.springs)):
 
@@ -629,7 +633,7 @@ class Physics(Cloth, Collision):
             v_1 = self.get_Vertlet_velocity(p_1, p_1_last)
             v_2 = self.get_Vertlet_velocity(p_2, p_2_last)
 
-            # Дельта импульса
+            # Дельта расстояния
             delta_p = [p_1[xyz] - p_2[xyz] 
                        for xyz in range(0, 3)] # p1 - p2
 
@@ -641,22 +645,45 @@ class Physics(Cloth, Collision):
                              delta_p[1] * delta_p[1] + \
                              delta_p[2] * delta_p[2])
             
-
             if dist != 0:
-                left_term = -self.springs[i].ks * (dist - self.springs[i].rest_length)
+                # Сила упругости  F = -k*dl
+                left_term = -(self.springs[i].ks * (dist - self.springs[i].rest_length))/10
+
+                # print("ks = ", self.springs[i].ks)
+                # print("rest_length = ", self.springs[i].rest_length)
+                # print("left_term = ", left_term)
+
+                # Сила трения 
                 right_term = self.springs[i].kd * ((delta_p[0] * delta_v[0] + delta_p[1] * delta_v[1] + delta_p[2] * delta_v[2]) / dist)
                 
+                # print("delta_p[0]*+ = ", delta_p[0] * delta_v[0] + delta_p[1] * delta_v[1] + delta_p[2] * delta_v[2])
+                # print("kd = ", self.springs[i].kd)
+                # print("right_term = ", right_term)
+                
+                
+                # (delta_p[xyz]/dist) - относительное удлиннение
+                # (left_term + right_term) - механическое напряжение
                 spring_force = [(left_term + right_term) * (delta_p[xyz]/dist) for xyz in range(0, 3)]
 
+                print("spring_force = ", spring_force, "\n\n")
+
                 if self.springs[i].pos_a != 0 and self.springs[i].pos_a != self.cloth_wight:
-                    self.vertices[self.springs[i].pos_a].set_velocity([self.vertices[self.springs[i].pos_a].V[xyz] + spring_force[xyz]
-                                                    for xyz in range(0, 3)])
+                    self.vertices[self.springs[i].pos_a].set_velocity(
+                                                                        [
+                                                                            self.vertices[self.springs[i].pos_a].V[xyz] + \
+                                                                            spring_force[xyz]
+                                                                            for xyz in range(0, 3)
+                                                                        ]
+                                                                    )
 
                 if self.springs[i].pos_b != 0 and self.springs[i].pos_b != self.cloth_wight:
-                    self.vertices[self.springs[i].pos_b].set_velocity([self.vertices[self.springs[i].pos_b].V[xyz] - spring_force[xyz]
-                                                    for xyz in range(0, 3)])
-                            
-            
+                    self.vertices[self.springs[i].pos_b].set_velocity(
+                                                                        [
+                                                                            self.vertices[self.springs[i].pos_b].V[xyz] - \
+                                                                            spring_force[xyz]
+                                                                            for xyz in range(0, 3)
+                                                                        ]
+                                                                    )
 
     def cloth_deformation(self, K = 2, Cd = 0.0007) -> list:
         ''' 
@@ -685,30 +712,6 @@ class Physics(Cloth, Collision):
                     воображаемой вязкой жидкостью.
         '''
 
-        # cloth_matrix = np.array([
-        #                             [i]
-        #                             for i in self.get_all_coord
-        #                         ])
-
-        # cloth_matrix = np.reshape(cloth_matrix, (int(self.meshResolution**0.5), int(self.meshResolution**0.5), 3))
-
-
-        # structural_springs = np.array([[
-        #         [cloth_matrix[i][j], cloth_matrix[i][j+1]], 
-        #         [cloth_matrix[i][j], cloth_matrix[i+1][j]]
-        #       ] for i in range(0, np.shape(cloth_matrix)[0]-1) 
-        #         for j in range(0, np.shape(cloth_matrix)[1]-1)])
-
-        # print(np.shape(structural_springs))
-
-        # print("structural_springs = \n", structural_springs)
-
-        # for i in range(0, self.meshmeshResolutionResolution-1):
-        #     for o in range(0, 2):
-        #         print(f'structural_springs{i}{o}{o} = ', structural_springs[i][o][o])
-        #         self.set_coo(i, [self.kutt._next_y(structural_springs[i][o][o][a], structural_springs[i][o][o][a]) for a in range(0, 3)])
-
-
 # Добавляем папку с проектом в поле зрения blender
 def importForDebugg():
     dir = os.path.dirname(bpy.data.filepath)
@@ -731,22 +734,11 @@ def loadDLL():
         # Для Blender
         filename = os.path.join((dirname[::-1][dirname[::-1].index("\\"):][::-1]),
                                 "С\\main\\x64\\Release\\main.dll")
+        global lib
         lib = cdll.LoadLibrary(filename)
-        lib.print_info()
+        lib.print_work_info()
     except OSError:
         print("Не удаётся установить соединение с DLL файлом")
-
-def isCUDAAvailable():
-    '''
-    Пробуем импортировать PyCuda для проверки поддержки данной технологии
-    Надо исправить, потому что у человека может быть просто не установлен пакет
-    для питона
-    '''
-    try:
-        from pycuda.tools import make_default_context
-        print(make_default_context().get_device().name())
-    except ModuleNotFoundError:
-        print("Технология CUDA не поддерживается на данном устройстве")
 
 # ------------------------------------------------------------------------
 #    UI
@@ -765,7 +757,7 @@ class GPUCloth_Settings(PropertyGroup):
         default = False
         )
 
-#    Object_Collizions = bpy.context.scene.tool.bool_object_coll
+    #    Object_Collizions = bpy.context.scene.tool.bool_object_coll
      
     bool_self_coll : BoolProperty(
         name="Enable or Disable",
@@ -773,7 +765,7 @@ class GPUCloth_Settings(PropertyGroup):
         default = False
         )
     
-#    Self_Collizions = bpy.context.scene.tool.bool_self_coll
+    #    Self_Collizions = bpy.context.scene.tool.bool_self_coll
 
     int : IntProperty(
         name = "Set a value",
@@ -793,7 +785,7 @@ class GPUCloth_Settings(PropertyGroup):
         max = 30.0
         )
 
-#    Vertex_Mass = bpy.context.scene.tool.float_vertex
+    #    Vertex_Mass = bpy.context.scene.tool.float_vertex
 
     float_speed : FloatProperty(
         name = "Speed Multiplier",
@@ -803,7 +795,7 @@ class GPUCloth_Settings(PropertyGroup):
         max = 30.0
         )
 
-#    Speed_Multiplier = bpy.context.scene.tool.float_speed
+    #    Speed_Multiplier = bpy.context.scene.tool.float_speed
 
     float_air : FloatProperty(
         name = "Air Viscosity",
@@ -813,7 +805,7 @@ class GPUCloth_Settings(PropertyGroup):
         max = 30.0
         )
 
-#    Air_Viscosity = bpy.context.scene.tool.float_air
+    #    Air_Viscosity = bpy.context.scene.tool.float_air
     
     float_distance : FloatProperty(
         name = "Minimal Distance",
@@ -823,7 +815,7 @@ class GPUCloth_Settings(PropertyGroup):
         max = 30.0
         ) 
         
-#    Minimal_Distance = bpy.context.scene.tool.float_distance
+    #    Minimal_Distance = bpy.context.scene.tool.float_distance
     
     float_distance_self : FloatProperty(
         name = "Self Minimal Distance",
@@ -833,7 +825,7 @@ class GPUCloth_Settings(PropertyGroup):
         max = 30.0
         ) 
     
-#    Self_Minimal_Distance = bpy.context.scene.tool.float_distance_self
+    #    Self_Minimal_Distance = bpy.context.scene.tool.float_distance_self
 
     float_friction : FloatProperty(
         name = "Friction",
@@ -843,7 +835,7 @@ class GPUCloth_Settings(PropertyGroup):
         max = 30.0
         ) 
 
-#    Friction = bpy.context.scene.tool.float_friction
+    #    Friction = bpy.context.scene.tool.float_friction
 
     float_impulse : FloatProperty(
         name = "Impulse Clamp",
@@ -853,7 +845,7 @@ class GPUCloth_Settings(PropertyGroup):
         max = 30.0
         ) 
 
-#    Impulse_Clamp = bpy.context.scene.tool.float_impulse
+    #    Impulse_Clamp = bpy.context.scene.tool.float_impulse
     
 
     float_impulse_self : FloatProperty(
@@ -864,7 +856,7 @@ class GPUCloth_Settings(PropertyGroup):
         max = 30.0
         ) 
 
-#    Self_Impulse_Clamp = bpy.context.scene.tool.float_impulse_self
+    #    Self_Impulse_Clamp = bpy.context.scene.tool.float_impulse_self
 
     string : StringProperty(
         name = "Set a value",
@@ -1010,8 +1002,6 @@ if __name__ == "__main__":
     register()
 
     # Проверка работоспособности CUDA
-    # isCUDAAvailable()
-
     # Проверка dll для запуска симуляции
     # loadDLL()
 
