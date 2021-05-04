@@ -29,7 +29,6 @@ __str__ - должен быть написан так, чтобы ПОЛЬЗОВ
 import bpy
 import numpy as np
 import sys, os, math, collections, mathutils, time
-from numba import jit, njit, cuda
 
 from bpy.props import (StringProperty,
                        BoolProperty,
@@ -275,8 +274,8 @@ class Spring:
         self.spring_type = spring_type
 
     def __repr__(self):
-        return f'''Spring: \n Current position: {self.pos_a} \nPrevious position: {self.pos_b}
-ks: {self.ks}\nkd: {self.kd} \nRest length: {self.rest_length} \nSpring type: {self.spring_type}       
+        return f'''Spring: \n Current position: {self.pos_a} \nPrevious position: {self.pos_b} \
+        \nks: {self.ks}\nkd: {self.kd} \nRest length: {self.rest_length} \nSpring type: {self.spring_type}       
                 '''
 
 
@@ -334,13 +333,15 @@ class Physics(Cloth, Collision):
 
     GRAVITY = bpy.context.scene.gravity
     FPS = bpy.context.scene.render.fps
-    TIME_STEP = 0.01 / FPS
+    TIME_STEP = 0.0001
+    # TIME_STEP = 0.1 / FPS
+    print(TIME_STEP)
    
     STRUCTURAL_SPRING_TYPE = 0
     SHEAR_SPRING_TYPE = 1
     BEND_SPRING_TYPE = 2
 
-    DEFAULT_DAMPING = -0.0125
+    DEFAULT_DAMPING = 1 # -0.0125
     VERTEX_SIZE = 4
     VERTEX_SIZE_HALF = 2.0
 
@@ -353,6 +354,7 @@ class Physics(Cloth, Collision):
     KS_SHEAR = 50.75
     KD_SHEAR = -0.25
 
+    # Отвечает за изгиб
     KS_BEND = 50.95
     KD_BEND = -0.25
 
@@ -395,6 +397,14 @@ class Physics(Cloth, Collision):
             Для вычисления используется формула уменьшенного веса.
             Р - вес / m - масса / g - гравитация
             Р = m(g-a)
+
+            План такой:
+            -Подготавливаем сцену
+            -Расчитываем силы влияющие на движение точек
+            -Расчитываем новые координаты точек
+            -Проверяем новые координаты на пересечения
+            -Выставляем координаты
+
             '''
             # if bpy.context.scene.frame_current == bpy.context.scene.frame_start:
             #     BackUp.set_backUp(self.backUp)
@@ -473,7 +483,6 @@ class Physics(Cloth, Collision):
                 return True
         return False
 
-
     def plane_collision(self) -> None:
         flags = []
         flag_num = 0
@@ -494,7 +503,6 @@ class Physics(Cloth, Collision):
                     flag_num += 1
         return flags, flag_num
 
-    @jit(parallel = True)
     def add_point(self, objID, vId, velocity = [0,0,0], acceleration = [0,0,0], mass = 0.3, 
                                                             hasCollision = False) -> None:
         # Добавляем класс точки в список
@@ -508,7 +516,6 @@ class Physics(Cloth, Collision):
         s = Spring(a, b, ks, kd, a - b, spring_type)
         self.springs.append(s)
 
-    @jit(parallel = True)
     def get_Vertlet_velocity(self, v_i:list, v_i_last:list) -> list:
         ''' С помощью интеграции верлета находим дифференциал скорости '''
         return [(v_i[i] - v_i_last[i]) / self.dt for i in range(0, 3)]
@@ -602,7 +609,6 @@ class Physics(Cloth, Collision):
 
             self.last_coo[i] = buff
 
-
     def ComputeForces(self):
         '''
         Начинает просчёт сил действующих на точки
@@ -658,14 +664,13 @@ class Physics(Cloth, Collision):
                 
                 # print("delta_p[0]*+ = ", delta_p[0] * delta_v[0] + delta_p[1] * delta_v[1] + delta_p[2] * delta_v[2])
                 # print("kd = ", self.springs[i].kd)
-                # print("right_term = ", right_term)
-                
+                # print("right_term = ", right_term)                
                 
                 # (delta_p[xyz]/dist) - относительное удлиннение
                 # (left_term + right_term) - механическое напряжение
                 spring_force = [(left_term + right_term) * (delta_p[xyz]/dist) for xyz in range(0, 3)]
 
-                print("spring_force = ", spring_force, "\n\n")
+                # print("spring_force = ", spring_force, "\n\n")
 
                 if self.springs[i].pos_a != 0 and self.springs[i].pos_a != self.cloth_wight:
                     self.vertices[self.springs[i].pos_a].set_velocity(
