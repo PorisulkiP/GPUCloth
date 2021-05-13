@@ -139,3 +139,7 @@ dmypy.json
 # Visual Studio # 
 .vs/
 x64/
+.vcxproj
+.filters
+.user
+.sln
