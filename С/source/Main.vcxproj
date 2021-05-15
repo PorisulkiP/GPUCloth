@@ -10,6 +10,20 @@
       <Platform>x64</Platform>
     </ProjectConfiguration>
   </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="cloth\cloth_settings.cuh" />
+    <ClInclude Include="cloth\SIM_mass_spring.cuh" />
+    <ClInclude Include="collision\collision.cuh" />
+    <ClInclude Include="DNA\DNA_meshdata_types.cuh" />
+    <ClInclude Include="hair\hair_settings.cuh" />
+    <ClInclude Include="main.cuh" />
+    <ClInclude Include="softBody\soft_body_settings.cuh" />
+  </ItemGroup>
+  <ItemGroup>
+    <CudaCompile Include="cloth\SIM_mass_spring.cu" />
+    <CudaCompile Include="collision\collision.cu" />
+    <CudaCompile Include="main.cu" />
+  </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{FC77A229-DCE4-4BBA-B17A-0CDBD9E2C507}</ProjectGuid>
     <RootNamespace>Main</RootNamespace>
@@ -43,6 +57,7 @@
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>true</LinkIncremental>
+    <TargetExt>.dll</TargetExt>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
@@ -54,9 +69,12 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <SubSystem>Console</SubSystem>
       <AdditionalDependencies>cudart_static.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <Version>0.0.1</Version>
+      <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);$(CudaToolkitLibDir);$(ProjectDir)</AdditionalLibraryDirectories>
     </Link>
     <CudaCompile>
       <TargetMachinePlatform>64</TargetMachinePlatform>
+      <Include>$(ProjectDir);%(Include)</Include>
     </CudaCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -83,12 +101,6 @@
       </Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
-  <ItemGroup>
-    <CudaCompile Include="main.cu" />
-  </ItemGroup>
-  <ItemGroup>
-    <ClInclude Include="header.cuh" />
-  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
     <Import Project="$(VCTargetsPath)\BuildCustomizations\CUDA 11.2.targets" />
