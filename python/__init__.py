@@ -28,8 +28,10 @@ __str__ - должен быть написан так, чтобы ПОЛЬЗОВ
 # импортируем API для работы с blender
 import bpy
 import numpy as np
-import sys, os, math, collections, mathutils, time
+import sys, os, math
 from mathutils import Vector
+
+from bpy.utils import unregister_class, register_class
 
 from bpy.props import (StringProperty,
                        BoolProperty,
@@ -84,13 +86,13 @@ class SetUp:
                                              scale=(1, 1, 1))
 
             # Подразделяем для симуляции ткани
-            # bpy.ops.object.subdivision_set(level=2, relative=False)
+            bpy.ops.object.subdivision_set(level=2, relative=False)
 
             # Изменяем подразделение на "простое"
-            # bpy.context.object.modifiers["Subdivision"].subdivision_type = 'SIMPLE'
+            bpy.context.object.modifiers["Subdivision"].subdivision_type = 'SIMPLE'
 
             # Применяем модификатор
-            # bpy.ops.object.modifier_apply(modifier="Subdivision")
+            bpy.ops.object.modifier_apply(modifier="Subdivision")
 
             # Создаём куб на который будет падать ткань
             bpy.ops.mesh.primitive_cube_add(size=2, enter_editmode=False,
@@ -121,14 +123,15 @@ SetUp()
 
 
 class Cloth:
-    def __init__(self):
+    def __init__(self, id_obj):
         super().__init__()
+        self.id_obj = id_obj
         self.mass = self.meshResolution*0.3
-
+        
     @property
     def meshResolution(self):
         ''' Кол-во точек на ткани '''
-        return len(bpy.data.objects["Plane"].data.vertices)
+        return len(bpy.data.objects[self.id_obj].data.vertices)
     
     @property
     def get_all_coord(self) -> list:
@@ -161,10 +164,10 @@ class Point:
 
     '''
 
-    def __init__(self, objID, vId, pos_x, pos_y, velocity= [0,0,0], 
+    def __init__(self, id_obj, vId, pos_x, pos_y, velocity= [0,0,0], 
                 acceleration = [0,0,0], hasCollision = False):
-        self.clothProp = Cloth()
-        self.objID = objID
+        self.clothProp = Cloth(id_obj)
+        self.id_obj = id_obj
         self.id = vId
         self.pos_x = pos_x
         self.pos_y = pos_y
@@ -203,13 +206,12 @@ class Point:
     @property
     def local_position(self) -> list:
         ''' Возвращает список(list) координат конкретной точки '''
-        return bpy.data.objects["Plane"].data.vertices[self.id].co
+        return bpy.data.objects[self.id_obj].data.vertices[self.id].co
 
     @property
     def global_position(self) -> list:
         ''' Возвращает список(list) координат конкретной точки '''
-        x = bpy.data.objects["Plane"].matrix_local @ bpy.data.objects["Plane"].data.vertices[self.id].co
-        return x
+        return bpy.data.objects[self.id_obj].matrix_local @ bpy.data.objects[self.id_obj].data.vertices[self.id].co
     
     @property
     def has_collision(self) -> bool:
@@ -244,17 +246,18 @@ class Point:
 
 
 class BackUp(Cloth):
-    def __init__(self):
-        super.__init__()
+    def __init__(self, id_obj):
+        super.__init__(id_obj)
+        self.id_obj = id_obj
     
     def set_backUp(self, backUp:list) -> None:
         ''' Устновка координат точек из бэкапа '''
-        for i in range(0, self.meshResolution):bpy.data.objects["Plane"].data.vertices[i].co = mathutils.Vector(backUp[i])
+        for i in range(0, self.meshResolution):bpy.data.objects[self.id_obj].data.vertices[i].co = mathutils.Vector(backUp[i])
     
     @property
     def creating_backUp(self) -> list:
         ''' Возвращает список(list) бэкап точек '''        
-        return [bpy.data.objects["Plane"].matrix_local @ bpy.data.objects["Plane"].data.vertices[i].co for i in range(0, self.meshResolution)]
+        return [bpy.data.objects[self.id_obj].matrix_local @ bpy.data.objects[self.id_obj].data.vertices[i].co for i in range(0, self.meshResolution)]
 
 
 class Spring:
@@ -294,24 +297,12 @@ class Collision:
         # collisionOBJs - список объектов способных к столкновению
         self.__collisionOBJs = []
 
-        # clothOBJs - список объектов способных к столкновению
-        self.__clothOBJs = []
-
     def __collisionOBJ(self) -> None:
         ''' Добавляет в массив объекты, с которыми пересекается ткань '''
         for col in self.__num_of_OBJ:            
             try:
                 col.modifiers['Collision'].settings.use
                 self.__collisionOBJs.append(col)
-            except KeyError:
-                pass
-
-    def __clothOBJ(self) -> None:
-        ''' Добавляет в массив объекты, на которых накинут можификатор ткани '''
-        for clo in self.__num_of_OBJ:            
-            try:
-                clo.modifiers['GPUCloth'].settings.use
-                self.__clothOBJs.append(clo)
             except KeyError:
                 pass
 
@@ -324,8 +315,8 @@ class Collision:
     @property
     def gpu_cloth_obj(self) -> list:
         ''' Возвращает массив объектов, на которых накинут можификатор ткани  '''
-        self.__clothOBJ()
-        return self.__clothOBJs
+        # self.__clothOBJ()
+        return bpy.types.Scene.CPUCloth_objs
 
     def get_depth(self, a, b):
         ''' Возвращает глубину проникновения в объект '''
@@ -337,7 +328,7 @@ class Physics(Cloth, Collision):
 
     GRAVITY = bpy.context.scene.gravity
     FPS = bpy.context.scene.render.fps
-    TIME_STEP = 0.01
+    TIME_STEP = 0.05
     # TIME_STEP = 0.001 / FPS
     print(TIME_STEP)
    
@@ -362,13 +353,14 @@ class Physics(Cloth, Collision):
     KS_BEND = 50.95
     KD_BEND = -0.25
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, id_obj):
+        super().__init__(id_obj)
         # Дельта времени
         self.dt = self.TIME_STEP
 
         # Создаём бэкап
         self.backUp = BackUp.creating_backUp
+        self.id_obj = id_obj
 
         # Создаём переменную где хранятся все связи(нитки, но не совсем) ткани
         self.protect_vertices = [] # точки которые не должны двигаться
@@ -414,10 +406,10 @@ class Physics(Cloth, Collision):
 
             id = 0
             # Запускаем цикл просчёта здесь
-            for x in range(self.cloth_lenght):
-                for y in range(0, self.cloth_wight):
-                    self.vertices[id].set_coo(self.ComputeForces(x, y, id))
-                    id += 1
+            # for x in range(self.cloth_lenght):
+            #     for y in range(0, self.cloth_wight):
+            #         self.vertices[id].set_coo(self.ComputeForces(x, y, id))
+            #         id += 1
 
             # if not(True in flags):
             #     self.ComputeForces()
@@ -540,8 +532,8 @@ class Physics(Cloth, Collision):
 
         i = 0
         for x in range(self.cloth_lenght):
-            for y in range(0, self.cloth_wight):
-                self.add_point(0, i, x, y)
+            for y in range(self.cloth_wight):
+                self.add_point(self.id_obj, i, x, y)
                 i+=1
 
         self.last_coo = [self.vertices[i].local_position for i in range(0, self.meshResolution)]
@@ -611,6 +603,7 @@ class Physics(Cloth, Collision):
         # SPRING_TYPE = 1.0f: structure
         # SPRING_TYPE = 1.41421356237f: shear
         # SPRING_TYPE = 2.0f: bend
+
         len_vel = velocity[0] + velocity[1] + velocity[2]
 
         MxL = 0.03 # молю бога узнать, что же это
@@ -624,6 +617,11 @@ class Physics(Cloth, Collision):
         #                     self.springs[index].rest_length) + \
         #                     k * 1.4 * (len_vel - SPRING_TYPE * MxL)))
         # print(f"return_2 = {a}")
+        # print(f"return = {self.normalize(velocity) * k}")
+        # print(f"return_2 = {self.normalize(velocity) * k * (len_vel - SPRING_TYPE * rLen)}")
+
+
+        # return self.normalize(velocity) * k
 
         if len_vel < (SPRING_TYPE * MxL):
             return self.normalize(velocity) * k * (len_vel - SPRING_TYPE * rLen)
@@ -635,15 +633,16 @@ class Physics(Cloth, Collision):
     def computeInnerForce(self, i, x, y):
         # х - позиция по длинне ткани
         # у - позиция по ширене ткани
-        #                ^ y-
+        #                ^ y+
         #                |
         #                |
         #      x- -------*-------> x+
         #                |
         #                |
-        #                | y+
+        #                | y-
 
-        curPos = Vector(self.vertices[i].local_position)
+        curPos = self.vertices[i].local_position
+        last_pos = self.last_coo[i]
         innF = Vector([0, 0, 0])
         tempV = 0
 
@@ -657,66 +656,54 @@ class Physics(Cloth, Collision):
         if x < 1:
             pass
         else:
-            for o in self.vertices:
-                if o.pos_x - 1 == x and o.pos_y == y:
-                    second_pos = Vector(self.vertices[o.pos_x].local_position)
-                    tempV = second_pos - curPos
-                    innF += self.constraintForce(tempV, 1, i)
+            tempV = last_pos - curPos
+            innF += self.constraintForce(tempV, 1, i)
 
-                    print(f"\nspring_types = {sp.spring_type}" )
-                    print(f"second_pos = {second_pos}")
-                    print(f"curPos = {curPos}")
-                    print(f"tempV = {tempV}")
-                    print(f"innF = {innF}\n")
+            print(f"\nspring_types = {sp.spring_type}" )
+            print(f"last_pos = {last_pos}")
+            print(f"curPos = {curPos}")
+            print(f"tempV = {tempV}")
+            print(f"innF = {innF}\n")
 
         #right
         if (x + 1) > (self.cloth_lenght - 1): 
             pass 
         else:
-            for o in self.vertices:
-                if o.pos_x + 1 == x and o.pos_y == y:
-                    second_pos = Vector(self.vertices[o.pos_x].local_position)
-                    tempV = list(second_pos - curPos )
-                    innF += self.constraintForce(tempV, 1, i)
+            tempV = last_pos - curPos
+            innF += self.constraintForce(tempV, 1, i)
 
-                    print(f"\nspring_types = {sp.spring_type}" )
-                    print(f"second_pos = {second_pos}")
-                    print(f"curPos = {curPos}")
-                    print(f"tempV = {tempV}")
-                    print(f"innF = {innF}\n")
+            print(f"\nspring_types = {sp.spring_type}" )
+            print(f"last_pos = {last_pos}")
+            print(f"curPos = {curPos}")
+            print(f"tempV = {tempV}")
+            print(f"innF = {innF}\n")
         
         #up
         if y < 1: 
             pass 
         else:
-            for o in self.vertices:
-                if o.pos_x == x and o.pos_y - 1 == y:
-                    second_pos = Vector(self.vertices[o.pos_x].local_position)
-                    tempV = list(second_pos - curPos )
-                    innF += self.constraintForce(tempV, 1, i)
-
-                    print(f"\nspring_types = {sp.spring_type}" )
-                    print(f"second_pos = {second_pos}")
-                    print(f"curPos = {curPos}")
-                    print(f"tempV = {tempV}")
-                    print(f"innF = {innF}\n")
+            tempV = last_pos - curPos
+            innF += self.constraintForce(tempV, 1, i)
+            
+            print(f"\nspring_types = {sp.spring_type}" )
+            print(f"last_pos = {last_pos}")
+            print(f"curPos = {curPos}")
+            print(f"tempV = {tempV}")
+            print(f"innF = {innF}\n")
 
         
         #down
         if (y + 1) > (self.cloth_wight - 1): 
             pass
         else:
-            for o in self.vertices:
-                if o.pos_x + 1 == x and o.pos_y + 1 == y:
-                    second_pos = Vector(self.vertices[o.pos_x].local_position)
-                    tempV = list(second_pos - curPos )
-                    innF += self.constraintForce(tempV, 1, i)
-
-                    print(f"\nspring_types = {sp.spring_type}" )
-                    print(f"second_pos = {second_pos}")
-                    print(f"curPos = {curPos}")
-                    print(f"tempV = {tempV}")
-                    print(f"innF = {innF}\n")
+            tempV = last_pos - curPos
+            innF += self.constraintForce(tempV, 1, i)
+            
+            print(f"\nspring_types = {sp.spring_type}" )
+            print(f"last_pos = {last_pos}")
+            print(f"curPos = {curPos}")
+            print(f"tempV = {tempV}")
+            print(f"innF = {innF}\n")
         
 
         ######## shear neighbor ########
@@ -724,100 +711,106 @@ class Physics(Cloth, Collision):
         if (x) < 1 or (y < 1):
             pass 
         else:
-            for o in self.vertices:
-                if o.pos_x - 1 == x and o.pos_y - 1 == y:
-                    second_pos = Vector(self.vertices[o.pos_x].local_position)
-                    tempV = list(second_pos - curPos )
-                    innF += self.constraintForce(tempV, 1.41421356237, i)
-
-                    print(f"\nspring_types = {sp.spring_type}" )
-                    print(f"second_pos = {second_pos}")
-                    print(f"curPos = {curPos}")
-                    print(f"tempV = {tempV}")
-                    print(f"innF = {innF}\n")
+            tempV = last_pos - curPos
+            innF += self.constraintForce(tempV, 1.41421356237, i)
+            
+            print(f"\nspring_types = {sp.spring_type}" )
+            print(f"last_pos = {last_pos}")
+            print(f"curPos = {curPos}")
+            print(f"tempV = {tempV}")
+            print(f"innF = {innF}\n")
         
         #left down
         if (x < 1) or (y + 1 > self.cloth_wight - 1):
             pass 
         else:
-            for o in self.vertices:
-                if o.pos_x - 1 == x and o.pos_y + 1 == y:
-                    second_pos = Vector(self.vertices[o.pos_x].local_position)
-                    tempV = list(second_pos - curPos )
-                    innF += self.constraintForce(tempV, 1.41421356237, i)
-
-                    print(f"\nspring_types = {sp.spring_type}" )
-                    print(f"second_pos = {second_pos}")
-                    print(f"curPos = {curPos}")
-                    print(f"tempV = {tempV}")
-                    print(f"innF = {innF}\n")
+            tempV = last_pos - curPos
+            innF += self.constraintForce(tempV, 1.41421356237, i)
+            
+            print(f"\nspring_types = {sp.spring_type}" )
+            print(f"last_pos = {last_pos}")
+            print(f"curPos = {curPos}")
+            print(f"tempV = {tempV}")
+            print(f"innF = {innF}\n")
         
         #right up
         if (x + 1 > self.cloth_lenght - 1) or (y < 1):
             pass 
         else:
-            for o in self.vertices:
-                if o.pos_x + 1 == x and o.pos_y - 1 == y:
-                    second_pos = Vector(self.vertices[o.pos_x].local_position)
-                    tempV = list(second_pos - curPos )
-                    innF += self.constraintForce(tempV, 1.41421356237, i)
-
-                    print(f"\nspring_types = {sp.spring_type}" )
-                    print(f"second_pos = {second_pos}")
-                    print(f"curPos = {curPos}")
-                    print(f"tempV = {tempV}")
-                    print(f"innF = {innF}\n")
+            tempV = last_pos - curPos
+            innF += self.constraintForce(tempV, 1.41421356237, i)
+            
+            print(f"\nspring_types = {sp.spring_type}" )
+            print(f"last_pos = {last_pos}")
+            print(f"curPos = {curPos}")
+            print(f"tempV = {tempV}")
+            print(f"innF = {innF}\n")
         
         #right down
         if (x + 1 > self.cloth_lenght - 1) or (y + 1 > self.cloth_wight - 1):
             pass 
         else: 
-            for o in self.vertices:
-                if o.pos_x + 1 == x and o.pos_y + 1 == y:
-                    second_pos = Vector(self.vertices[o.pos_x].local_position)
-                    tempV = list(second_pos - curPos )
-                    innF += self.constraintForce(tempV, 1.41421356237, i)        
+            tempV = last_pos - curPos
+            innF += self.constraintForce(tempV, 1.41421356237, i)
+            
+            print(f"\nspring_types = {sp.spring_type}" )
+            print(f"last_pos = {last_pos}")
+            print(f"curPos = {curPos}")
+            print(f"tempV = {tempV}")
+            print(f"innF = {innF}\n")       
 
         ######## bend neighbor ########
         #left 2
         if x < 2:
             pass 
         else:
-            for o in self.vertices:
-                if o.pos_x - 2 == x and o.pos_y == y:
-                    second_pos = Vector(self.vertices[o.pos_x].local_position)
-                    tempV = list(second_pos - curPos )
-                    innF += self.constraintForce(tempV, 2, i)
+            tempV = last_pos - curPos
+            innF += self.constraintForce(tempV, 2, i)
+            
+            print(f"\nspring_types = {sp.spring_type}" )
+            print(f"last_pos = {last_pos}")
+            print(f"curPos = {curPos}")
+            print(f"tempV = {tempV}")
+            print(f"innF = {innF}\n")
         
         #right 2
         if (x + 2) > self.cloth_lenght - 1:
             pass 
         else: 
-            for o in self.vertices:
-                if o.pos_x + 2 == x and o.pos_y == y:
-                    second_pos = Vector(self.vertices[o.pos_x].local_position)
-                    tempV = list(second_pos - curPos )
-                    innF += self.constraintForce(tempV, 2, i)
+            tempV = last_pos - curPos
+            innF += self.constraintForce(tempV, 2, i)
+            
+            print(f"\nspring_types = {sp.spring_type}" )
+            print(f"last_pos = {last_pos}")
+            print(f"curPos = {curPos}")
+            print(f"tempV = {tempV}")
+            print(f"innF = {innF}\n")
         
         #up 2
         if y < 2:
             pass 
         else: 
-            for o in self.vertices:
-                if o.pos_x == x and o.pos_y - 2 == y:
-                    second_pos = Vector(self.vertices[o.pos_x].local_position)
-                    tempV = list(second_pos - curPos )
-                    innF += self.constraintForce(tempV, 2, i)
+            tempV = last_pos - curPos
+            innF += self.constraintForce(tempV, 2, i)
+            
+            print(f"\nspring_types = {sp.spring_type}" )
+            print(f"last_pos = {last_pos}")
+            print(f"curPos = {curPos}")
+            print(f"tempV = {tempV}")
+            print(f"innF = {innF}\n")
         
         #down 2
         if ((y + 2) > self.cloth_wight - 1):
             pass 
         else: 
-            for o in self.vertices:
-                if o.pos_x == x and o.pos_y + 2 == y:
-                    second_pos = Vector(self.vertices[o.pos_x].local_position)
-                    tempV = list(second_pos - curPos )
-                    innF += self.constraintForce(tempV, 2, i)
+            tempV = last_pos - curPos
+            innF += self.constraintForce(tempV, 2, i)
+            
+            print(f"\nspring_types = {sp.spring_type}" )
+            print(f"last_pos = {last_pos}")
+            print(f"curPos = {curPos}")
+            print(f"tempV = {tempV}")
+            print(f"innF = {innF}\n")
 
         return innF
 
@@ -878,13 +871,14 @@ class Physics(Cloth, Collision):
         acceleration = net_forse / self.mass
         print(f"acceleration_f = {acceleration}")
 
-        vel = Vector(self.vertices[id].velocity) + Vector(acceleration) * self.dt
+        vel = Vector(self.vertices[id].velocity) + Vector(acceleration) * self.dt        
+        # self.vertices[id].velocity = vel
         print(f"vel_f = {vel}")
 
         next_pos = self.vertices[id].local_position
         id = self.vertices[id].id
 
-        if id == 25:
+        if id == 25 or id == 0 or id == 10:
             # self.vertices[id].has_collision == True
             next_pos[0] += 0
             next_pos[1] += 0
@@ -897,7 +891,7 @@ class Physics(Cloth, Collision):
 
         return next_pos
         
-    ############################################ РАБОТАЕТ НА КОРРЕКТНО!!! ############################################
+    ############################################ РАБОТАЕТ НE КОРРЕКТНО!!! ############################################
             # # Создаём локальную переменную для хранения скорости точки
             # vel = self.get_Vertlet_velocity(self.vertices[num].local_position, self.last_coo[num])
 
@@ -977,7 +971,7 @@ class Physics(Cloth, Collision):
             #                                                                     for xyz in range(3)
             #                                                                 ]
             #                                                             )
-    ############################################ РАБОТАЕТ НА КОРРЕКТНО!!! ############################################
+    ############################################ РАБОТАЕТ НE КОРРЕКТНО!!! ############################################
 
     def cloth_deformation(self, K = 2, Cd = 0.0007) -> list:
         ''' 
@@ -1039,7 +1033,7 @@ def loadDLL():
 # ------------------------------------------------------------------------
 
 
-class GPUCloth_Settings(PropertyGroup):
+class GPUCloth_settings(PropertyGroup):
     '''
     This class defines the values ​​of each input. 
     We can change them byreferring to specific variables corresponding to a given input.
@@ -1050,16 +1044,12 @@ class GPUCloth_Settings(PropertyGroup):
         description="A bool property",
         default = False
         )
-
-    #    Object_Collizions = bpy.context.scene.tool.bool_object_coll
      
     bool_self_coll : BoolProperty(
         name="Enable or Disable",
         description="A bool property",
         default = False
         )
-    
-    #    Self_Collizions = bpy.context.scene.tool.bool_self_coll
 
     int : IntProperty(
         name = "Set a value",
@@ -1069,37 +1059,109 @@ class GPUCloth_Settings(PropertyGroup):
         max = 100
         )
 
-    # Object_Collizions = bpy.context.scene.tool.bool_object_coll
+    # --- 3 lvl Quality Steps / Speed Multiplier --- #
+
+    int_quality : IntProperty(
+        name = "Quality Steps",
+        description = "Quality of the simulation in steps per frame (higher is better but slower)",
+        default = 5,
+        min = 1,
+        max = 100
+        )
+
+    float_speed : FloatProperty(
+        name = "Speed Multiplier",
+        description = "Close speed is multiplied by this value",
+        default = 1.000,
+        min = 0.001,
+        max = 30.0
+        )
+
+    # --- 4 lvl Vertex Mass / Air Viscosity / Bending model --- #
 
     float_vertex : FloatProperty(
         name = "Vertex Mass",
         description = "The mass of each vertex on the cloth material",
-        default = 0.33,
+        default = 0.30,
         min = 0.001,
         max = 30.0
         )
-
-    #    Vertex_Mass = bpy.context.scene.tool.float_vertex
-
-    float_speed : FloatProperty(
-        name = "Speed Multiplier",
-        description = "Close speed is multiplied bythis value",
-        default = 0.1000,
-        min = 0.001,
-        max = 30.0
-        )
-
-    #    Speed_Multiplier = bpy.context.scene.tool.float_speed
 
     float_air : FloatProperty(
         name = "Air Viscosity",
         description = "Air has some thickness which slows falling things down",
-        default = 0.1000,
+        default = 1,
         min = 0.001,
         max = 30.0
         )
 
-    #    Air_Viscosity = bpy.context.scene.tool.float_air
+    # --- 5 lvl Stiffness Tension / Compression / Shear / Bending --- #
+    
+    float_stiffness_tension : FloatProperty(
+        name = "Tension",
+        description = "",
+        default = 15,
+        min = 0,
+        max = 5000.0
+        )
+
+    float_stiffness_compression : FloatProperty(
+        name = "Compression",
+        description = "",
+        default = 15,
+        min = 0,
+        max = 10000.0
+        )
+    
+    float_stiffness_shear : FloatProperty(
+        name = "Shear",
+        description = "",
+        default = 5,
+        min = 0,
+        max = 10000.0
+        )
+
+    float_stiffness_bending : FloatProperty(
+        name = "Bending",
+        description = "",
+        default = 0.500,
+        min = 0,
+        max = 1000.0
+        )
+
+    # --- 6 lvl Damping Tension / Compression / Shear / Bending --- #
+
+    float_damping_tension : FloatProperty(
+        name = "Tension",
+        description = "",
+        default = 15,
+        min = 0,
+        max = 5000.0
+        )
+
+    float_damping_compression : FloatProperty(
+        name = "Compression",
+        description = "",
+        default = 15,
+        min = 0,
+        max = 10000.0
+        )
+    
+    float_damping_shear : FloatProperty(
+        name = "Shear",
+        description = "",
+        default = 5,
+        min = 0,
+        max = 10000.0
+        )
+
+    float_damping_bending : FloatProperty(
+        name = "Bending",
+        description = "",
+        default = 0.500,
+        min = 0,
+        max = 1000.0
+        )
     
     float_distance : FloatProperty(
         name = "Minimal Distance",
@@ -1108,8 +1170,6 @@ class GPUCloth_Settings(PropertyGroup):
         min = 0.001,
         max = 30.0
         ) 
-        
-    #    Minimal_Distance = bpy.context.scene.tool.float_distance
     
     float_distance_self : FloatProperty(
         name = "Self Minimal Distance",
@@ -1118,8 +1178,6 @@ class GPUCloth_Settings(PropertyGroup):
         min = 0.001,
         max = 30.0
         ) 
-    
-    #    Self_Minimal_Distance = bpy.context.scene.tool.float_distance_self
 
     float_friction : FloatProperty(
         name = "Friction",
@@ -1129,8 +1187,6 @@ class GPUCloth_Settings(PropertyGroup):
         max = 30.0
         ) 
 
-    #    Friction = bpy.context.scene.tool.float_friction
-
     float_impulse : FloatProperty(
         name = "Impulse Clamp",
         description = "Prevents explosions in tight and complicated collision situations by restricting the amount of movement after a collision",
@@ -1138,8 +1194,6 @@ class GPUCloth_Settings(PropertyGroup):
         min = 0.000,
         max = 30.0
         ) 
-
-    #    Impulse_Clamp = bpy.context.scene.tool.float_impulse
     
 
     float_impulse_self : FloatProperty(
@@ -1150,147 +1204,316 @@ class GPUCloth_Settings(PropertyGroup):
         max = 30.0
         ) 
 
-    #    Self_Impulse_Clamp = bpy.context.scene.tool.float_impulse_self
-
     string : StringProperty(
         name = "Set a value",
         description = "A string property",
         default = "None"
         )
 
-    # Self_Impulse_Clamp = bpy.context.scene.tool.float_impulse_self
+#    --- Operators ---
+
+class Make_Cloth(Operator):
+    bl_label = "Make_Cloth"
+    bl_idname = "mesh.oneclicksetup"
+    bl_options = {"REGISTER", "UNDO"} 
+
+    def execute(self, context):
+        names = context.selected_objects
+        for name in names:
+            for i in range(len(bpy.data.objects)):
+                if name == bpy.data.objects[i] and not (i in bpy.types.Scene.CPUCloth_objs):
+                    bpy.types.Scene.CPUCloth_objs.append(i)
+                    sim.append(Physics(i))
+        print("CPUCloth_objs = ", bpy.types.Scene.CPUCloth_objs)
+        return {"FINISHED"}
+    
+def cloth_is_select(selected_objects):
+    if selected_objects == [bpy.data.objects[1]]:
+        return True
+    return False
+
+class Remove_Cloth(Operator):
+    bl_label = "Remove_Cloth"
+    bl_idname = "mesh.remove_cloth"
+    # bl_options = {"REGISTER", "UNDO"} 
+
+    def execute(self, context):
+        names = context.selected_objects
+        for name in names:
+            for i in range(len(bpy.data.objects)):
+                if name == bpy.data.objects[i] and (i in bpy.types.Scene.CPUCloth_objs):
+                    try:
+                        bpy.types.Scene.CPUCloth_objs.remove(i)                        
+                    except IndexError:
+                        pass
+        print("CPUCloth_objs = ", bpy.types.Scene.CPUCloth_objs)
+        return {"FINISHED"}
+    
+def cloth_is_select(selected_objects):
+    for name in selected_objects:
+        for i in range(len(bpy.data.objects)):
+            if name == bpy.data.objects[i] and (i in bpy.types.Scene.CPUCloth_objs):
+                return True
+    return False
+
 
 #    --- GPUCloth in Properties window ---
 
-class UV_PT_GPUCloth(Panel):
+class Main(Panel):
     '''
-    This is a main (parent) Panel on T-panel. 
-    The main interface and nested panels of the created fabric are assembled here.
+        This is a main (parent) Panel on T-panel. 
+        The main interface and nested panels of the created fabric are assembled here.
     '''
-    bl_idname = "UV_PT_GPUCloth"
     bl_label = "GPUCloth"
-    bl_category = "My Category"
-    bl_space_type = 'PROPERTIES'
-    bl_region_type = 'WINDOW'
-    bl_options = {'DEFAULT_CLOSED'}
+    bl_idname = "PHYS_PT_GPUCloth"
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = 'GPUCloth'
 
     def draw(self, context):
         layout = self.layout
         scene = context.scene
-        mytool = scene.tool
+        selected_objects = context.selected_objects
+
+        col = layout.column(align=False)
+        col.label(text="API type: ")
+
+        row = col.row(align=True)        
+        row.prop(scene, "GPU_API_type", expand=True)
+        layout.separator()
+
+        layout.operator("mesh.oneclicksetup", text="Make a cloth")
+        layout.operator("mesh.remove_cloth", text="Remove GPUCloth")
+        layout.separator()
+
+        param = scene.tool
+        split = layout.split(factor=0.4)
+
+        col = split.column()
+        col_1 = split.column()
+
+        col.label(text="Quality Steps")
+        col_1.prop(param, "int_quality", text="")
+        col.label(text="Speed Multiplier")
+        col_1.prop(param, "float_speed", text="")
+
+        if cloth_is_select(selected_objects):
+            pass
+        
+
+class GPUCloth_properties(Panel):
+    bl_label = "Physics properties"
+    bl_idname = "PHYS_PT_GPUCloth_properties"
+    bl_parent_id = "PHYS_PT_GPUCloth"
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = 'GPUCloth'
+
+    def draw(self, context):
+        layout = self.layout
+        scene = context.scene
+        param = scene.tool
         split = layout.split(factor=0.4)
         col_1 = split.column()
         col_2 = split.column()
         
         # display the properties
         col_1.label(text="Vertex Mass")
-        col_2.prop(mytool, "float_vertex", text="")
-        col_1.label(text="Speed Multiplier")
-        col_2.prop(mytool, "float_speed", text="")
+        col_2.prop(param, "float_vertex", text="")
+
         col_1.label(text="Air Viscosity")
-        col_2.prop(mytool, "float_air", text="")
-        
-class UV_PT_GPUCloth_ObjColl(Panel):
-    '''
-    This is a child Panel on GPUCloth.
-    This panel is checkbox.
-    '''
-    bl_idname = "UV_PT_GPUCloth_ObjColl"
-    bl_label = ""
-    bl_parent_id = "UV_PT_GPUCloth"
-    bl_category = "My Category"
-    bl_space_type = 'PROPERTIES'
-    bl_region_type = 'WINDOW'
-    bl_options = {'DEFAULT_CLOSED'}
+        col_2.prop(param, "float_air", text="")
 
-    def draw_header(self,context):
-        self.layout.prop(context.scene.render, "use_border", text="Object Collizions")
-        
+        col_1.label(text="Bending model ")
+        col_2.prop(scene, "bending_model", text = "")
+
+
+class GPUCloth_properties_stiffness(Panel):
+    bl_label = "Stiffness"
+    bl_idname = "PHYS_PT_GPUCloth_stiffness"
+    bl_parent_id = "PHYS_PT_GPUCloth_properties"
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = 'GPUCloth'
+
     def draw(self, context):
         layout = self.layout
         scene = context.scene
-        mytool = scene.tool
+        param = scene.tool
         split = layout.split(factor=0.4)
         col_1 = split.column()
         col_2 = split.column()
-
+        
         # display the properties
-        col_1.label(text="Distance (min)")
-        col_2.prop(mytool, "float_distance", text="")
-        col_1.label(text="Impulse Clamp")
-        col_2.prop(mytool, "float_impulse", text="")
-        
-        if bpy.context.scene.render.use_border == False:
-            col_1.enabled = False
-            col_2.enabled = False
-            
-        if bpy.context.scene.render.use_border == True:
-            col_1.enabled = True
-            col_2.enabled = True
+        col_1.label(text="Tension")
+        col_2.prop(param, "float_stiffness_tension", text="")
 
-class UV_PT_GPUCloth_SelfColl(Panel):
-    '''
-    This is a child Panel on GPUCloth.
-    This panel is checkbox.
-    '''
-    bl_idname = "UV_PT_GPUCloth_SelfColl"
-    bl_label = ""
-    bl_parent_id = "UV_PT_GPUCloth"
-    bl_category = "My Category"
-    bl_space_type = 'PROPERTIES'
-    bl_region_type = 'WINDOW'
-    bl_options = {'DEFAULT_CLOSED'}
+        col_1.label(text="Compression")
+        col_2.prop(param, "float_stiffness_compression", text="")
 
-    def draw_header(self,context):
-        self.layout.prop(context.scene.render, "use_placeholder", text="Self Collizions")
+        col_1.label(text="Snear")
+        col_2.prop(param, "float_stiffness_shear", text="")
         
+        col_1.label(text="Bending")
+        col_2.prop(param, "float_stiffness_bending", text="")
+
+class GPUCloth_properties_damping(Panel):
+    bl_label = "Damping"
+    bl_idname = "PHYS_PT_GPUCloth_damping"
+    bl_parent_id = "PHYS_PT_GPUCloth_properties"
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = 'GPUCloth'
+
     def draw(self, context):
         layout = self.layout
         scene = context.scene
-        mytool = scene.tool
+        param = scene.tool
         split = layout.split(factor=0.4)
         col_1 = split.column()
         col_2 = split.column()
-
-        # display the properties
-        col_1.label(text="Friction")
-        col_2.prop(mytool, "float_friction", text="")
-        col_1.label(text="Distance (m)")
-        col_2.prop(mytool, "float_distance_self", text="")
-        col_1.label(text="Impulse Clamp")
-        col_2.prop(mytool, "float_impulse_self", text="")
         
-        if bpy.context.scene.render.use_placeholder == False:
-            col_1.enabled = False
-            col_2.enabled = False
+        # display the properties
+        col_1.label(text="Tension")
+        col_2.prop(param, "float_damping_tension", text="")
+
+        col_1.label(text="Compression")
+        col_2.prop(param, "float_damping_compression", text="")
+
+        col_1.label(text="Snear")
+        col_2.prop(param, "float_damping_shear", text="")
+        
+        col_1.label(text="Bending")
+        col_2.prop(param, "float_damping_bending", text="")
+
+# class GPUCloth_obj_collision(Operator):
+    #     '''
+    #     This is a child Panel on GPUCloth.
+    #     This panel is checkbox.
+    #     '''
+    #     bl_idname = "GPUCloth_obj_collision"
+    #     bl_label = ""
+    #     bl_parent_id = "GPUCloth_main"
+    #     bl_space_type = 'VIEW_3D'
+    #     bl_region_type = 'UI'
+    #     bl_category = 'GPUCloth'
+
+    #     def draw_header(self,context):
+    #         self.layout.prop(context.scene.render, "use_border", text="Object collisions")
             
-        if bpy.context.scene.render.use_placeholder == True:
-            col_1.enabled = True
-            col_2.enabled = True
+    #     def draw(self, context):
+    #         layout = self.layout
+    #         scene = context.scene
+    #         mytool = scene.tool
+    #         split = layout.split(factor=0.4)
+    #         col_1 = split.column()
+    #         col_2 = split.column()
+
+    #         # display the properties
+    #         col_1.label(text="Distance (min)")
+    #         col_2.prop(mytool, "float_distance", text="")
+    #         col_1.label(text="Impulse Clamp")
+    #         col_2.prop(mytool, "float_impulse", text="")
+            
+    #         if bpy.context.scene.render.use_border == False:
+    #             col_1.enabled = False
+    #             col_2.enabled = False
+    #         else:
+    #             col_1.enabled = True
+    #             col_2.enabled = True
+
+    # class GPUCloth_self_collision(Operator):
+    #     '''
+    #     This is a child Panel on GPUCloth.
+    #     This panel is checkbox.
+    #     '''
+    #     bl_idname = "GPUCloth_self_collision"
+    #     bl_label = ""
+    #     bl_parent_id = "GPUCloth_main" 
+    #     bl_space_type = 'VIEW_3D'
+    #     bl_region_type = 'UI'
+    #     bl_category = 'GPUCloth'
+
+    #     def draw_header(self,context):
+    #         self.layout.prop(context.scene.render, "use_placeholder", text="Self collisions")
+            
+    #     def draw(self, context):
+    #         layout = self.layout
+    #         scene = context.scene
+    #         mytool = scene.tool
+    #         split = layout.split(factor=0.4)
+    #         col_1 = split.column()
+    #         col_2 = split.column()
+
+    #         # display the properties
+    #         col_1.label(text="Friction")
+    #         col_2.prop(mytool, "float_friction", text="")
+    #         col_1.label(text="Distance (m)")
+    #         col_2.prop(mytool, "float_distance_self", text="")
+    #         col_1.label(text="Impulse Clamp")
+    #         col_2.prop(mytool, "float_impulse_self", text="")
+            
+    #         if bpy.context.scene.render.use_placeholder == False:
+    #             col_1.enabled = False
+    #             col_2.enabled = False            
+    #         else:
+    #             col_1.enabled = True
+    #             col_2.enabled = True
 
 #     --- Registration UI Panel ---
 
 classes = (
-    GPUCloth_Settings,
-    UV_PT_GPUCloth,
-    UV_PT_GPUCloth_ObjColl,
-    UV_PT_GPUCloth_SelfColl,
+    Make_Cloth,
+    Remove_Cloth,
+    Main,
+    GPUCloth_properties,
+    GPUCloth_properties_stiffness,
+    GPUCloth_properties_damping,
+    # GPUCloth_properties_internal_spriings,
+    # GPUCloth_properties_pressure,
+    # GPUCloth_cache,
+    # GPUCloth_shape,
+    # GPUCloth_collisions,
+    # GPUCloth_object_collision,
+    # GPUCloth_self_collision,
+
+    # Эта панель используется для ограничения определенных свойств ткани определенной группой вершин.
+    # GPUCloth_property weights,
+
+    # Как и другие системы физической динамики, симуляция ткани также зависит от внешних силовых эффекторов.
+    # GPUCloth_field_weghts, # Внешнии силы
+    GPUCloth_settings
+
 )
 
 def register():
-    from bpy.utils import register_class
     for cls in classes:
         register_class(cls)
+    
+    bpy.types.Scene.GPU_API_type = bpy.props.EnumProperty(
+            items=( 
+                    ('CUDA', 'CUDA', 'For Nvidia graphics card'), 
+                    ('OPENCL', 'OpenCL', 'For all graphics card especially for ATI(AMD) GPU'), 
+                    ('GLSL', 'GLSL', 'For all GPU')
+                )
+        )
+    bpy.types.Scene.bending_model = bpy.props.EnumProperty(
+            items=( 
+                ('LBM','Linear', 'Linear benging model'), 
+                ('ABM','Angular', 'Angular benging model') 
+            )
+        )
 
-    bpy.types.Scene.tool = PointerProperty(type=GPUCloth_Settings)
+    # CPUCloth_objs - список объектов способных к столкновению
+    bpy.types.Scene.CPUCloth_objs = []
+    bpy.types.Scene.tool = PointerProperty(type = GPUCloth_settings)
 
 def unregister():
-    from bpy.utils import unregister_class
     for cls in reversed(classes):
         unregister_class(cls)
 
     del bpy.types.Scene.tool
-
+    del bpy.types.Scene.CPUCloth_objs
 
 if __name__ == "__main__":
     register()
@@ -1298,19 +1521,22 @@ if __name__ == "__main__":
     # Проверка работоспособности CUDA
     # Проверка dll для запуска симуляции
     # loadDLL()
-    print("\n\n\n\n\n\n\n\n\n\n\n")
+    # print("\n\n\n\n\n\n\n\n\n\n\n")
 
     # Переход на первый кадр
     bpy.context.scene.frame_current = bpy.context.scene.frame_start
 
-    # Создание экземпляра класса физики
-    sim = Physics()
+    # Создаём под каждый объект свой экземпляр класса и добавляем в список
+    sim = []
+    for id_obj in range(len(bpy.types.Scene.CPUCloth_objs)):
+        # Создание экземпляра класса физики
+        sim.append(Physics(id_obj))
 
-    # Запуск симуляции физики
-    sim.start_sim()
+        # Запуск симуляции физики
+        sim[id_obj].start_sim()
 
     # Запуск анимации
-    for i in range(10):
-            bpy.context.scene.frame_current = i
+    # for i in range(10):
+    #         bpy.context.scene.frame_current = i
 
     # bpy.ops.screen.animation_play(reverse=False, sync=False)
