@@ -1,0 +1,643 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClInclude Include="cloth\cloth_settings.h">
+      <Filter>Cloth</Filter>
+    </ClInclude>
+    <ClInclude Include="cloth\SIM_mass_spring.cuh">
+      <Filter>SIM</Filter>
+    </ClInclude>
+    <ClInclude Include="main.cuh">
+      <Filter>Main</Filter>
+    </ClInclude>
+    <ClInclude Include="intern\ConstrainedConjugateGradient.h">
+      <Filter>intern</Filter>
+    </ClInclude>
+    <ClInclude Include="intern\implicit.h">
+      <Filter>intern</Filter>
+    </ClInclude>
+    <ClInclude Include="DNA\cloth_types.cuh">
+      <Filter>DNA</Filter>
+    </ClInclude>
+    <ClInclude Include="DNA\ID.h">
+      <Filter>DNA</Filter>
+    </ClInclude>
+    <ClInclude Include="DNA\customdata_types.cuh">
+      <Filter>DNA</Filter>
+    </ClInclude>
+    <ClInclude Include="DNA\defs.cuh">
+      <Filter>DNA</Filter>
+    </ClInclude>
+    <ClInclude Include="DNA\scene_types.cuh">
+      <Filter>DNA</Filter>
+    </ClInclude>
+    <ClInclude Include="DNA\vec_types.cuh">
+      <Filter>DNA</Filter>
+    </ClInclude>
+    <ClInclude Include="DNA\object_force_types.cuh">
+      <Filter>DNA</Filter>
+    </ClInclude>
+    <ClInclude Include="DNA\object_types.cuh">
+      <Filter>DNA</Filter>
+    </ClInclude>
+    <ClInclude Include="DNA\modifier_types.cuh">
+      <Filter>DNA</Filter>
+    </ClInclude>
+    <ClInclude Include="DNA\meshdata_types.cuh">
+      <Filter>DNA</Filter>
+    </ClInclude>
+    <ClInclude Include="DNA\listBase.h">
+      <Filter>DNA</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\tracking_private.h">
+      <Filter>kernel</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\collision.h">
+      <Filter>kernel</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\nla_private.h">
+      <Filter>kernel</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\particle_private.h">
+      <Filter>kernel</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\assert.cuh">
+      <Filter>lib</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\mempool.cuh">
+      <Filter>lib</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\compiler_attrs.cuh">
+      <Filter>lib</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\compiler_compat.cuh">
+      <Filter>lib</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\linklist.cuh">
+      <Filter>lib</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\B_math.h">
+      <Filter>lib</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\math_base.h">
+      <Filter>lib</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\math_base_safe.h">
+      <Filter>lib</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\math_bits.cuh">
+      <Filter>lib</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\math_color.cuh">
+      <Filter>lib</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\math_geom.cuh">
+      <Filter>lib</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\math_inline.cuh">
+      <Filter>lib</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\math_interp.cuh">
+      <Filter>lib</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\math_matrix.cuh">
+      <Filter>lib</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\math_rotation.cuh">
+      <Filter>lib</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\math_solvers.cuh">
+      <Filter>lib</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\math_statistics.cuh">
+      <Filter>lib</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\math_vector.cuh">
+      <Filter>lib</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\strict_flags.cuh">
+      <Filter>lib</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\sys_types.cuh">
+      <Filter>lib</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\utildefines.h">
+      <Filter>lib</Filter>
+    </ClInclude>
+    <ClInclude Include="intern\mallocn_inline.h">
+      <Filter>intern</Filter>
+    </ClInclude>
+    <ClInclude Include="intern\mallocn_intern.h">
+      <Filter>intern</Filter>
+    </ClInclude>
+    <ClInclude Include="intern\MEM_guardedalloc.cuh">
+      <Filter>intern</Filter>
+    </ClInclude>
+    <ClInclude Include="intern\depsgraph\DEG_depsgraph_debug.h">
+      <Filter>intern\depsgraph</Filter>
+    </ClInclude>
+    <ClInclude Include="intern\depsgraph\DEG_depsgraph_physics.h">
+      <Filter>intern\depsgraph</Filter>
+    </ClInclude>
+    <ClInclude Include="intern\depsgraph\DEG_depsgraph_query.h">
+      <Filter>intern\depsgraph</Filter>
+    </ClInclude>
+    <ClInclude Include="intern\depsgraph\intern\depsgraph.h">
+      <Filter>intern\depsgraph\intern</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\listbase.h">
+      <Filter>intern\depsgraph\intern</Filter>
+    </ClInclude>
+    <ClInclude Include="DNA\pointcache_types.h">
+      <Filter>DNA</Filter>
+    </ClInclude>
+    <ClInclude Include="DNA\defaults.cuh">
+      <Filter>DNA</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\intern\list_sort_impl.h">
+      <Filter>lib\intern</Filter>
+    </ClInclude>
+    <ClInclude Include="RNA\types.h">
+      <Filter>DNA</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\B_collection.h">
+      <Filter>kernel</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\layer.h">
+      <Filter>kernel</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\modifier.h">
+      <Filter>kernel</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\scene.h">
+      <Filter>kernel</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\kdopbvh.h">
+      <Filter>kernel</Filter>
+    </ClInclude>
+    <ClInclude Include="intern\depsgraph\DEG_depsgraph.h">
+      <Filter>intern\depsgraph</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\edgehash.h">
+      <Filter>lib</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\BLI_listbase_wrapper.hh">
+      <Filter>lib</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\BLI_rand.h">
+      <Filter>lib</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\BLI_rand.hh">
+      <Filter>lib</Filter>
+    </ClInclude>
+    <ClInclude Include="DNA\anim_types.h">
+      <Filter>DNA</Filter>
+    </ClInclude>
+    <ClInclude Include="DNA\DNA_collection_types.h">
+      <Filter>DNA</Filter>
+    </ClInclude>
+    <ClInclude Include="DNA\DNA_sequence_types.h">
+      <Filter>DNA</Filter>
+    </ClInclude>
+    <ClInclude Include="intern\atomic\atomic_ops.h">
+      <Filter>kernel</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\cloth.h">
+      <Filter>kernel</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\compiler_typecheck.h">
+      <Filter>kernel</Filter>
+    </ClInclude>
+    <ClInclude Include="DNA\mesh_types.h">
+      <Filter>kernel</Filter>
+    </ClInclude>
+    <ClInclude Include="intern\atomic\intern\atomic_ops_utils.h">
+      <Filter>kernel</Filter>
+    </ClInclude>
+    <ClInclude Include="intern\atomic\intern\atomic_ops_ext.h">
+      <Filter>intern</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\task.h">
+      <Filter>lib</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\task.hh">
+      <Filter>lib</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\threads.h">
+      <Filter>lib</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\pointcache.h">
+      <Filter>kernel</Filter>
+    </ClInclude>
+    <ClInclude Include="DNA\B_texture_types.h">
+      <Filter>DNA</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\lib_query.h">
+      <Filter>kernel</Filter>
+    </ClInclude>
+    <ClInclude Include="DNA\fluid_types.h">
+      <Filter>DNA</Filter>
+    </ClInclude>
+    <ClInclude Include="DNA\DNA_material_defaults.h">
+      <Filter>DNA</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\BKE_main.h">
+      <Filter>kernel</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\ghash.h">
+      <Filter>lib</Filter>
+    </ClInclude>
+    <ClInclude Include="DNA\particle_types.h">
+      <Filter>lib</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\particle.h">
+      <Filter>lib</Filter>
+    </ClInclude>
+    <ClInclude Include="DNA\particle_defaults.h">
+      <Filter>lib</Filter>
+    </ClInclude>
+    <ClInclude Include="DNA\boid_types.h">
+      <Filter>lib</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\boids.h">
+      <Filter>lib</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\bvhutils.h">
+      <Filter>lib</Filter>
+    </ClInclude>
+    <ClInclude Include="DNA\color_types.h">
+      <Filter>lib</Filter>
+    </ClInclude>
+    <ClInclude Include="DNA\curve_types.h">
+      <Filter>lib</Filter>
+    </ClInclude>
+    <ClInclude Include="RNA\define.h">
+      <Filter>lib</Filter>
+    </ClInclude>
+    <ClInclude Include="RNA\enum_types.h">
+      <Filter>lib</Filter>
+    </ClInclude>
+    <ClInclude Include="RNA\intern\internal.h">
+      <Filter>lib</Filter>
+    </ClInclude>
+    <ClInclude Include="RNA\intern\internal_types.h">
+      <Filter>lib</Filter>
+    </ClInclude>
+    <ClInclude Include="DNA\material_types.h">
+      <Filter>lib</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\object.h">
+      <Filter>lib</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\BLI_map.hpp">
+      <Filter>Data_types</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\BLI_vector.hh">
+      <Filter>Data_types</Filter>
+    </ClInclude>
+    <ClInclude Include="intern\depsgraph\intern\node\deg_node_id.h">
+      <Filter>intern\depsgraph</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\mesh_runtime.h">
+      <Filter>kernel</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\index_range.hh">
+      <Filter>lib</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\customdata.h">
+      <Filter>kernel</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\memarena.h">
+      <Filter>lib</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\math_geom.h">
+      <Filter>lib</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\BLI_array.hh">
+      <Filter>lib</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\BLI_span.hh">
+      <Filter>lib</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\bmesh.h">
+      <Filter>bmesh</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\BKE_lib_id.h">
+      <Filter>kernel</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\intern\lib_intern.h">
+      <Filter>kernel\intern</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\BKE_idtype.h">
+      <Filter>kernel</Filter>
+    </ClInclude>
+    <ClInclude Include="intern\BLT_translation.h">
+      <Filter>intern</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\BKE_shrinkwrap.h">
+      <Filter>kernel</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\bmesh_mesh_convert.h">
+      <Filter>bmesh\intern</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\BKE_DerivedMesh.h">
+      <Filter>kernel</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <CudaCompile Include="cloth\SIM_mass_spring.cu">
+      <Filter>SIM</Filter>
+    </CudaCompile>
+    <CudaCompile Include="main.cu">
+      <Filter>Main</Filter>
+    </CudaCompile>
+    <CudaCompile Include="intern\mallocn.cpp">
+      <Filter>intern</Filter>
+    </CudaCompile>
+    <CudaCompile Include="cloth\intern\hair_volume.cpp">
+      <Filter>SIM\intern</Filter>
+    </CudaCompile>
+    <CudaCompile Include="lib\intern\memarena.cpp">
+      <Filter>lib\intern</Filter>
+    </CudaCompile>
+    <CudaCompile Include="lib\intern\mempool.cpp">
+      <Filter>lib\intern</Filter>
+    </CudaCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="Cloth">
+      <UniqueIdentifier>{baae2dca-5288-43e5-8c00-87c2f5fa9973}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Main">
+      <UniqueIdentifier>{4fad2043-ecdc-4d57-ad97-f51808930b17}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="SIM">
+      <UniqueIdentifier>{aeb4172d-149b-44a9-a8dc-febce10b96f8}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Collision">
+      <UniqueIdentifier>{a9628ba2-919a-41b2-8ef6-7f7d73006f13}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="intern">
+      <UniqueIdentifier>{60e1a528-5e04-4168-86fc-1aa11af18a0e}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="DNA">
+      <UniqueIdentifier>{8432adce-e828-4cdc-8aea-94cfdbc03fd4}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="lib">
+      <UniqueIdentifier>{a98d50b0-4a38-487b-be2d-0cea8bc79f36}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="kernel">
+      <UniqueIdentifier>{17ea67fd-dd68-4942-a2a3-5128703047e5}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="kernel\intern">
+      <UniqueIdentifier>{a0d8e598-7833-4127-8739-72b5434b1dbd}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="lib\intern">
+      <UniqueIdentifier>{f3aca653-6189-4d39-a6ba-17a1e9757990}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="DNA\intern">
+      <UniqueIdentifier>{79499ade-b99b-4af8-ab2b-f6f48a14b99d}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="SIM\intern">
+      <UniqueIdentifier>{97846c60-3cf5-4b8e-8d6b-556555fe1855}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="intern\depsgraph">
+      <UniqueIdentifier>{c00ff78b-34ba-44da-a056-7ec48db65a48}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="intern\depsgraph\intern">
+      <UniqueIdentifier>{b8a90c67-8221-452b-a3a9-588b6648cef1}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Data_types">
+      <UniqueIdentifier>{b90b2e6d-a92f-4715-a559-fa888018dff2}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="bmesh">
+      <UniqueIdentifier>{ce95b174-2327-47b3-97e3-e206354093af}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="bmesh\intern">
+      <UniqueIdentifier>{33988be5-f27f-4812-846b-e42d44309e4d}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="bmesh\operators">
+      <UniqueIdentifier>{a47f587c-4587-48f1-9f00-83efb9fd1d8c}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="bmesh\tools">
+      <UniqueIdentifier>{1c7be30c-4833-499b-bbb9-b1abae0ff55b}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="intern\implicit.cpp">
+      <Filter>intern</Filter>
+    </ClCompile>
+    <ClCompile Include="lib\intern\array_store_utils.cpp">
+      <Filter>lib\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="lib\intern\array_utils.cpp">
+      <Filter>lib\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="intern\depsgraph\intern\depsgraph.cc">
+      <Filter>intern\depsgraph\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="lib\intern\buffer.cpp">
+      <Filter>lib\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="lib\intern\linklist.cpp">
+      <Filter>lib\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="lib\intern\listbase.cpp">
+      <Filter>lib\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="lib\intern\math_base.cpp">
+      <Filter>lib\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="lib\intern\math_base_inline.cpp">
+      <Filter>lib\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="lib\intern\math_bits_inline.cpp">
+      <Filter>lib\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="lib\intern\math_boolean.cc">
+      <Filter>lib\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="lib\intern\math_color.cpp">
+      <Filter>lib\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="lib\intern\math_color_blend_inline.cpp">
+      <Filter>lib\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="lib\intern\math_color_inline.cpp">
+      <Filter>lib\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="lib\intern\math_geom.cpp">
+      <Filter>lib\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="lib\intern\math_geom_inline.cpp">
+      <Filter>lib\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="lib\intern\math_interp.cpp">
+      <Filter>lib\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="lib\intern\math_matrix.cpp">
+      <Filter>lib\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="lib\intern\math_rotation.cpp">
+      <Filter>lib\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="lib\intern\math_solvers.cpp">
+      <Filter>lib\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="lib\intern\math_statistics.cpp">
+      <Filter>lib\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="lib\intern\math_vec.cc">
+      <Filter>lib\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="lib\intern\math_vector.cpp">
+      <Filter>lib\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="lib\intern\math_vector_inline.cu">
+      <Filter>lib\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="lib\intern\memory_utils.cpp">
+      <Filter>lib\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="lib\intern\noise.cpp">
+      <Filter>lib\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="lib\intern\rand.cc">
+      <Filter>lib\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="lib\intern\sort.cpp">
+      <Filter>lib\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="lib\intern\sort_utils.cpp">
+      <Filter>lib\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="lib\intern\stack.cpp">
+      <Filter>lib\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="lib\intern\storage.cpp">
+      <Filter>lib\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="lib\intern\system_win32.cpp">
+      <Filter>lib\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="lib\intern\threads.cc">
+      <Filter>lib\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\intern\cloth.cu">
+      <Filter>kernel\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\intern\collision.cu">
+      <Filter>kernel\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\intern\effect.cpp">
+      <Filter>kernel\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\intern\rigidbody.cpp">
+      <Filter>kernel\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\intern\simulation.cc">
+      <Filter>kernel\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="intern\leak_detector.cc">
+      <Filter>intern</Filter>
+    </ClCompile>
+    <ClCompile Include="intern\mallocn_guarded_impl.cpp">
+      <Filter>intern</Filter>
+    </ClCompile>
+    <ClCompile Include="intern\mallocn_lockfree_impl.cpp">
+      <Filter>intern</Filter>
+    </ClCompile>
+    <ClCompile Include="lib\intern\kdopbvh.cpp">
+      <Filter>lib\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="lib\intern\task_graph.cc">
+      <Filter>lib\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="lib\intern\task_iterator.cpp">
+      <Filter>lib\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="lib\intern\task_pool.cc">
+      <Filter>lib\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="lib\intern\task_range.cc">
+      <Filter>lib\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="lib\intern\task_scheduler.cc">
+      <Filter>lib\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\intern\particle_child.cpp">
+      <Filter>lib\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\intern\particle_distribute.cpp">
+      <Filter>lib\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\intern\particle_system.cpp">
+      <Filter>lib\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\intern\particle.cpp">
+      <Filter>lib\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\intern\boids.cpp">
+      <Filter>lib\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\intern\pointcache.cpp">
+      <Filter>kernel\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\intern\modifier.cpp">
+      <Filter>kernel\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="lib\intern\ghash.cpp">
+      <Filter>lib\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="lib\intern\ghash_utils.cpp">
+      <Filter>lib\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="mainTests.cpp">
+      <Filter>Main</Filter>
+    </ClCompile>
+    <ClCompile Include="intern\depsgraph\intern\node\deg_node_id.cpp">
+      <Filter>intern\depsgraph</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\intern\mesh_runtime.cpp">
+      <Filter>kernel\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="lib\intern\bvhutils.cpp">
+      <Filter>lib\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\intern\lib_id.cpp">
+      <Filter>kernel\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\intern\lib_id_delete.cpp">
+      <Filter>kernel\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\intern\idtype.cpp">
+      <Filter>kernel\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\intern\main.cpp">
+      <Filter>kernel\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\intern\shrinkwrap.cpp">
+      <Filter>kernel\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="lib\bmesh_mesh_convert.cpp">
+      <Filter>bmesh\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\intern\customdata.cpp">
+      <Filter>kernel\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\intern\subdiv_ccg.cpp">
+      <Filter>kernel\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\intern\subdiv.cpp">
+      <Filter>kernel\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\intern\mesh_normals.cpp">
+      <Filter>kernel\intern</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="packages.config">
+      <Filter>Main</Filter>
+    </None>
+  </ItemGroup>
+</Project>

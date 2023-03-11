@@ -85,13 +85,13 @@ class SetUp:
                                              align='WORLD', location=(0, 0, 1),
                                              scale=(1, 1, 1))
 
-            # Подразделяем для симуляции ткани
+            # # Подразделяем для симуляции ткани
             bpy.ops.object.subdivision_set(level=2, relative=False)
 
-            # Изменяем подразделение на "простое"
+            # # Изменяем подразделение на "простое"
             bpy.context.object.modifiers["Subdivision"].subdivision_type = 'SIMPLE'
 
-            # Применяем модификатор
+            # # Применяем модификатор
             bpy.ops.object.modifier_apply(modifier="Subdivision")
 
             # Создаём куб на который будет падать ткань
@@ -165,14 +165,15 @@ class Point:
     '''
 
     def __init__(self, id_obj, vId, pos_x, pos_y, velocity= [0,0,0], 
-                acceleration = [0,0,0], hasCollision = False):
+                acceleration = [0,0,0], freeze = False, hasCollision = False):
         self.clothProp = Cloth(id_obj)
         self.id_obj = id_obj
         self.id = vId
-        self.pos_x = pos_x
-        self.pos_y = pos_y
+        self.pos_x = pos_x # Позиция в сетке по х
+        self.pos_y = pos_y # Позиция в сетке по у
         self.velocity= velocity
         self.acceleration = acceleration
+        self.freeze = freeze # точки которые не должны двигаться
         self.hasCollision = hasCollision
 
     def __len__(self) -> int:
@@ -180,13 +181,15 @@ class Point:
         return self.clothProp.meshResolution
        
     def __repr__(self):
-        return f'''
-        All properties of points: 
-        id = {self.id}
-        V = {self.velocity}
-        a = {self.acceleration}
-        m = {self.clothProp.mass}
-        hasCollision = {self.hasCollision}
+        #         All properties of points: 
+        # id = {self.id}
+        # position = {self.local_position}
+        # V = {self.velocity}
+        # a = {self.acceleration}
+        # m = {self.clothProp.mass}
+        # freeze = {self.freeze}
+        # hasCollision = {self.hasCollision}
+        return f''' position = {self.local_position}
         '''
 
     # ------------------------------------------------------------------------
@@ -199,7 +202,7 @@ class Point:
         return self.velocity
 
     @property
-    def a(self) -> list:
+    def get_acceleration(self) -> list:
         ''' Возвращает список(list) ускорения каждой точки '''
         return self.acceleration
     
@@ -214,12 +217,12 @@ class Point:
         return bpy.data.objects[self.id_obj].matrix_local @ bpy.data.objects[self.id_obj].data.vertices[self.id].co
     
     @property
-    def has_collision(self) -> bool:
+    def get_has_collision(self) -> bool:
         ''' Возвращает факт(bool) пересейчения каждой точки '''
         return self.hasCollision
 
     @property
-    def m(self) -> float:
+    def get_mass(self) -> float:
         ''' Возвращает массу(float) точек '''
         return 0.3 /  self.clothProp.meshResolution
 
@@ -238,7 +241,6 @@ class Point:
     def set_coo(self, new_coo:Vector) -> None:
         ''' Установка новых координат '''
         bpy.data.objects["Plane"].data.vertices[self.id].co = new_coo
-
 
     def set_is_collide(self, hasCollision:bool) -> None:
         ''' Установка параметра столкновения '''
@@ -328,8 +330,8 @@ class Physics(Cloth, Collision):
 
     GRAVITY = bpy.context.scene.gravity
     FPS = bpy.context.scene.render.fps
-    TIME_STEP = 0.05
-    # TIME_STEP = 0.001 / FPS
+    # TIME_STEP = 0.05
+    TIME_STEP = (1 / 5) / FPS
     print(TIME_STEP)
    
     STRUCTURAL_SPRING_TYPE = 0
@@ -363,7 +365,6 @@ class Physics(Cloth, Collision):
         self.id_obj = id_obj
 
         # Создаём переменную где хранятся все связи(нитки, но не совсем) ткани
-        self.protect_vertices = [] # точки которые не должны двигаться
         self.vertices = [] 
         self.last_coo = []
         self.springs = []
@@ -406,10 +407,23 @@ class Physics(Cloth, Collision):
 
             id = 0
             # Запускаем цикл просчёта здесь
-            # for x in range(self.cloth_lenght):
-            #     for y in range(0, self.cloth_wight):
-            #         self.vertices[id].set_coo(self.ComputeForces(x, y, id))
-            #         id += 1
+            self.vertices[0].freeze = True
+            self.vertices[len(self.vertices) - 1].freeze = True
+
+            for x in range(self.cloth_lenght):
+                for y in range(0, self.cloth_wight):
+
+                    buffer = Vector(self.vertices[id].local_position)
+                    print("buffer1 = ", buffer)
+
+                    self.vertices[id].set_coo(self.ComputeForces(x, y, id))
+
+                    self.last_coo[id] = buffer
+
+                    print("local_position = ", self.vertices[id].local_position)
+                    print("last_coo = ", self.last_coo[id])
+
+                    id += 1            
 
             # if not(True in flags):
             #     self.ComputeForces()
@@ -502,9 +516,9 @@ class Physics(Cloth, Collision):
         return flags, flag_num
 
     def add_point(self, objID, vId, pos_x, pos_y, velocity= [0,0,0], acceleration = [0,0,0],
-                                                hasCollision = False) -> None:
+                                                freeze = 0, hasCollision = False) -> None:
         # Добавляем класс точки в список
-        vert = Point(objID, vId, pos_x, pos_y, velocity, acceleration, hasCollision)
+        vert = Point(objID, vId, pos_x, pos_y, velocity, acceleration, freeze, hasCollision)
         self.vertices.append(vert)
 
     def add_spring(self, a, b, ks, kd, spring_type) -> None:
@@ -515,14 +529,9 @@ class Physics(Cloth, Collision):
     def IntegrateVerlet(self, pos, last_pos, a) -> list:
         ''' 
             Метод Стёрмера — Верле(Интеграция Верле)
-            https:#ru.wikipedia.org/wiki/Метод_Стёрмера_—_Верле
-             С помощью интеграции верлета находим дифференциал скорости
             
-            1.Вычисляются новые положения тел.
-            2.Для каждой связи удовлетворяется соответствующее ограничение, 
-            то есть расстояние между точками делается таким, каким оно должно быть.
-            3.Шаг 2 повторяется несколько раз, тем самым все условия удовлетворяются (разрешается система условий).
-        '''
+            С помощью интеграции верлета находим дифференциал скорости
+            '''
         return 2.0 * pos - last_pos + a * self.dt**2
 
     def preparation(self) -> None:
@@ -536,7 +545,7 @@ class Physics(Cloth, Collision):
                 self.add_point(self.id_obj, i, x, y)
                 i+=1
 
-        self.last_coo = [self.vertices[i].local_position for i in range(0, self.meshResolution)]
+        self.last_coo = list([self.vertices[i].local_position for i in range(0, self.meshResolution)])
 
         # Добавление структурных пружин
         # Горизонтальные точки
@@ -589,48 +598,47 @@ class Physics(Cloth, Collision):
                             ((self.cloth_lenght - 1) * self.cloth_wight) + i, 
                             self.KS_BEND, self.KD_BEND, self.BEND_SPRING_TYPE)
 
-    def normalize(self, v:list) -> list:
+    def normalize(self, v:Vector) -> list:
         '''
-            Скомунизженно из функции glm::normalize()
+            Нормализация вектора.
+            Делим каждую координату вектора на его длинну.
+            Как итог получаем значение от -1 до 1.
         '''
-        len_of_v = math.sqrt( (v[0] * v[0]) + (v[1] * v[1]) + (v[2] * v[2]) )
-        if len_of_v == 0:
-            return Vector([0, 0, 0])
-        else:
-            return Vector([v[0] / len_of_v, v[1] / len_of_v, v[2] / len_of_v])
+        if v == Vector([0, 0, 0]): return v
 
-    def constraintForce(self, velocity, SPRING_TYPE, index):
-        # SPRING_TYPE = 1.0f: structure
-        # SPRING_TYPE = 1.41421356237f: shear
-        # SPRING_TYPE = 2.0f: bend
+        len_of_v = (((v[0]**2)+(v[1]**2)+(v[2]**2))**0.5) # Длинна вектора
+        
+        return Vector([v[xyz] / len_of_v for xyz in range(3)])
 
+    def constraintForce(self, velocity, SPRING_TYPE, pov):
+        '''
+            Расчёт жёсткости пружины
+
+            # SPRING_TYPE = 1.0f:           structure:
+            # SPRING_TYPE = 1.41421356237f: shear
+            # SPRING_TYPE = 2.0f:           bend
+        '''
         len_vel = velocity[0] + velocity[1] + velocity[2]
 
         MxL = 0.03 # молю бога узнать, что же это
         k = 100 # жёскость
         rLen = 0.02 # rest len - длинна в покое
-        rLen = self.springs[index].rest_length
-
-        # print(f"return = {Vector(self.normalize(velocity)) * k * (len_vel - SPRING_TYPE * rLen)}")
-        # a = Vector(self.normalize(velocity)) * float((k * (len_vel * \
-        #                     MxL - len_vel - SPRING_TYPE * \
-        #                     self.springs[index].rest_length) + \
-        #                     k * 1.4 * (len_vel - SPRING_TYPE * MxL)))
-        # print(f"return_2 = {a}")
-        # print(f"return = {self.normalize(velocity) * k}")
-        # print(f"return_2 = {self.normalize(velocity) * k * (len_vel - SPRING_TYPE * rLen)}")
-
+        rLen = self.springs[pov].rest_length
 
         # return self.normalize(velocity) * k
+        print("velocity = ",velocity)
+        print("velocity.normalize() = ", self.normalize(velocity))
+
+        velocity = self.normalize(velocity)
 
         if len_vel < (SPRING_TYPE * MxL):
-            return self.normalize(velocity) * k * (len_vel - SPRING_TYPE * rLen)
+            return velocity * k * (len_vel - SPRING_TYPE * rLen)
         else:
-            return self.normalize(velocity) * float((k * (len_vel * \
+            return velocity * float((k * (len_vel * \
                             MxL - len_vel - SPRING_TYPE * rLen) + \
                             k * 1.4 * (len_vel - SPRING_TYPE * MxL)))
 
-    def computeInnerForce(self, i, x, y):
+    def computeInnerForce(self, i, x, y, curPos, last_pos):
         # х - позиция по длинне ткани
         # у - позиция по ширене ткани
         #                ^ y+
@@ -641,69 +649,70 @@ class Physics(Cloth, Collision):
         #                |
         #                | y-
 
-        curPos = self.vertices[i].local_position
-        last_pos = self.last_coo[i]
         innF = Vector([0, 0, 0])
         tempV = 0
 
+        print(f"\n curPos = {curPos}" )
+        print(f"\n last_pos = {last_pos}" )
+        print(f"\n tempV = {curPos - last_pos}" )
+
         sp = self.springs[i]
-        print("len(self.springs) = ",len(self.springs))
         print(sp)
 
-        id = (x * self.cloth_wight) + y                  
+        # id = (x * self.cloth_wight) + y                  
         ######## structure ########
         #left
         if x < 1:
             pass
         else:
-            tempV = last_pos - curPos
+            tempV = curPos - last_pos
             innF += self.constraintForce(tempV, 1, i)
 
-            print(f"\nspring_types = {sp.spring_type}" )
-            print(f"last_pos = {last_pos}")
-            print(f"curPos = {curPos}")
-            print(f"tempV = {tempV}")
-            print(f"innF = {innF}\n")
+            # print(f"\n spring_types = {sp.spring_type}" )
+            # print(f"last_pos = {last_pos}")
+            # print(f"curPos = {curPos}")
+            # print(f"tempV = {tempV}")
+            # print(f"innF = {innF}\n")
 
         #right
         if (x + 1) > (self.cloth_lenght - 1): 
             pass 
         else:
-            tempV = last_pos - curPos
+            tempV = curPos - last_pos
             innF += self.constraintForce(tempV, 1, i)
 
-            print(f"\nspring_types = {sp.spring_type}" )
-            print(f"last_pos = {last_pos}")
-            print(f"curPos = {curPos}")
-            print(f"tempV = {tempV}")
-            print(f"innF = {innF}\n")
+            # print(f"\nspring_types = {sp.spring_type}" )
+            # print(f"last_pos = {last_pos}")
+            # print(f"curPos = {curPos}")
+            # print(f"tempV = {tempV}")
+            # print(f"innF = {innF}\n")
         
         #up
         if y < 1: 
             pass 
         else:
-            tempV = last_pos - curPos
+            tempV = curPos - last_pos
             innF += self.constraintForce(tempV, 1, i)
             
-            print(f"\nspring_types = {sp.spring_type}" )
-            print(f"last_pos = {last_pos}")
-            print(f"curPos = {curPos}")
-            print(f"tempV = {tempV}")
-            print(f"innF = {innF}\n")
+            # print(f"\nspring_types = {sp.spring_type}" )
+            # print(f"last_pos = {last_pos}")
+            # print(f"curPos = {curPos}")
+            # print(f"tempV = {tempV}")
+            # print(f"innF = {innF}\n")
 
         
         #down
         if (y + 1) > (self.cloth_wight - 1): 
             pass
         else:
-            tempV = last_pos - curPos
+            tempV = curPos - last_pos
             innF += self.constraintForce(tempV, 1, i)
             
-            print(f"\nspring_types = {sp.spring_type}" )
-            print(f"last_pos = {last_pos}")
-            print(f"curPos = {curPos}")
-            print(f"tempV = {tempV}")
-            print(f"innF = {innF}\n")
+            # print(f"\nspring_types = {sp.spring_type}" )
+            # print(f"last_pos = {last_pos}")
+            # print(f"curPos = {curPos}")
+            # print(f"tempV = {tempV}")
+            # print(f"innF = {innF}\n")
         
 
         ######## shear neighbor ########
@@ -711,110 +720,295 @@ class Physics(Cloth, Collision):
         if (x) < 1 or (y < 1):
             pass 
         else:
-            tempV = last_pos - curPos
+            tempV = curPos - last_pos
             innF += self.constraintForce(tempV, 1.41421356237, i)
             
-            print(f"\nspring_types = {sp.spring_type}" )
-            print(f"last_pos = {last_pos}")
-            print(f"curPos = {curPos}")
-            print(f"tempV = {tempV}")
-            print(f"innF = {innF}\n")
+            # print(f"\nspring_types = {sp.spring_type}" )
+            # print(f"last_pos = {last_pos}")
+            # print(f"curPos = {curPos}")
+            # print(f"tempV = {tempV}")
+            # print(f"innF = {innF}\n")
         
         #left down
         if (x < 1) or (y + 1 > self.cloth_wight - 1):
             pass 
         else:
-            tempV = last_pos - curPos
+            tempV = curPos - last_pos
             innF += self.constraintForce(tempV, 1.41421356237, i)
             
-            print(f"\nspring_types = {sp.spring_type}" )
-            print(f"last_pos = {last_pos}")
-            print(f"curPos = {curPos}")
-            print(f"tempV = {tempV}")
-            print(f"innF = {innF}\n")
+            # print(f"\nspring_types = {sp.spring_type}" )
+            # print(f"last_pos = {last_pos}")
+            # print(f"curPos = {curPos}")
+            # print(f"tempV = {tempV}")
+            # print(f"innF = {innF}\n")
         
         #right up
         if (x + 1 > self.cloth_lenght - 1) or (y < 1):
             pass 
         else:
-            tempV = last_pos - curPos
+            tempV = curPos - last_pos
             innF += self.constraintForce(tempV, 1.41421356237, i)
             
-            print(f"\nspring_types = {sp.spring_type}" )
-            print(f"last_pos = {last_pos}")
-            print(f"curPos = {curPos}")
-            print(f"tempV = {tempV}")
-            print(f"innF = {innF}\n")
+            # print(f"\nspring_types = {sp.spring_type}" )
+            # print(f"last_pos = {last_pos}")
+            # print(f"curPos = {curPos}")
+            # print(f"tempV = {tempV}")
+            # print(f"innF = {innF}\n")
         
         #right down
         if (x + 1 > self.cloth_lenght - 1) or (y + 1 > self.cloth_wight - 1):
             pass 
         else: 
-            tempV = last_pos - curPos
+            tempV = curPos - last_pos
             innF += self.constraintForce(tempV, 1.41421356237, i)
             
-            print(f"\nspring_types = {sp.spring_type}" )
-            print(f"last_pos = {last_pos}")
-            print(f"curPos = {curPos}")
-            print(f"tempV = {tempV}")
-            print(f"innF = {innF}\n")       
+            # print(f"\nspring_types = {sp.spring_type}" )
+            # print(f"last_pos = {last_pos}")
+            # print(f"curPos = {curPos}")
+            # print(f"tempV = {tempV}")
+            # print(f"innF = {innF}\n")       
 
         ######## bend neighbor ########
         #left 2
         if x < 2:
             pass 
         else:
-            tempV = last_pos - curPos
+            tempV = curPos - last_pos
             innF += self.constraintForce(tempV, 2, i)
             
-            print(f"\nspring_types = {sp.spring_type}" )
-            print(f"last_pos = {last_pos}")
-            print(f"curPos = {curPos}")
-            print(f"tempV = {tempV}")
-            print(f"innF = {innF}\n")
+            # print(f"\nspring_types = {sp.spring_type}" )
+            # print(f"last_pos = {last_pos}")
+            # print(f"curPos = {curPos}")
+            # print(f"tempV = {tempV}")
+            # print(f"innF = {innF}\n")
         
         #right 2
         if (x + 2) > self.cloth_lenght - 1:
             pass 
         else: 
-            tempV = last_pos - curPos
+            tempV = curPos - last_pos
             innF += self.constraintForce(tempV, 2, i)
             
-            print(f"\nspring_types = {sp.spring_type}" )
-            print(f"last_pos = {last_pos}")
-            print(f"curPos = {curPos}")
-            print(f"tempV = {tempV}")
-            print(f"innF = {innF}\n")
+            # print(f"\nspring_types = {sp.spring_type}" )
+            # print(f"last_pos = {last_pos}")
+            # print(f"curPos = {curPos}")
+            # print(f"tempV = {tempV}")
+            # print(f"innF = {innF}\n")
         
         #up 2
         if y < 2:
             pass 
         else: 
-            tempV = last_pos - curPos
+            tempV = curPos - last_pos
             innF += self.constraintForce(tempV, 2, i)
             
-            print(f"\nspring_types = {sp.spring_type}" )
-            print(f"last_pos = {last_pos}")
-            print(f"curPos = {curPos}")
-            print(f"tempV = {tempV}")
-            print(f"innF = {innF}\n")
+            # print(f"\nspring_types = {sp.spring_type}" )
+            # print(f"last_pos = {last_pos}")
+            # print(f"curPos = {curPos}")
+            # print(f"tempV = {tempV}")
+            # print(f"innF = {innF}\n")
         
         #down 2
         if ((y + 2) > self.cloth_wight - 1):
             pass 
         else: 
-            tempV = last_pos - curPos
+            tempV = curPos - last_pos
             innF += self.constraintForce(tempV, 2, i)
             
-            print(f"\nspring_types = {sp.spring_type}" )
-            print(f"last_pos = {last_pos}")
-            print(f"curPos = {curPos}")
-            print(f"tempV = {tempV}")
-            print(f"innF = {innF}\n")
+            # print(f"\nspring_types = {sp.spring_type}" )
+            # print(f"last_pos = {last_pos}")
+            # print(f"curPos = {curPos}")
+            # print(f"tempV = {tempV}")
+            # print(f"innF = {innF}\n")
 
         return innF
 
-    def computeForceNet(self, x, y, pov) -> list:
+    def computeInnerForce(self, i, x, y, curPos, last_pos):
+        # х - позиция по длинне ткани
+        # у - позиция по ширене ткани
+        #                ^ y+
+        #                |
+        #                |
+        #      x- -------*-------> x+
+        #                |
+        #                |
+        #                | y-
+
+        innF = Vector([0, 0, 0])
+        tempV = 0
+
+        print(f"\n curPos = {curPos}" )
+        print(f"\n last_pos = {last_pos}" )
+        print(f"\n tempV = {curPos - last_pos}" )
+
+        sp = self.springs[i]
+        print(sp)
+
+        # id = (x * self.cloth_wight) + y                  
+        ######## structure ########
+        #left
+        if x < 1:
+            pass
+        else:
+            tempV = curPos - last_pos
+            innF += self.constraintForce(tempV, 1, i)
+
+            # print(f"\n spring_types = {sp.spring_type}" )
+            # print(f"last_pos = {last_pos}")
+            # print(f"curPos = {curPos}")
+            # print(f"tempV = {tempV}")
+            # print(f"innF = {innF}\n")
+
+        #right
+        if (x + 1) > (self.cloth_lenght - 1): 
+            pass 
+        else:
+            tempV = curPos - last_pos
+            innF += self.constraintForce(tempV, 1, i)
+
+            # print(f"\nspring_types = {sp.spring_type}" )
+            # print(f"last_pos = {last_pos}")
+            # print(f"curPos = {curPos}")
+            # print(f"tempV = {tempV}")
+            # print(f"innF = {innF}\n")
+        
+        #up
+        if y < 1: 
+            pass 
+        else:
+            tempV = curPos - last_pos
+            innF += self.constraintForce(tempV, 1, i)
+            
+            # print(f"\nspring_types = {sp.spring_type}" )
+            # print(f"last_pos = {last_pos}")
+            # print(f"curPos = {curPos}")
+            # print(f"tempV = {tempV}")
+            # print(f"innF = {innF}\n")
+
+        
+        #down
+        if (y + 1) > (self.cloth_wight - 1): 
+            pass
+        else:
+            tempV = curPos - last_pos
+            innF += self.constraintForce(tempV, 1, i)
+            
+            # print(f"\nspring_types = {sp.spring_type}" )
+            # print(f"last_pos = {last_pos}")
+            # print(f"curPos = {curPos}")
+            # print(f"tempV = {tempV}")
+            # print(f"innF = {innF}\n")
+        
+
+        ######## shear neighbor ########
+        #left up
+        if (x) < 1 or (y < 1):
+            pass 
+        else:
+            tempV = curPos - last_pos
+            innF += self.constraintForce(tempV, 1.41421356237, i)
+            
+            # print(f"\nspring_types = {sp.spring_type}" )
+            # print(f"last_pos = {last_pos}")
+            # print(f"curPos = {curPos}")
+            # print(f"tempV = {tempV}")
+            # print(f"innF = {innF}\n")
+        
+        #left down
+        if (x < 1) or (y + 1 > self.cloth_wight - 1):
+            pass 
+        else:
+            tempV = curPos - last_pos
+            innF += self.constraintForce(tempV, 1.41421356237, i)
+            
+            # print(f"\nspring_types = {sp.spring_type}" )
+            # print(f"last_pos = {last_pos}")
+            # print(f"curPos = {curPos}")
+            # print(f"tempV = {tempV}")
+            # print(f"innF = {innF}\n")
+        
+        #right up
+        if (x + 1 > self.cloth_lenght - 1) or (y < 1):
+            pass 
+        else:
+            tempV = curPos - last_pos
+            innF += self.constraintForce(tempV, 1.41421356237, i)
+            
+            # print(f"\nspring_types = {sp.spring_type}" )
+            # print(f"last_pos = {last_pos}")
+            # print(f"curPos = {curPos}")
+            # print(f"tempV = {tempV}")
+            # print(f"innF = {innF}\n")
+        
+        #right down
+        if (x + 1 > self.cloth_lenght - 1) or (y + 1 > self.cloth_wight - 1):
+            pass 
+        else: 
+            tempV = curPos - last_pos
+            innF += self.constraintForce(tempV, 1.41421356237, i)
+            
+            # print(f"\nspring_types = {sp.spring_type}" )
+            # print(f"last_pos = {last_pos}")
+            # print(f"curPos = {curPos}")
+            # print(f"tempV = {tempV}")
+            # print(f"innF = {innF}\n")       
+
+        ######## bend neighbor ########
+        #left 2
+        if x < 2:
+            pass 
+        else:
+            tempV = curPos - last_pos
+            innF += self.constraintForce(tempV, 2, i)
+            
+            # print(f"\nspring_types = {sp.spring_type}" )
+            # print(f"last_pos = {last_pos}")
+            # print(f"curPos = {curPos}")
+            # print(f"tempV = {tempV}")
+            # print(f"innF = {innF}\n")
+        
+        #right 2
+        if (x + 2) > self.cloth_lenght - 1:
+            pass 
+        else: 
+            tempV = curPos - last_pos
+            innF += self.constraintForce(tempV, 2, i)
+            
+            # print(f"\nspring_types = {sp.spring_type}" )
+            # print(f"last_pos = {last_pos}")
+            # print(f"curPos = {curPos}")
+            # print(f"tempV = {tempV}")
+            # print(f"innF = {innF}\n")
+        
+        #up 2
+        if y < 2:
+            pass 
+        else: 
+            tempV = curPos - last_pos
+            innF += self.constraintForce(tempV, 2, i)
+            
+            # print(f"\nspring_types = {sp.spring_type}" )
+            # print(f"last_pos = {last_pos}")
+            # print(f"curPos = {curPos}")
+            # print(f"tempV = {tempV}")
+            # print(f"innF = {innF}\n")
+        
+        #down 2
+        if ((y + 2) > self.cloth_wight - 1):
+            pass 
+        else: 
+            tempV = curPos - last_pos
+            innF += self.constraintForce(tempV, 2, i)
+            
+            # print(f"\nspring_types = {sp.spring_type}" )
+            # print(f"last_pos = {last_pos}")
+            # print(f"curPos = {curPos}")
+            # print(f"tempV = {tempV}")
+            # print(f"innF = {innF}\n")
+
+        return innF
+
+    def computeForceNet(self, x, y, pov, curPos, last_pos) -> list:
         '''
             pov - position of the vertex
             F = m*g + Fwind - air * vel* vel + innF - damp = m*Acc
@@ -822,7 +1016,8 @@ class Physics(Cloth, Collision):
         # print("\n\tcomputeForceNet")
 
         # Тут и считаются ограничения на растягивание
-        inner_forse = self.computeInnerForce(pov, x, y)
+        inner_forse = self.computeInnerForce(pov, x, y, curPos, last_pos)
+        # inner_forse = Vector([0, 0, 0])
         print(f"inner_forse = {inner_forse}")
 
         vel = self.vertices[pov].velocity
@@ -833,7 +1028,7 @@ class Physics(Cloth, Collision):
         # print(f"len_vel = {len_vel}")
 
         acceleration = self.vertices[pov].acceleration
-        print(f"acceleration = {acceleration}")
+        # print(f"acceleration = {acceleration}")
 
         wind_forse = [0, 0, 0]
 
@@ -848,51 +1043,44 @@ class Physics(Cloth, Collision):
             
         return net_forse
 
-    def ComputeForces(self, x, y, id) -> list:
+    def ComputeForces(self, x, y, pov) -> list:
         '''
             Начинает просчёт сил действующих на точки
             pov - position_of_vertex
         '''
-        # print("\n\tComputeForces")
         # Берём позицию точки и предыдущую позицию
-        pos = self.vertices[id].local_position
-        if id >= 1:
-            pos_last = self.last_coo[id]
-        else:
-            pos_last = self.last_coo[id]
+        pos = self.vertices[pov].local_position
+        pos_last = self.last_coo[pov]
 
+        # print("\n\n")
         # print(f"pos = {pos}")
         # print(f"pos_last = {pos_last}")
 
-        net_forse = Vector(self.computeForceNet(x, y, id))
-        print(f"net_forse = {net_forse}")
+        net_forse = Vector(self.computeForceNet(x, y, pov, pos, pos_last))
+        # print(f"net_forse = {net_forse}")
 
         # print("\n\tComputeForces")
         acceleration = net_forse / self.mass
-        print(f"acceleration_f = {acceleration}")
+        # print(f"acceleration_f = {acceleration}")
 
-        vel = Vector(self.vertices[id].velocity) + Vector(acceleration) * self.dt        
-        # self.vertices[id].velocity = vel
-        print(f"vel_f = {vel}")
+        vel = Vector(self.vertices[pov].velocity)        
+        # print(f"vel_f = {vel}")
 
-        next_pos = self.vertices[id].local_position
-        id = self.vertices[id].id
+        next_pos = self.vertices[pov].local_position
 
-        if id == 25 or id == 0 or id == 10:
-            # self.vertices[id].has_collision == True
-            next_pos[0] += 0
-            next_pos[1] += 0
-            next_pos[2] += 0
-        else:
-            next_pos = self.IntegrateVerlet(pos, pos_last, acceleration)
+        if self.vertices[pov].freeze == True:
+            return next_pos
 
-        print(f"pos = {pos}")
-        print(f"next_pos = {next_pos}")
+        self.vertices[pov].set_velocity(vel) 
+
+        next_pos = self.IntegrateVerlet(pos, pos_last, acceleration)
+
+        self.last_coo[pov] = pos
 
         return next_pos
         
-    ############################################ РАБОТАЕТ НE КОРРЕКТНО!!! ############################################
-            # # Создаём локальную переменную для хранения скорости точки
+    ########################################### РАБОТАЕТ НE КОРРЕКТНО!!! ############################################
+            # Создаём локальную переменную для хранения скорости точки
             # vel = self.get_Vertlet_velocity(self.vertices[num].local_position, self.last_coo[num])
 
             # if num != 0 and num != self.cloth_wight:
@@ -975,7 +1163,7 @@ class Physics(Cloth, Collision):
 
     def cloth_deformation(self, K = 2, Cd = 0.0007) -> list:
         ''' 
-        Здесь производится деформация ткнани 
+        Здесь производится деформация ткани 
 
         Пружинные силы(Spring forces) - при заданной пружине, 
         соединяющей две частицы, расположенные в точках p и q, 
@@ -999,6 +1187,7 @@ class Physics(Cloth, Collision):
                     мы предполагаем, что каждая частица со скоростью v выталкивается 
                     воображаемой вязкой жидкостью.
         '''
+        pass
 
 # Добавляем папку с проектом в поле зрения blender
 def importForDebugg():
@@ -1300,7 +1489,6 @@ class Main(Panel):
         if cloth_is_select(selected_objects):
             pass
         
-
 class GPUCloth_properties(Panel):
     bl_label = "Physics properties"
     bl_idname = "PHYS_PT_GPUCloth_properties"
@@ -1326,7 +1514,6 @@ class GPUCloth_properties(Panel):
 
         col_1.label(text="Bending model ")
         col_2.prop(scene, "bending_model", text = "")
-
 
 class GPUCloth_properties_stiffness(Panel):
     bl_label = "Stiffness"
@@ -1386,79 +1573,79 @@ class GPUCloth_properties_damping(Panel):
         col_1.label(text="Bending")
         col_2.prop(param, "float_damping_bending", text="")
 
-# class GPUCloth_obj_collision(Operator):
-    #     '''
-    #     This is a child Panel on GPUCloth.
-    #     This panel is checkbox.
-    #     '''
-    #     bl_idname = "GPUCloth_obj_collision"
-    #     bl_label = ""
-    #     bl_parent_id = "GPUCloth_main"
-    #     bl_space_type = 'VIEW_3D'
-    #     bl_region_type = 'UI'
-    #     bl_category = 'GPUCloth'
+class GPUCloth_obj_collision(Operator):
+        '''
+        This is a child Panel on GPUCloth.
+        This panel is checkbox.
+        '''
+        bl_idname = "GPUCloth_obj_collision"
+        bl_label = ""
+        bl_parent_id = "GPUCloth_main"
+        bl_space_type = 'VIEW_3D'
+        bl_region_type = 'UI'
+        bl_category = 'GPUCloth'
 
-    #     def draw_header(self,context):
-    #         self.layout.prop(context.scene.render, "use_border", text="Object collisions")
+        def draw_header(self,context):
+            self.layout.prop(context.scene.render, "use_border", text="Object collisions")
             
-    #     def draw(self, context):
-    #         layout = self.layout
-    #         scene = context.scene
-    #         mytool = scene.tool
-    #         split = layout.split(factor=0.4)
-    #         col_1 = split.column()
-    #         col_2 = split.column()
+        def draw(self, context):
+            layout = self.layout
+            scene = context.scene
+            mytool = scene.tool
+            split = layout.split(factor=0.4)
+            col_1 = split.column()
+            col_2 = split.column()
 
-    #         # display the properties
-    #         col_1.label(text="Distance (min)")
-    #         col_2.prop(mytool, "float_distance", text="")
-    #         col_1.label(text="Impulse Clamp")
-    #         col_2.prop(mytool, "float_impulse", text="")
+            # display the properties
+            col_1.label(text="Distance (min)")
+            col_2.prop(mytool, "float_distance", text="")
+            col_1.label(text="Impulse Clamp")
+            col_2.prop(mytool, "float_impulse", text="")
             
-    #         if bpy.context.scene.render.use_border == False:
-    #             col_1.enabled = False
-    #             col_2.enabled = False
-    #         else:
-    #             col_1.enabled = True
-    #             col_2.enabled = True
+            if bpy.context.scene.render.use_border == False:
+                col_1.enabled = False
+                col_2.enabled = False
+            else:
+                col_1.enabled = True
+                col_2.enabled = True
 
-    # class GPUCloth_self_collision(Operator):
-    #     '''
-    #     This is a child Panel on GPUCloth.
-    #     This panel is checkbox.
-    #     '''
-    #     bl_idname = "GPUCloth_self_collision"
-    #     bl_label = ""
-    #     bl_parent_id = "GPUCloth_main" 
-    #     bl_space_type = 'VIEW_3D'
-    #     bl_region_type = 'UI'
-    #     bl_category = 'GPUCloth'
+class GPUCloth_self_collision(Operator):
+    '''
+    This is a child Panel on GPUCloth.
+    This panel is checkbox.
+    '''
+    bl_idname = "GPUCloth_self_collision"
+    bl_label = ""
+    bl_parent_id = "GPUCloth_main" 
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = 'GPUCloth'
 
-    #     def draw_header(self,context):
-    #         self.layout.prop(context.scene.render, "use_placeholder", text="Self collisions")
-            
-    #     def draw(self, context):
-    #         layout = self.layout
-    #         scene = context.scene
-    #         mytool = scene.tool
-    #         split = layout.split(factor=0.4)
-    #         col_1 = split.column()
-    #         col_2 = split.column()
+    def draw_header(self,context):
+        self.layout.prop(context.scene.render, "use_placeholder", text="Self collisions")
+        
+    def draw(self, context):
+        layout = self.layout
+        scene = context.scene
+        mytool = scene.tool
+        split = layout.split(factor=0.4)
+        col_1 = split.column()
+        col_2 = split.column()
 
-    #         # display the properties
-    #         col_1.label(text="Friction")
-    #         col_2.prop(mytool, "float_friction", text="")
-    #         col_1.label(text="Distance (m)")
-    #         col_2.prop(mytool, "float_distance_self", text="")
-    #         col_1.label(text="Impulse Clamp")
-    #         col_2.prop(mytool, "float_impulse_self", text="")
-            
-    #         if bpy.context.scene.render.use_placeholder == False:
-    #             col_1.enabled = False
-    #             col_2.enabled = False            
-    #         else:
-    #             col_1.enabled = True
-    #             col_2.enabled = True
+        # display the properties
+        col_1.label(text="Friction")
+        col_2.prop(mytool, "float_friction", text="")
+        col_1.label(text="Distance (m)")
+        col_2.prop(mytool, "float_distance_self", text="")
+        col_1.label(text="Impulse Clamp")
+        col_2.prop(mytool, "float_impulse_self", text="")
+        
+        if bpy.context.scene.render.use_placeholder == False:
+            col_1.enabled = False
+            col_2.enabled = False            
+        else:
+            col_1.enabled = True
+            col_2.enabled = True
 
 #     --- Registration UI Panel ---
 
@@ -1517,6 +1704,7 @@ def unregister():
 
 if __name__ == "__main__":
     register()
+    bpy.types.Scene.CPUCloth_objs.append(1)
 
     # Проверка работоспособности CUDA
     # Проверка dll для запуска симуляции
@@ -1528,15 +1716,16 @@ if __name__ == "__main__":
 
     # Создаём под каждый объект свой экземпляр класса и добавляем в список
     sim = []
-    for id_obj in range(len(bpy.types.Scene.CPUCloth_objs)):
+    for id_obj in bpy.types.Scene.CPUCloth_objs:
         # Создание экземпляра класса физики
         sim.append(Physics(id_obj))
-
+    
+    for i in range(len(bpy.types.Scene.CPUCloth_objs)):
         # Запуск симуляции физики
-        sim[id_obj].start_sim()
+        sim[i].start_sim()
 
     # Запуск анимации
-    # for i in range(10):
-    #         bpy.context.scene.frame_current = i
+    for i in range(10):
+            bpy.context.scene.frame_current = i
 
-    # bpy.ops.screen.animation_play(reverse=False, sync=False)
+    bpy.ops.screen.animation_play(reverse=False, sync=False)
