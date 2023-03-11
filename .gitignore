@@ -147,3 +147,10 @@ x64/
 # Pay version #
 hair/
 softBody/
+*.tlog
+*.obj
+*.deps
+*.cache
+*.pdb
+*.txt
+*.recipe

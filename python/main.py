@@ -340,9 +340,10 @@ class Physics(Cloth, Collision):
                 self.ComputeForces()
                 self.Integratevelocityerlet()
             else:
-                for num in self.vertices:
-                    for xyz in range(0, 3):  
-                        newCoor[xyz] += 0
+                pass
+                # for num in self.vertices:
+                #     for xyz in range(0, 3):  
+                #         newCoor[xyz] += 0
         return checkCollision
 
         
@@ -630,28 +631,28 @@ class Physics(Cloth, Collision):
                     воображаемой вязкой жидкостью.
         '''
 
-        # cloth_matrix = np.array([
-        #                             [i]
-        #                             for i in self.get_all_coord
-        #                         ])
+        cloth_matrix = np.array([
+                                    [i]
+                                    for i in self.get_all_coord
+                                ])
 
-        # cloth_matrix = np.reshape(cloth_matrix, (int(self.meshResolution**0.5), int(self.meshResolution**0.5), 3))
+        cloth_matrix = np.reshape(cloth_matrix, (int(self.meshResolution**0.5), int(self.meshResolution**0.5), 3))
 
 
-        # structural_springs = np.array([[
-        #         [cloth_matrix[i][j], cloth_matrix[i][j+1]], 
-        #         [cloth_matrix[i][j], cloth_matrix[i+1][j]]
-        #       ] for i in range(0, np.shape(cloth_matrix)[0]-1) 
-        #         for j in range(0, np.shape(cloth_matrix)[1]-1)])
+        structural_springs = np.array([[
+                [cloth_matrix[i][j], cloth_matrix[i][j+1]], 
+                [cloth_matrix[i][j], cloth_matrix[i+1][j]]
+              ] for i in range(0, np.shape(cloth_matrix)[0]-1) 
+                for j in range(0, np.shape(cloth_matrix)[1]-1)])
 
-        # print(np.shape(structural_springs))
+        print(np.shape(structural_springs))
 
-        # print("structural_springs = \n", structural_springs)
+        print("structural_springs = \n", structural_springs)
 
-        # for i in range(0, self.meshmeshResolutionResolution-1):
-        #     for o in range(0, 2):
-        #         print(f'structural_springs{i}{o}{o} = ', structural_springs[i][o][o])
-        #         self.set_coo(i, [self.kutt._next_y(structural_springs[i][o][o][a], structural_springs[i][o][o][a]) for a in range(0, 3)])
+        for i in range(0, self.meshmeshResolutionResolution-1):
+            for o in range(0, 2):
+                print(f'structural_springs{i}{o}{o} = ', structural_springs[i][o][o])
+                self.set_coo(i, [self.kutt._next_y(structural_springs[i][o][o][a], structural_springs[i][o][o][a]) for a in range(0, 3)])
 
 
 # Добавляем папку с проектом в поле зрения blender
