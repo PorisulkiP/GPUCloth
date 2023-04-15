@@ -688,6 +688,8 @@ enum {
 //extern void (*BKE_mesh_batch_cache_dirty_tag_cb)(struct Mesh *me, eMeshBatchDirtyMode mode);
 //extern void (*BKE_mesh_batch_cache_free_cb)(struct Mesh *me);
 
+void BKE_mesh_batch_cache_free(void* batch_cache);
+
 /* Inlines */
 
 /* Instead of -1 that function uses ORIGINDEX_NONE as defined in BKE_customdata.h,

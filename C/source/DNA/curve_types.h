@@ -108,11 +108,11 @@ typedef struct BPoint {
   float weight;
   /** F1: selection status,  hide: is point hidden or not. */
   uint8_t f1;
-  char _pad1[1];
+  //char _pad1[1];
   short hide;
   /** User-set radius per point for beveling etc. */
   float radius;
-  char _pad[4];
+  //char _pad[4];
 } BPoint;
 
 /**
@@ -128,7 +128,7 @@ typedef struct Nurb {
   short hide, flag;
   /** Number of points in the U or V directions. */
   int pntsu, pntsv;
-  char _pad[4];
+  //char _pad[4];
   /** Tessellation resolution in the U or V directions. */
   short resolu, resolv;
   short orderu, orderv;
@@ -151,7 +151,7 @@ typedef struct CharInfo {
   /** Index start at 1, unlike mesh & nurbs. */
   short mat_nr;
   char flag;
-  char _pad[3];
+  //char _pad[3];
 } CharInfo;
 
 typedef struct TextBox {

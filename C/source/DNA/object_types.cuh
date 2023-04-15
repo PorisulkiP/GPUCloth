@@ -231,7 +231,7 @@ typedef struct Object {
   //struct Object *parent, *track;
   /* if ob->proxy (or proxy_group), this object is proxy for object ob->proxy */
   /* proxy_from is set in target back to the proxy. */
-  //struct Object *proxy, *proxy_group, *proxy_from;
+  struct Object *proxy, *proxy_group, *proxy_from;
   /** Old animation system, deprecated for 2.5. */
   //struct Ipo *ipo;
   ///* struct Path *path; */
@@ -256,7 +256,7 @@ typedef struct Object {
   /** List of bDeformGroup (vertex groups) names and flag only. */
   //ListBase defbase;
   /** List of ModifierData structures. */
-  //ListBase modifiers;
+  ListBase modifiers;
   /** List of GpencilModifierData structures. */
   //ListBase greasepencil_modifiers;
   ///** List of facemaps. */

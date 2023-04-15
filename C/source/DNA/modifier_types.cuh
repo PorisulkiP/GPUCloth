@@ -111,8 +111,8 @@ typedef struct CollisionModifierData {
 	struct BVHTree* bvhtree;
 } CollisionModifierData;
 
-typedef struct ClothModifierData {
-	//ModifierData modifier;
+typedef struct ClothModifierData : ModifierData {
+	ModifierData modifier;
 
 	/** The internal data structure for cloth. */
 	struct Cloth* clothObject;
@@ -137,6 +137,8 @@ typedef struct ClothModifierData {
 
 	struct ClothSolverResult* solver_result;
 } ClothModifierData;
+
+//static const ClothModifierData DNA_DEFAULT_ClothModifierData = _DNA_DEFAULT_ClothModifierData;
 
 typedef struct ColDetectData {
 	ClothModifierData* clmd;
@@ -190,7 +192,9 @@ typedef enum ModifierType {
 	eModifierType_SimpleDeform = 28,
 	eModifierType_Multires = 29,
 	eModifierType_Surface = 30,
+#ifdef DNA_DEPRECATED_ALLOW
 	eModifierType_Smoke = 31,
+#endif
 	eModifierType_ShapeKey = 32,
 	eModifierType_Solidify = 33,
 	eModifierType_Screw = 34,

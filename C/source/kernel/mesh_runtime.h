@@ -2,6 +2,17 @@
 
 #include "customdata.h"  /* for eCustomDataMask */
 
+/* avoid fan-fill topology */
+#define USE_CLIP_EVEN
+#define USE_CONVEX_SKIP
+/* sweep back-and-forth about convex ears (avoids lop-sided fans) */
+#define USE_CLIP_SWEEP
+// #define USE_CONVEX_SKIP_TEST
+
+#ifdef USE_CONVEX_SKIP
+#  define USE_KDTREE
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -16,6 +27,28 @@ extern "C" {
     struct Mesh;
     struct Object;
     struct Scene;
+
+    typedef bool axis_t;
+
+    typedef struct KDTreeNode2D {
+        uint32_t neg, pos;
+        uint32_t index;
+        axis_t axis; /* range is only (0-1) */
+        uint16_t flag;
+        uint32_t parent;
+    } KDTreeNode2D;
+
+    struct KDRange2D {
+        float min, max;
+    };
+
+    struct KDTree2D {
+        KDTreeNode2D* nodes;
+        const float(*coords)[2];
+        uint32_t root;
+        uint32_t node_num;
+        uint32_t* nodes_map; /* index -> node lookup */
+    };
 
     enum {
         CONCAVE = -1,
@@ -40,6 +73,7 @@ extern "C" {
         struct KDTree2D kdtree;
 #endif
     } PolyFill;
+    typedef signed char eSign;
 
     /** Circular double linked-list. */
     typedef struct PolyIndex {
@@ -53,11 +87,10 @@ extern "C" {
         MemArena* pf_arena;
     };
 
-    struct TessellationUserData 
-    {
+    struct TessellationUserData {
         const MLoop* mloop;
         const MPoly* mpoly;
-        const MVert* mvert;
+        const float(*positions)[3];
 
         /** Output array. */
         MLoopTri* mlooptri;
@@ -70,25 +103,25 @@ extern "C" {
 
     void mesh_ensure_looptri_data(Mesh* mesh);
 
-    void BKE_mesh_batch_cache_free(Mesh* me);
+    //void BKE_mesh_batch_cache_free(Mesh* me);
 
-    void pf_coord_sign_calc(PolyFill* pf, PolyIndex* pi);
+    //void pf_coord_sign_calc(PolyFill* pf, PolyIndex* pi);
     /**
      * \brief Initialize the runtime of the given mesh.
      *
      * Function expects that the runtime is already cleared.
      */
-    void BKE_mesh_runtime_init_data(struct Mesh *mesh);
+    //void BKE_mesh_runtime_init_data(struct Mesh *mesh);
     /**
      * \brief Free all data (and mutexes) inside the runtime of the given mesh.
      */
-    void BKE_mesh_runtime_free_data(struct Mesh *mesh);
+    //void BKE_mesh_runtime_free_data(struct Mesh *mesh);
     /**
      * Clear all pointers which we don't want to be shared on copying the datablock.
      * However, keep all the flags which defines what the mesh is (for example, that
      * it's deformed only, or that its custom data layers are out of date.)
      */
-    void BKE_mesh_runtime_reset_on_copy(struct Mesh *mesh, int flag);
+    //void BKE_mesh_runtime_reset_on_copy(struct Mesh *mesh, int flag);
     int BKE_mesh_runtime_looptri_len(const struct Mesh *mesh);
     void BKE_mesh_runtime_looptri_recalc(struct Mesh *mesh);
     /**
@@ -97,10 +130,10 @@ extern "C" {
      * \note This is a ported copy of dm_getLoopTriArray(dm).
      */
     const struct MLoopTri *BKE_mesh_runtime_looptri_ensure(const struct Mesh *mesh);
-    void BKE_mesh_recalc_looptri(const MLoop* mloop, const MPoly* mpoly, const MVert* mvert, int totloop, int totpoly, MLoopTri* mlooptri);
+    void BKE_mesh_recalc_looptri(const MLoop* mloop, const MPoly* mpoly, const float(*vert_positions)[3], int totloop, int totpoly, MLoopTri* mlooptri);
     bool BKE_mesh_runtime_ensure_edit_data(struct Mesh *mesh);
-    bool BKE_mesh_runtime_clear_edit_data(struct Mesh *mesh);
-    bool BKE_mesh_runtime_reset_edit_data(struct Mesh *mesh);
+    //bool BKE_mesh_runtime_clear_edit_data(struct Mesh *mesh);
+    //bool BKE_mesh_runtime_reset_edit_data(struct Mesh *mesh);
     void BKE_mesh_runtime_clear_geometry(struct Mesh *mesh);
     /**
      * \brief This function clears runtime cache of the given mesh.
@@ -120,36 +153,37 @@ extern "C" {
      * They should also be renamed to use conventions from BKE, not old DerivedMesh.cc.
      * For now keep the names similar to avoid confusion. */
 
-    struct Mesh *mesh_get_eval_final(struct Depsgraph *depsgraph,
-                                     const struct Scene *scene,
-                                     struct Object *ob,
-                                     const struct CustomData_MeshMasks *dataMask);
+    //struct Mesh *mesh_get_eval_final(struct Depsgraph *depsgraph,
+    //                                 const struct Scene *scene,
+    //                                 struct Object *ob,
+    //                                 const struct CustomData_MeshMasks *dataMask);
 
-    struct Mesh *mesh_get_eval_deform(struct Depsgraph *depsgraph,
-                                      const struct Scene *scene,
-                                      struct Object *ob,
-                                      const struct CustomData_MeshMasks *dataMask);
+    //struct Mesh *mesh_get_eval_deform(struct Depsgraph *depsgraph,
+    //                                  const struct Scene *scene,
+    //                                  struct Object *ob,
+    //                                  const struct CustomData_MeshMasks *dataMask);
 
-    struct Mesh *mesh_create_eval_final(struct Depsgraph *depsgraph,
-                                        const struct Scene *scene,
-                                        struct Object *ob,
-                                        const struct CustomData_MeshMasks *dataMask);
+    //struct Mesh *mesh_create_eval_final(struct Depsgraph *depsgraph,
+    //                                    const struct Scene *scene,
+    //                                    struct Object *ob,
+    //                                    const struct CustomData_MeshMasks *dataMask);
 
-    struct Mesh *mesh_create_eval_no_deform(struct Depsgraph *depsgraph,
-                                            const struct Scene *scene,
-                                            struct Object *ob,
-                                            const struct CustomData_MeshMasks *dataMask);
-    struct Mesh *mesh_create_eval_no_deform_render(struct Depsgraph *depsgraph,
-                                                   const struct Scene *scene,
-                                                   struct Object *ob,
-                                                   const struct CustomData_MeshMasks *dataMask);
+    //struct Mesh *mesh_create_eval_no_deform(struct Depsgraph *depsgraph,
+    //                                        const struct Scene *scene,
+    //                                        struct Object *ob,
+    //                                        const struct CustomData_MeshMasks *dataMask);
+    //struct Mesh *mesh_create_eval_no_deform_render(struct Depsgraph *depsgraph,
+    //                                               const struct Scene *scene,
+    //                                               struct Object *ob,
+    //                                               const struct CustomData_MeshMasks *dataMask);
 
-    void BKE_mesh_runtime_eval_to_meshkey(struct Mesh *me_deformed,
-                                          struct Mesh *me,
-                                          struct KeyBlock *kb);
+    //void BKE_mesh_runtime_eval_to_meshkey(struct Mesh *me_deformed,
+    //                                      struct Mesh *me,
+    //                                      struct KeyBlock *kb);
 
 #ifndef NDEBUG
-    bool BKE_mesh_runtime_is_valid(struct Mesh *me_eval);
+    bool BKE_mesh_runtime_is_valid(Mesh* me_eval);
+    char* BKE_mesh_debug_info(const Mesh* me);
 #endif /* NDEBUG */
 
 #ifdef __cplusplus

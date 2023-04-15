@@ -149,20 +149,20 @@ typedef struct PTCacheID {
   int (*read_stream)(PTCacheFile *pf, void *calldata);
 
   /* copies custom extradata to cache data */
-  void (*write_extra_data)(void *calldata, struct PTCacheMem *pm, int cfra);
+  void (*write_extra_data)(void *calldata, struct PTCacheMem *pm);
   /* copies custom extradata to cache data */
-  void (*read_extra_data)(void *calldata, struct PTCacheMem *pm, float cfra);
+  void (*read_extra_data)(void *calldata, struct PTCacheMem *pm);
   /* copies custom extradata to cache data */
   void (*interpolate_extra_data)(
       void *calldata, struct PTCacheMem *pm, float cfra, float cfra1, float cfra2);
 
   /* Total number of simulated points
    * (the cfra parameter is just for using same function pointer with totwrite). */
-  int (*totpoint)(void *calldata, int cfra);
+  int (*totpoint)(void *calldata);
   /* report error if number of points does not match */
   void (*error)(const struct ID *owner_id, void *calldata, const char *message);
   /* number of points written for current cache frame */
-  int (*totwrite)(void *calldata, int cfra);
+  int (*totwrite)(void *calldata);
 
   int (*write_header)(PTCacheFile *pf);
   int (*read_header)(PTCacheFile *pf);

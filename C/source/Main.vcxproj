@@ -32,6 +32,8 @@
     <ClInclude Include="DNA\color_types.h" />
     <ClInclude Include="DNA\curve_types.h" />
     <ClInclude Include="DNA\DNA_material_defaults.h" />
+    <ClInclude Include="DNA\DNA_modifier_defaults.h" />
+    <ClInclude Include="DNA\DNA_screen_types.h" />
     <ClInclude Include="DNA\fluid_types.h" />
     <ClInclude Include="DNA\material_types.h" />
     <ClInclude Include="DNA\particle_defaults.h" />
@@ -65,11 +67,13 @@
     <ClInclude Include="kernel\BKE_DerivedMesh.h" />
     <ClInclude Include="kernel\BKE_idtype.h" />
     <ClInclude Include="kernel\BKE_lib_id.h" />
+    <ClInclude Include="kernel\BKE_lib_remap.h" />
     <ClInclude Include="kernel\BKE_shrinkwrap.h" />
     <ClInclude Include="kernel\customdata.h" />
     <ClInclude Include="kernel\BKE_main.h" />
     <ClInclude Include="kernel\boids.h" />
     <ClInclude Include="kernel\intern\lib_intern.h" />
+    <ClInclude Include="kernel\intern\subdiv_inline.h" />
     <ClInclude Include="kernel\lib_query.h" />
     <ClInclude Include="kernel\bvhutils.h" />
     <ClInclude Include="kernel\mesh_runtime.h" />
@@ -87,11 +91,18 @@
     <ClInclude Include="kernel\tracking_private.h" />
     <ClInclude Include="lib\assert.cuh" />
     <ClInclude Include="lib\BLI_array.hh" />
+    <ClInclude Include="lib\BLI_assert.h" />
+    <ClInclude Include="lib\BLI_dynstr.h" />
+    <ClInclude Include="lib\BLI_hash_tables.hh" />
+    <ClInclude Include="lib\BLI_linklist_stack.h" />
+    <ClInclude Include="lib\BLI_map_slots.hh" />
+    <ClInclude Include="lib\BLI_math_vector.hh" />
+    <ClInclude Include="lib\BLI_math_vector_types.hh" />
     <ClInclude Include="lib\BLI_span.hh" />
     <ClInclude Include="lib\bmesh.h" />
     <ClInclude Include="lib\bmesh_mesh_convert.h" />
     <ClInclude Include="lib\index_range.hh" />
-    <ClInclude Include="lib\BLI_map.hpp" />
+    <ClInclude Include="lib\BLI_map.hh" />
     <ClInclude Include="lib\BLI_vector.hh" />
     <ClInclude Include="lib\edgehash.h" />
     <ClInclude Include="lib\ghash.h" />
@@ -100,6 +111,7 @@
     <ClInclude Include="lib\BLI_rand.hh" />
     <ClInclude Include="lib\math_geom.h" />
     <ClInclude Include="lib\memarena.h" />
+    <ClInclude Include="lib\task.h" />
     <ClInclude Include="lib\threads.h" />
     <ClInclude Include="lib\compiler_typecheck.h" />
     <ClInclude Include="lib\kdopbvh.h" />
@@ -124,10 +136,11 @@
     <ClInclude Include="lib\math_vector.cuh" />
     <ClInclude Include="lib\strict_flags.cuh" />
     <ClInclude Include="lib\sys_types.cuh" />
-    <ClInclude Include="lib\task.h" />
     <ClInclude Include="lib\task.hh" />
     <ClInclude Include="lib\utildefines.h" />
     <ClInclude Include="main.cuh" />
+    <ClInclude Include="modifiers\intern\MOD_util.h" />
+    <ClInclude Include="modifiers\MOD_modifiertypes.h" />
     <ClInclude Include="RNA\define.h" />
     <ClInclude Include="RNA\enum_types.h" />
     <ClInclude Include="RNA\intern\internal.h" />
@@ -157,6 +170,8 @@
     <ClCompile Include="kernel\intern\idtype.cpp" />
     <ClCompile Include="kernel\intern\lib_id.cpp" />
     <ClCompile Include="kernel\intern\lib_id_delete.cpp" />
+    <ClCompile Include="kernel\intern\lib_query.cpp" />
+    <ClCompile Include="kernel\intern\lib_remap.cpp" />
     <ClCompile Include="kernel\intern\main.cpp" />
     <ClCompile Include="kernel\intern\mesh_normals.cpp" />
     <ClCompile Include="kernel\intern\mesh_runtime.cpp" />
@@ -174,6 +189,7 @@
     <ClCompile Include="lib\bmesh_mesh_convert.cpp" />
     <ClCompile Include="lib\intern\array_store_utils.cpp" />
     <ClCompile Include="lib\intern\array_utils.cpp" />
+    <ClCompile Include="lib\intern\BLI_dynstr.cpp" />
     <ClCompile Include="lib\intern\bvhutils.cpp" />
     <ClCompile Include="lib\intern\ghash.cpp" />
     <ClCompile Include="lib\intern\ghash_utils.cpp" />
@@ -213,6 +229,8 @@
     <ClCompile Include="lib\intern\task_scheduler.cc" />
     <ClCompile Include="lib\intern\threads.cc" />
     <ClCompile Include="mainTests.cpp" />
+    <ClCompile Include="modifiers\intern\MOD_cloth.cpp" />
+    <ClCompile Include="modifiers\intern\MOD_util.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
@@ -243,7 +261,7 @@
     <VCToolsVersion>
     </VCToolsVersion>
     <PreferredToolArchitecture>x64</PreferredToolArchitecture>
-    <UseDebugLibraries>false</UseDebugLibraries>
+    <UseDebugLibraries>true</UseDebugLibraries>
   </PropertyGroup>
   <PropertyGroup Label="Configuration" Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <PlatformToolset>v142</PlatformToolset>
@@ -280,7 +298,7 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <OutDir>C:\Users\alex1\AppData\Roaming\Blender Foundation\Blender\3.3\scripts\addons\SimplyClothPro\dll\</OutDir>
-    <IncludePath>$(IncludePath);$(SolutionDir)\kernel;$(SolutionDir)\lib;$(SolutionDir)\intern\depsgraph\intern;$(SolutionDir)\intern\depsgraph;$(SolutionDir)\intern\atomic;$(SolutionDir)\intern;$(SolutionDir)\RNA;$(SolutionDir)\cloth;$(SolutionDir)\bmesh\operators;$(SolutionDir)\bmesh\intern;$(SolutionDir)\bmesh\tools;$(SolutionDir)\bmesh;$(SolutionDir)\DNA</IncludePath>
+    <IncludePath>$(IncludePath);$(SolutionDir)\kernel;$(SolutionDir)\lib;$(SolutionDir)\intern\depsgraph\intern;$(SolutionDir)\intern\depsgraph;$(SolutionDir)\intern\atomic;$(SolutionDir)\intern;$(SolutionDir)\RNA;$(SolutionDir)\cloth;$(SolutionDir)\bmesh\operators;$(SolutionDir)\bmesh\intern;$(SolutionDir)\bmesh\tools;$(SolutionDir)\bmesh;$(SolutionDir)\modifiers\intern;$(SolutionDir)\modifiers;$(SolutionDir)\DNA</IncludePath>
     <ExternalIncludePath>$(VC_IncludePath);$(WindowsSDK_IncludePath);</ExternalIncludePath>
     <LibraryPath>$(VC_LibraryPath_x64);$(WindowsSDK_LibraryPath_x64)</LibraryPath>
     <ReferencePath>$(VC_ReferencesPath_x64);$(SolutionDir);</ReferencePath>
@@ -309,11 +327,11 @@
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
       <WarningLevel>TurnOffAllWarnings</WarningLevel>
-      <Optimization>Disabled</Optimization>
+      <Optimization>Custom</Optimization>
       <PreprocessorDefinitions>WIN32;WIN64;_DEBUG;_XKEYCHECK_H ;_WINDLL;_USRDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <LanguageStandard_C>stdc17</LanguageStandard_C>
-      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <DebugInformationFormat>EditAndContinue</DebugInformationFormat>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
@@ -337,18 +355,18 @@
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
       <WarningLevel>TurnOffAllWarnings</WarningLevel>
-      <Optimization>MaxSpeed</Optimization>
+      <Optimization>Disabled</Optimization>
       <FunctionLevelLinking>
       </FunctionLevelLinking>
-      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <IntrinsicFunctions>false</IntrinsicFunctions>
       <PreprocessorDefinitions>WIN32;WIN64;_XKEYCHECK_H;_WINDLL;_USRDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <LanguageStandard_C>stdc17</LanguageStandard_C>
+      <LanguageStandard_C>Default</LanguageStandard_C>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
-      <DebugInformationFormat>None</DebugInformationFormat>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <InlineFunctionExpansion>Default</InlineFunctionExpansion>
-      <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
+      <FavorSizeOrSpeed>Neither</FavorSizeOrSpeed>
       <EnableFiberSafeOptimizations>
       </EnableFiberSafeOptimizations>
       <WholeProgramOptimization>false</WholeProgramOptimization>
@@ -362,9 +380,13 @@
       <SDLCheck>false</SDLCheck>
       <GuardEHContMetadata>
       </GuardEHContMetadata>
+      <ExpandAttributedSource>false</ExpandAttributedSource>
+      <AssemblerOutput>NoListing</AssemblerOutput>
+      <DisableLanguageExtensions>false</DisableLanguageExtensions>
+      <AdditionalOptions>/wd4244 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
-      <GenerateDebugInformation>false</GenerateDebugInformation>
+      <GenerateDebugInformation>DebugFull</GenerateDebugInformation>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <SubSystem>NotSet</SubSystem>

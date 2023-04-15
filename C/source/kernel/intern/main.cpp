@@ -28,7 +28,7 @@ Main *BKE_main_new(void)
 void BKE_main_free(Main *mainvar)
 {
   /* also call when reading a file, erase all, etc */
-  ListBase *lbarray[MAX_LIBARRAY];
+  ListBase *lbarray[INDEX_ID_MAX];
   int a;
 
   /* Since we are removing whole main, no need to bother 'properly'
@@ -512,7 +512,7 @@ ListBase *which_libbase(Main *bmain, short type)
  * generic traversal of all the blocks in a Main (by traversing all the
  * lists in turn), without worrying about block types.
  *
- * \note #MAX_LIBARRAY define should match this code */
+ * \note #INDEX_ID_MAX define should match this code */
 int set_listbasepointers(Main *bmain, ListBase **lb)
 {
   /* BACKWARDS! also watch order of free-ing! (mesh<->mat), first items freed last.
@@ -581,5 +581,5 @@ int set_listbasepointers(Main *bmain, ListBase **lb)
 
   lb[INDEX_ID_NULL] = NULL;
 
-  return (MAX_LIBARRAY - 1);
+  return (INDEX_ID_MAX - 1);
 }

@@ -117,11 +117,7 @@ void free_bvhtree_from_mesh(struct BVHTreeFromMesh *data);
 /**
  * Math functions used by callbacks
  */
-float bvhtree_ray_tri_intersection(const BVHTreeRay *ray,
-                                   const float m_dist,
-                                   const float v0[3],
-                                   const float v1[3],
-                                   const float v2[3]);
+float bvhtree_ray_tri_intersection(const BVHTreeRay *ray, const float m_dist, const float v0[3], const float v1[3], const float v2[3]);
 float bvhtree_sphereray_tri_intersection(const BVHTreeRay *ray,
                                          float radius,
                                          const float m_dist,

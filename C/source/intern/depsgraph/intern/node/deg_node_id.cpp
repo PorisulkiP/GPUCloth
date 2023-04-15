@@ -38,7 +38,7 @@
 //}
 
 /* Initialize 'id' node - from pointer data given. */
-void IDNode::init(const ID *id, const char *UNUSED(subdata))
+void IDNode::init(const ID *id)
 {
   BLI_assert(id != nullptr);
   id_orig = (ID *)id;

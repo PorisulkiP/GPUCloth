@@ -1,6 +1,6 @@
 #pragma once
 
-#include "BLI_map.hpp"
+#include "BLI_map.hh"
 #include "BLI_vector.hh"
 
 #include "anim_types.h"
@@ -876,7 +876,7 @@ extern "C" {
         //};
 
         /** Initialize 'id' node - from pointer data given. */
-        void init(const ID* id, const char* subdata);
+        void init(const ID* id);
         // void init_copy_on_write(ID* id_cow_hint = nullptr);
         ~IDNode() { destroy(); }
         void destroy();

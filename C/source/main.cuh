@@ -30,7 +30,7 @@ DLLEXPORT bool BuildClothSprings(ClothModifierData* clmd, Mesh* mesh);
 DLLEXPORT int SIM_solver(Depsgraph* depsgraph, Object* ob, ClothModifierData* clmd, Mesh* mesh, int frame);
 
 // TESTS
-DLLEXPORT Mesh* Mesh_test(Mesh* mesh, uint trisCount);
+DLLEXPORT Mesh* Mesh_test(Mesh* mesh);
 DLLEXPORT Depsgraph* Depsgraph_test(Depsgraph* depsgraph);
 DLLEXPORT Object* Object_test(Object* obj);
 DLLEXPORT ClothModifierData* ClothModifierData_test(ClothModifierData* cloth);

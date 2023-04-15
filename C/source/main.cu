@@ -30,7 +30,7 @@ int SIM_SetCollisionOBJs()
 
 bool BuildClothSprings(ClothModifierData* clmd, Mesh* mesh)
 {
-    return cloth_build_springs(clmd, mesh);
+    return cloth_from_object(clmd, mesh);
 }
 
 // Запуск вычислений

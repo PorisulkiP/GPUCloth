@@ -22,6 +22,8 @@
 
 //#include "B_kdtree_impl.h"
 
+#pragma warning(disable: 4244)
+
 static void distribute_invalid(ParticleSimulationData* sim, int from);
 static int distribute_binary_search(const float* sum, int n, float value);
 static int distribute_compare_orig_index(const void* p1, const void* p2, void* user_data);
@@ -365,7 +367,7 @@ static int psys_thread_context_init_distribute(ParticleThreadContext* ctx, Parti
         return 0;
     }
 
-    if (!final_mesh->runtime.deformed_only /*&& !CustomData_get_layer(&final_mesh->fdata, CD_ORIGINDEX)*/) {
+    if (!final_mesh->runtime->deformed_only /*&& !CustomData_get_layer(&final_mesh->fdata, CD_ORIGINDEX)*/) {
         printf(
             "Can't create particles with the current modifier stack, disable destructive modifiers\n");
         // XXX error("Can't paint with the current modifier stack, disable destructive modifiers");
@@ -763,7 +765,9 @@ static int psys_thread_context_init_distribute(ParticleThreadContext* ctx, Parti
     return 1;
 }
 
-
+#undef rad1
+#undef rad2
+#undef rad3
 /* almost exact copy of BLI_jitter_init */
 static void init_mv_jit(float *jit, int num, int seed2, float amount)
 {
@@ -771,7 +775,8 @@ static void init_mv_jit(float *jit, int num, int seed2, float amount)
   float *jit2, x, rad1, rad2, rad3;
   int i, num2;
 
-  if (num == 0) {
+  if (num == 0) 
+  {
     return;
   }
 
@@ -899,25 +904,29 @@ static void distribute_from_verts_exec(ParticleTask *thread, ParticleData *pa, i
 
   zero_v4(pa->fuv);
 
-  if (pa->num != DMCACHE_NOTFOUND && pa->num < ctx->mesh->totvert) {
+  if (pa->num != DMCACHE_NOTFOUND && pa->num < ctx->mesh->totvert) 
+  {
+      /* This finds the first face to contain the emitting vertex,
+       * this is not ideal, but is mostly fine as UV seams generally
+       * map to equal-colored parts of a texture */
+      for (int i = 0; i < ctx->mesh->totface; i++, mface++) 
+      {
+          if (ELEM(pa->num, mface->v1, mface->v2, mface->v3, mface->v4)) 
+          {
+              auto vert = &mface->v1;
 
-    /* This finds the first face to contain the emitting vertex,
-     * this is not ideal, but is mostly fine as UV seams generally
-     * map to equal-colored parts of a texture */
-    for (int i = 0; i < ctx->mesh->totface; i++, mface++) {
-      if (ELEM(pa->num, mface->v1, mface->v2, mface->v3, mface->v4)) {
-        uint *vert = &mface->v1;
+              for (int j = 0; j < 4; j++, vert++) 
+              {
+                  if (*vert == pa->num) 
+                  {
+                      pa->fuv[j] = 1.0f;
+                      break;
+                  }
+              }
 
-        for (int j = 0; j < 4; j++, vert++) {
-          if (*vert == pa->num) {
-            pa->fuv[j] = 1.0f;
-            break;
+              break;
           }
-        }
-
-        break;
       }
-    }
   }
 
 #if ONLY_WORKING_WITH_PA_VERTS
@@ -1185,7 +1194,7 @@ static void distribute_children_exec(ParticleTask *thread, ChildParticle *cpa, i
   }
 }
 
-static void exec_distribute_parent(TaskPool *__restrict UNUSED(pool), void *taskdata)
+static void exec_distribute_parent(void *taskdata)
 {
   ParticleTask *task = (ParticleTask*)taskdata;
   ParticleSystem *psys = task->ctx->sim.psys;
@@ -1214,7 +1223,7 @@ static void exec_distribute_parent(TaskPool *__restrict UNUSED(pool), void *task
   }
 }
 
-static void exec_distribute_child(TaskPool *__restrict UNUSED(pool), void *taskdata)
+static void exec_distribute_child(void *taskdata)
 {
   ParticleTask *task = (ParticleTask*)taskdata;
   ParticleSystem *psys = task->ctx->sim.psys;
@@ -1317,11 +1326,13 @@ static void distribute_particles_on_dm(ParticleSimulationData *sim, int from)
     ParticleTask *task = &tasks[i];
 
     psys_task_init_distribute(task, sim);
-    if (from == PART_FROM_CHILD) {
-      BLI_task_pool_push(task_pool, exec_distribute_child, task, false, NULL);
+    if (from == PART_FROM_CHILD) 
+    {
+      BLI_task_pool_push(task_pool, (TaskRunFunction)exec_distribute_child, task, false, NULL);
     }
-    else {
-      BLI_task_pool_push(task_pool, exec_distribute_parent, task, false, NULL);
+    else 
+    {
+      BLI_task_pool_push(task_pool, (TaskRunFunction)exec_distribute_parent, task, false, NULL);
     }
   }
   BLI_task_pool_work_and_wait(task_pool);
@@ -1340,7 +1351,7 @@ static void distribute_particles_on_dm(ParticleSimulationData *sim, int from)
 }
 
 /* ready for future use, to emit particles without geometry */
-static void distribute_particles_on_shape(ParticleSimulationData *sim, int UNUSED(from))
+static void distribute_particles_on_shape(ParticleSimulationData *sim)
 {
   distribute_invalid(sim, 0);
 
@@ -1352,19 +1363,24 @@ void distribute_particles(ParticleSimulationData *sim, int from)
   PARTICLE_PSMD;
   int distr_error = 0;
 
-  if (psmd) {
-    if (psmd->mesh_final) {
+  if (psmd) 
+  {
+    if (psmd->mesh_final) 
+    {
       distribute_particles_on_dm(sim, from);
     }
-    else {
+    else 
+    {
       distr_error = 1;
     }
   }
-  else {
-    distribute_particles_on_shape(sim, from);
+  else 
+  {
+    distribute_particles_on_shape(sim);
   }
 
-  if (distr_error) {
+  if (distr_error) 
+  {
     distribute_invalid(sim, from);
 
     fprintf(stderr, "Particle distribution error!\n");

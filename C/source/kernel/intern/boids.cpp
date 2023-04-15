@@ -68,7 +68,7 @@ static bool rule_goal_avoid(BoidRule *rule, BoidBrainData *bbd, BoidValues *val,
   EffectorCache *cur, *eff = NULL;
   EffectorCache temp_eff;
   EffectorData efd, cur_efd;
-  float mul = (rule->type == eBoidRuleType_Avoid ? 1.0 : -1.0);
+  float mul = (rule->type == eBoidRuleType_Avoid ? 1.0f : -1.0f);
   float priority = 0.0f, len = 0.0f;
   bool ret = false;
 
@@ -508,7 +508,7 @@ static bool rule_follow_leader(BoidRule *rule,
   float vec[3] = {0.0f, 0.0f, 0.0f}, loc[3] = {0.0f, 0.0f, 0.0f};
   float mul, len;
   int n = (flbr->queue_size <= 1) ? bbd->sim->psys->totpart : flbr->queue_size;
-  int i, p = pa - bbd->sim->psys->particles;
+  int i, p = int(pa - bbd->sim->psys->particles);
   bool ret = false;
 
   if (flbr->ob) {
@@ -1060,8 +1060,9 @@ static BoidState *get_boid_state(BoidSettings *boids, ParticleData *pa)
 
   /* for some reason particle isn't at a valid state */
   state = (BoidState*)boids->states.first;
-  if (state) {
-    bpa->data.state_id = state->id;
+  if (state) 
+  {
+    bpa->data.state_id = short(state->id);
   }
 
   return state;

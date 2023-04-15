@@ -135,7 +135,8 @@ int do_step_cloth(Depsgraph* depsgraph, Object* ob, ClothModifierData* clmd, Mes
 // cloth.c
 ////////////////////////////////////////////////
 
-void cloth_from_mesh(ClothModifierData* clmd, const Object* ob, Mesh* mesh);
+bool cloth_from_object(ClothModifierData* clmd, Mesh* mesh);
+void cloth_from_mesh(ClothModifierData* clmd, Mesh* mesh);
 void cloth_update_springs(ClothModifierData* clmd);
 void cloth_update_verts(Object* ob, ClothModifierData* clmd, Mesh* mesh);
 void cloth_update_spring_lengths(ClothModifierData* clmd, Mesh* mesh);
@@ -165,7 +166,7 @@ void cloth_clear_cache(struct Object *ob, struct ClothModifierData *clmd, float 
     //    return;
     //}
 
-    BKE_ptcache_id_clear(&pid, 3, framenr); // PTCACHE_CLEAR_AFTER 3
+    BKE_ptcache_id_clear(&pid, 3, (uint)framenr); // PTCACHE_CLEAR_AFTER 3
 }
 
 

@@ -90,10 +90,10 @@ typedef struct IDOverrideLibrary {
 	 * Always NULL outside of read/write context. */
 	struct ID* storage;
 
-	IDOverrideLibraryRuntime* runtime;
+	//IDOverrideLibraryRuntime* runtime;
 
 	uint flag;
-	char _pad_1[4];
+	//char _pad_1[4];
 } IDOverrideLibrary;
 
 typedef struct IDProperty {
@@ -107,7 +107,7 @@ typedef struct IDProperty {
 	 * seemed like a good idea as a '_pad' var was needed anyway :) */
 	int saved;
 	/** NOTE: alignment for 64 bits. */
-	IDPropertyData data;
+	//IDPropertyData data;
 
 	/* Array length, also (this is important!) string length + 1.
 	 * the idea is to be able to reuse array realloc functions on strings. */
@@ -118,7 +118,7 @@ typedef struct IDProperty {
 	 * Note that the buffering is mild; the code comes from python's list implementation. */
 	int totallen;
 
-	IDPropertyUIData* ui_data;
+	//IDPropertyUIData* ui_data;
 } IDProperty;
 
 /* There's a nasty circular dependency here.... 'void *' to the rescue! I
@@ -395,14 +395,6 @@ enum {
 
  /* 2 characters for ID code and 64 for actual name */
 #define MAX_ID_NAME 66
-
-/** #ID_Runtime_Remap.status */
-enum {
-	/** new_id is directly linked in current .blend. */
-	ID_REMAP_IS_LINKED_DIRECT = 1 << 0,
-	/** There was some skipped 'user_one' usages of old_id. */
-	ID_REMAP_IS_USER_ONE_SKIPPED = 1 << 1,
-};
 
 /** Status used and counters created during id-remapping. */
 typedef struct ID_Runtime_Remap {

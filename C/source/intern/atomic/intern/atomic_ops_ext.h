@@ -259,7 +259,7 @@ void atomic_store_ptr(void **p, void *v)
 #if (LG_SIZEOF_PTR == 8)
   atomic_store_uint64((uint64_t *)p, (uint64_t)v);
 #elif (LG_SIZEOF_PTR == 4)
-  atomic_store_uint32((uint32_t *)p, (uint32_t)v);
+  atomic_store_uint32((uint32_t *)p, static_cast<uint32_t>(reinterpret_cast<uintptr_t>(v)));
 #endif
 }
 

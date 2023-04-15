@@ -172,9 +172,9 @@ struct GSet *BKE_main_gset_create(struct Main *bmain, struct GSet *gset);
 
 #define FOREACH_MAIN_LISTBASE_ID_BEGIN(_lb, _id) \
   { \
-    ID *_id_next = (_lb)->first; \
+    ID *_id_next = (ID *)(_lb)->first; \
     for ((_id) = _id_next; (_id) != NULL; (_id) = _id_next) { \
-      _id_next = (_id)->next;
+      _id_next = (ID *)(_id)->next;
 
 #define FOREACH_MAIN_LISTBASE_ID_END \
   } \
@@ -183,7 +183,7 @@ struct GSet *BKE_main_gset_create(struct Main *bmain, struct GSet *gset);
 
 #define FOREACH_MAIN_LISTBASE_BEGIN(_bmain, _lb) \
   { \
-    ListBase *_lbarray[MAX_LIBARRAY]; \
+    ListBase *_lbarray[INDEX_ID_MAX]; \
     int _i = set_listbasepointers((_bmain), _lbarray); \
     while (_i--) { \
       (_lb) = _lbarray[_i];
@@ -198,29 +198,24 @@ struct GSet *BKE_main_gset_create(struct Main *bmain, struct GSet *gset);
  * use #FOREACH_MAIN_LISTBASE and #FOREACH_MAIN_LISTBASE_ID instead
  * if you need that kind of control flow. */
 #define FOREACH_MAIN_ID_BEGIN(_bmain, _id) \
-  { \
-    ListBase *_lb; \
+  { ListBase *_lb; \
     FOREACH_MAIN_LISTBASE_BEGIN ((_bmain), _lb) { \
       FOREACH_MAIN_LISTBASE_ID_BEGIN (_lb, (_id))
 
 #define FOREACH_MAIN_ID_END \
-  FOREACH_MAIN_LISTBASE_ID_END; \
-  } \
-  FOREACH_MAIN_LISTBASE_END; \
-  } \
-  ((void)0)
+  FOREACH_MAIN_LISTBASE_ID_END; } \
+  FOREACH_MAIN_LISTBASE_END; } ((void)0)
 
 struct BlendThumbnail *BKE_main_thumbnail_from_imbuf(struct Main *bmain, struct ImBuf *img);
 struct ImBuf *BKE_main_thumbnail_to_imbuf(struct Main *bmain, struct BlendThumbnail *data);
 void BKE_main_thumbnail_create(struct Main *bmain);
 
 const char *BKE_main_blendfile_path(const struct Main *bmain) ATTR_NONNULL();
-const char *BKE_main_blendfile_path_from_global(void);
+//const char *BKE_main_blendfile_path_from_global(void);
 
 struct ListBase *which_libbase(struct Main *bmain, short type);
 
-#define MAX_LIBARRAY 41
-int set_listbasepointers(struct Main *main, struct ListBase *lb[MAX_LIBARRAY]);
+int set_listbasepointers(Main* bmain, ListBase** lb);
 
 #define MAIN_VERSION_ATLEAST(main, ver, subver) \
   ((main)->versionfile > (ver) || \
@@ -230,10 +225,18 @@ int set_listbasepointers(struct Main *main, struct ListBase *lb[MAX_LIBARRAY]);
   ((main)->versionfile < (ver) || \
    ((main)->versionfile == (ver) && (main)->subversionfile < (subver)))
 
+/**
+ * The size of thumbnails (optionally) stored in the `.blend` files header.
+ *
+ * NOTE(@campbellbarton): This is kept small as it's stored uncompressed in the `.blend` file,
+ * where a larger size would increase the size of every `.blend` file unreasonably.
+ * If we wanted to increase the size, we'd want to use compression (JPEG or similar).
+ */
 #define BLEN_THUMB_SIZE 128
 
 #define BLEN_THUMB_MEMSIZE(_x, _y) \
   (sizeof(BlendThumbnail) + ((size_t)(_x) * (size_t)(_y)) * sizeof(int))
-/** Protect against buffer overflow vulnerability & negative sizes. */
+ /** Protect against buffer overflow vulnerability & negative sizes. */
 #define BLEN_THUMB_MEMSIZE_IS_VALID(_x, _y) \
   (((_x) > 0 && (_y) > 0) && ((uint64_t)(_x) * (uint64_t)(_y) < (SIZE_MAX / (sizeof(int) * 4))))
+

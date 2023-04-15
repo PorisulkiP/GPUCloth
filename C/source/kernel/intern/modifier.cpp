@@ -29,45 +29,49 @@
 #include "DEG_depsgraph.h"
 #include "DEG_depsgraph_query.h"
 
-//#include "MOD_modifiertypes.h"
+#include "MOD_modifiertypes.h"
 
 static ModifierTypeInfo *modifier_types[NUM_MODIFIER_TYPES] = {NULL};
 static VirtualModifierData virtualModifierCommonData;
 
 void BKE_modifier_init(void)
 {
-  ModifierData *md;
+  //ModifierData *md;
+  /* Initialize modifier types */
+  modifier_type_init(modifier_types); /* MOD_utils.c */
   /* Initialize global cmmon storage used for virtual modifier list */
-  md = BKE_modifier_new(eModifierType_Armature);
-  virtualModifierCommonData.amd = *((ArmatureModifierData *)md);
-  BKE_modifier_free(md);
+  //md = BKE_modifier_new(eModifierType_Armature);
+  //virtualModifierCommonData.amd = *((ArmatureModifierData *)md);
+  //BKE_modifier_free(md);
 
-  md = BKE_modifier_new(eModifierType_Curve);
-  virtualModifierCommonData.cmd = *((CurveModifierData *)md);
-  BKE_modifier_free(md);
+  //md = BKE_modifier_new(eModifierType_Curve);
+  //virtualModifierCommonData.cmd = *((CurveModifierData *)md);
+  //BKE_modifier_free(md);
 
-  md = BKE_modifier_new(eModifierType_Lattice);
-  virtualModifierCommonData.lmd = *((LatticeModifierData *)md);
-  BKE_modifier_free(md);
+  //md = BKE_modifier_new(eModifierType_Lattice);
+  //virtualModifierCommonData.lmd = *((LatticeModifierData *)md);
+  //BKE_modifier_free(md);
 
-  md = BKE_modifier_new(eModifierType_ShapeKey);
-  virtualModifierCommonData.smd = *((ShapeKeyModifierData *)md);
-  BKE_modifier_free(md);
+  //md = BKE_modifier_new(eModifierType_ShapeKey);
+  //virtualModifierCommonData.smd = *((ShapeKeyModifierData *)md);
+  //BKE_modifier_free(md);
 
-  virtualModifierCommonData.amd.modifier.mode |= eModifierMode_Virtual;
-  virtualModifierCommonData.cmd.modifier.mode |= eModifierMode_Virtual;
-  virtualModifierCommonData.lmd.modifier.mode |= eModifierMode_Virtual;
-  virtualModifierCommonData.smd.modifier.mode |= eModifierMode_Virtual;
+  //virtualModifierCommonData.amd.modifier.mode |= eModifierMode_Virtual;
+  //virtualModifierCommonData.cmd.modifier.mode |= eModifierMode_Virtual;
+  //virtualModifierCommonData.lmd.modifier.mode |= eModifierMode_Virtual;
+  //virtualModifierCommonData.smd.modifier.mode |= eModifierMode_Virtual;
 }
 
 const ModifierTypeInfo *BKE_modifier_get_info(ModifierType type)
 {
-  /* type unsigned, no need to check < 0 */
-  if (type < NUM_MODIFIER_TYPES && modifier_types[type] && modifier_types[type]->name[0] != '\0') {
     return modifier_types[type];
-  }
+  /* type unsigned, no need to check < 0 */
+  //if (type < NUM_MODIFIER_TYPES && modifier_types[type] && modifier_types[type]->name[0] != '\0') 
+  //{
+  //  return modifier_types[type];
+  //}
 
-  return NULL;
+  //return nullptr;
 }
 
 /**
@@ -186,12 +190,13 @@ void BKE_modifier_remove_from_list(Object *ob, ModifierData *md)
 //
 ModifierData *BKE_modifiers_findby_type(Object *ob, ModifierType type)
 {
-  //LISTBASE_FOREACH (ModifierData *, md, &ob->modifiers) 
-  //{
-  //  if (md->type == type) {
-  //    return md;
-  //  }
-  //}
+  LISTBASE_FOREACH (ModifierData *, md, &ob->modifiers) 
+  {
+    if (md->type == type) 
+    {
+      return md;
+    }
+  }
   return NULL;
 }
 //
@@ -254,7 +259,7 @@ ModifierData *BKE_modifiers_findby_type(Object *ob, ModifierType type)
 //  memcpy(md_dst_data, md_src_data, (size_t)mti->structSize - data_size);
 //
 //  /* Runtime fields are never to be preserved. */
-//  md_dst->runtime = NULL;
+//  md_dst->runtime->= NULL;
 //}
 //
 //static void modifier_copy_data_id_us_cb(void *UNUSED(userData),
@@ -919,9 +924,9 @@ ModifierData *BKE_modifiers_findby_type(Object *ob, ModifierType type)
  */
 static void modwrap_dependsOnNormals(Mesh *me)
 {
-  switch ((eMeshWrapperType)me->runtime.wrapper_type) {
+  switch ((eMeshWrapperType)me->runtime->wrapper_type) {
     case ME_WRAPPER_TYPE_BMESH: {
-      EditMeshData *edit_data = me->runtime.edit_data;
+      EditMeshData *edit_data = me->runtime->edit_data;
       if (edit_data->vertexCos) {
         /* Note that 'ensure' is acceptable here since these values aren't modified in-place.
          * If that changes we'll need to recalculate. */
@@ -943,17 +948,19 @@ static void modwrap_dependsOnNormals(Mesh *me)
 
 void BKE_mesh_wrapper_ensure_mdata(Mesh* me)
 {
-    ThreadMutex* mesh_eval_mutex = (ThreadMutex*)me->runtime.eval_mutex;
-    BLI_mutex_lock(mesh_eval_mutex);
+    auto mesh_eval_mutex = &me->runtime->eval_mutex;
+    mesh_eval_mutex->lock();
 
-    if (me->runtime.wrapper_type == ME_WRAPPER_TYPE_MDATA) {
-        BLI_mutex_unlock(mesh_eval_mutex);
+    if (me->runtime->wrapper_type == ME_WRAPPER_TYPE_MDATA) 
+    {
+        mesh_eval_mutex->unlock();
         return;
     }
 
     /* Must isolate multithreaded tasks while holding a mutex lock. */
-    blender::threading::isolate_task([&]() {
-        switch (static_cast<eMeshWrapperType>(me->runtime.wrapper_type)) 
+    blender::threading::isolate_task([&]() 
+        {
+        switch (static_cast<eMeshWrapperType>(me->runtime->wrapper_type)) 
         {
         case ME_WRAPPER_TYPE_MDATA:
         case ME_WRAPPER_TYPE_SUBD: {
@@ -965,11 +972,11 @@ void BKE_mesh_wrapper_ensure_mdata(Mesh* me)
             me->totpoly = 0;
             me->totloop = 0;
 
-            BLI_assert(me->edit_mesh != nullptr);
-            BLI_assert(me->runtime.edit_data != nullptr);
+            //BLI_assert(me->edit_mesh != nullptr);
+            //BLI_assert(me->runtime->edit_data != nullptr);
 
-            BMEditMesh* em = me->edit_mesh;
-            //BM_mesh_bm_to_me_for_eval(em->bm, me, &me->runtime.cd_mask_extra);
+            //BMEditMesh* em = me->edit_mesh;
+            //BM_mesh_bm_to_me_for_eval(em->bm, me, &me->runtime->cd_mask_extra);
 
             /* Adding original index layers assumes that all BMesh mesh wrappers are created from
              * original edit mode meshes (the only case where adding original indices makes sense).
@@ -981,25 +988,27 @@ void BKE_mesh_wrapper_ensure_mdata(Mesh* me)
              * harmful. */
             //BKE_mesh_ensure_default_orig_index_customdata_no_check(me);
 
-            EditMeshData* edit_data = me->runtime.edit_data;
-            if (edit_data->vertexCos) {
+            EditMeshData* edit_data = me->runtime->edit_data;
+            if (edit_data->vertexCos) 
+            {
                 //BKE_mesh_vert_coords_apply(me, edit_data->vertexCos);
-                me->runtime.is_original = false;
+                //me->runtime->is_original = false;
             }
             break;
         }
         }
 
-        if (me->runtime.wrapper_type_finalize) {
-            //BKE_mesh_wrapper_deferred_finalize_mdata(me, &me->runtime.cd_mask_extra);
+        if (me->runtime->wrapper_type_finalize) 
+        {
+            //BKE_mesh_wrapper_deferred_finalize_mdata(me, &me->runtime->cd_mask_extra);
         }
 
         /* Keep type assignment last, so that read-only access only uses the mdata code paths after all
          * the underlying data has been initialized. */
-        me->runtime.wrapper_type = ME_WRAPPER_TYPE_MDATA;
-        });
+        me->runtime->wrapper_type = ME_WRAPPER_TYPE_MDATA;
+    });
 
-    BLI_mutex_unlock(mesh_eval_mutex);
+    mesh_eval_mutex->unlock();
 }
 
 struct Mesh *BKE_modifier_modify_mesh(ModifierData *md, const ModifierEvalContext *ctx, struct Mesh *me)
@@ -1007,7 +1016,7 @@ struct Mesh *BKE_modifier_modify_mesh(ModifierData *md, const ModifierEvalContex
   const ModifierTypeInfo *mti = BKE_modifier_get_info((ModifierType)md->type);
   BLI_assert(CustomData_has_layer(&me->pdata, CD_NORMAL) == false);
 
-  if (me->runtime.wrapper_type == ME_WRAPPER_TYPE_BMESH) 
+  if (me->runtime->wrapper_type == ME_WRAPPER_TYPE_BMESH) 
   {
     if ((mti->flags & eModifierTypeFlag_AcceptsBMesh) == 0) 
     {
@@ -1065,7 +1074,7 @@ BMEditMesh* BKE_editmesh_from_object(Object* ob)
     }
 #  endif
 #endif
-    return ((Mesh*)ob->data)->edit_mesh;
+    return nullptr;//((Mesh*)ob->data)->edit_mesh;
 }
 
 /**
@@ -1368,7 +1377,7 @@ Mesh *BKE_modifier_get_evaluated_mesh_from_evaluated_object(Object *ob_eval,
 //    BKE_modifier_session_uuid_generate(md);
 //
 //    md->error = NULL;
-//    md->runtime = NULL;
+//    md->runtime->= NULL;
 //
 //    /* Modifier data has been allocated as a part of data migration process and
 //     * no reading of nested fields from file is needed. */

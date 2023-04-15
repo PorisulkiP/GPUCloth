@@ -717,7 +717,7 @@ static void twist_get_axis(const ParticleChildModifierContext *modifier_ctx,
                            float r_axis[3])
 {
   const int num_segments = twist_num_segments(modifier_ctx);
-  const int index = clamp_i(time * num_segments, 0, num_segments);
+  const int index = clamp_i(int(time * num_segments), 0, num_segments);
   if (index > 0) {
     sub_v3_v3v3(
         r_axis, modifier_ctx->parent_keys[index].co, modifier_ctx->parent_keys[index - 1].co);
@@ -792,7 +792,7 @@ static void do_twist(const ParticleChildModifierContext *modifier_ctx,
   /* Perform rotation around parent curve. */
   float vec[3];
   sub_v3_v3v3(vec, state->co, modifier_ctx->par_co);
-  rotate_v3_v3v3fl(state->co, vec, axis, angle * 2.0f * M_PI);
+  rotate_v3_v3v3fl(state->co, vec, axis, float(angle * 2.0f * M_PI));
   add_v3_v3(state->co, modifier_ctx->par_co);
 }
 
@@ -807,7 +807,7 @@ void do_child_modifiers(const ParticleChildModifierContext *modifier_ctx,
   ChildParticle *cpa = modifier_ctx->cpa;
   ParticleSettings *part = sim->psys->part;
   CurveMapping *clumpcurve = NULL, *roughcurve = NULL;
-  int i = cpa - sim->psys->child;
+  int i = int(cpa - sim->psys->child);
   int guided = 0;
 
   //if (part->child_flag & PART_CHILD_USE_CLUMP_CURVE) {

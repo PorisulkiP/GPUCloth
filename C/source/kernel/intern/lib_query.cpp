@@ -1,42 +1,19 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
- * The Original Code is Copyright (C) 2014 by Blender Foundation.
- * All rights reserved.
- */
-
-/** \file
- * \ingroup bke
- */
-
 #include <stdlib.h>
 
 #include "anim_types.h"
 
-#include "BLI_ghash.h"
+#include "ghash.h"
 #include "BLI_linklist_stack.h"
-#include "listbase.cuh"
+#include "listbase.h"
 #include "utildefines.h"
 
-#include "BKE_anim_data.h"
-#include "BKE_idprop.h"
-#include "BKE_idtype.h"
+//#include "BKE_anim_data.h"
+//#include "BKE_idprop.h"
+//#include "BKE_idtype.h"
 #include "BKE_lib_id.h"
-#include "BKE_lib_query.h"
+#include "lib_query.h"
 #include "BKE_main.h"
-#include "BKE_node.h"
+//#include "BKE_node.h"
 
 /* status */
 enum {
@@ -70,27 +47,33 @@ typedef struct LibraryForeachIDData {
 
 bool BKE_lib_query_foreachid_process(LibraryForeachIDData *data, ID **id_pp, int cb_flag)
 {
-  if (!(data->status & IDWALK_STOP)) {
+  if (!(data->status & IDWALK_STOP)) 
+  {
     const int flag = data->flag;
     ID *old_id = *id_pp;
-    const int callback_return = data->callback(&(struct LibraryIDLinkCallbackData){
-        .user_data = data->user_data,
-        .bmain = data->bmain,
-        .id_owner = data->owner_id,
-        .id_self = data->self_id,
-        .id_pointer = id_pp,
-        .cb_flag = ((cb_flag | data->cb_flag) & ~data->cb_flag_clear)});
-    if (flag & IDWALK_READONLY) {
+    const int callback_return = 0;
+    //data->callback(&(struct LibraryIDLinkCallbackData*) {
+    //    .user_data = data->user_data,
+    //    .bmain = data->bmain,
+    //    .id_owner = data->owner_id,
+    //    .id_self = data->self_id,
+    //    .id_pointer = id_pp,
+    //    .cb_flag = ((cb_flag | data->cb_flag) & ~data->cb_flag_clear)});
+    if (flag & IDWALK_READONLY) 
+    {
       BLI_assert(*(id_pp) == old_id);
     }
     if (old_id && (flag & IDWALK_RECURSE)) {
-      if (BLI_gset_add((data)->ids_handled, old_id)) {
-        if (!(callback_return & IDWALK_RET_STOP_RECURSION)) {
+      if (BLI_gset_add((data)->ids_handled, old_id)) 
+      {
+        if (!(callback_return & IDWALK_RET_STOP_RECURSION)) 
+        {
           BLI_LINKSTACK_PUSH(data->ids_todo, old_id);
         }
       }
     }
-    if (callback_return & IDWALK_RET_STOP_ITER) {
+    if (callback_return & IDWALK_RET_STOP_ITER) 
+    {
       data->status |= IDWALK_STOP;
       return false;
     }
@@ -110,10 +93,12 @@ int BKE_lib_query_foreachid_process_callback_flag_override(LibraryForeachIDData 
                                                            const bool do_replace)
 {
   const int cb_flag_backup = data->cb_flag;
-  if (do_replace) {
+  if (do_replace) 
+  {
     data->cb_flag = cb_flag;
   }
-  else {
+  else 
+  {
     data->cb_flag |= cb_flag;
   }
   return cb_flag_backup;
@@ -127,12 +112,12 @@ static void library_foreach_ID_link(Main *bmain,
                                     int flag,
                                     LibraryForeachIDData *inherit_data);
 
-void BKE_lib_query_idpropertiesForeachIDLink_callback(ID *id_prop, void *user_data)
+void BKE_lib_query_idpropertiesForeachIDLink_callback(IDProperty *id_prop, void *user_data)
 {
   BLI_assert(id_prop->type == IDP_ID);
 
   LibraryForeachIDData *data = (LibraryForeachIDData *)user_data;
-  BKE_LIB_FOREACHID_PROCESS_ID(data, id_prop->data.pointer, IDWALK_CB_USER);
+  //BKE_LIB_FOREACHID_PROCESS_ID(data, id_prop->data.pointer, IDWALK_CB_USER);
 }
 
 bool BKE_library_foreach_ID_embedded(LibraryForeachIDData *data, ID **id_pp)
@@ -182,7 +167,8 @@ static void library_foreach_ID_link(Main *bmain,
 
   BLI_assert(inherit_data == NULL || data.bmain == inherit_data->bmain);
 
-  if (flag & IDWALK_RECURSE) {
+  if (flag & IDWALK_RECURSE) 
+  {
     /* For now, recursion implies read-only. */
     flag |= IDWALK_READONLY;
 
@@ -191,7 +177,8 @@ static void library_foreach_ID_link(Main *bmain,
 
     BLI_gset_add(data.ids_handled, id);
   }
-  else {
+  else 
+  {
     data.ids_handled = NULL;
   }
   data.flag = flag;
@@ -205,7 +192,7 @@ static void library_foreach_ID_link(Main *bmain,
 #define CALLBACK_INVOKE(check_id_super, cb_flag) \
   BKE_LIB_FOREACHID_PROCESS(&data, check_id_super, cb_flag)
 
-  for (; id != NULL; id = (flag & IDWALK_RECURSE) ? BLI_LINKSTACK_POP(data.ids_todo) : NULL) {
+  for (; id != NULL; id = (flag & IDWALK_RECURSE) ? (ID*)BLI_LINKSTACK_POP(data.ids_todo) : NULL) {
     data.self_id = id;
     /* Note that we may call this functions sometime directly on an embedded ID, without any
      * knowledge of the owner ID then.
@@ -218,13 +205,15 @@ static void library_foreach_ID_link(Main *bmain,
      * (like root nodetree of a material).
      * In that case, we do not want to generate those 'generic flags' from our current sub-data ID
      * (the node tree), but re-use those generated for the 'owner' ID (the material). */
-    if (inherit_data == NULL) {
+    if (inherit_data == NULL) 
+    {
       data.cb_flag = ID_IS_LINKED(id) ? IDWALK_CB_INDIRECT_USAGE : 0;
       /* When an ID is not in Main database, it should never refcount IDs it is using.
        * Exceptions: NodeTrees (yeah!) directly used by Materials. */
       data.cb_flag_clear = (id->tag & LIB_TAG_NO_MAIN) ? IDWALK_CB_USER | IDWALK_CB_USER_ONE : 0;
     }
-    else {
+    else 
+    {
       data.cb_flag = inherit_data->cb_flag;
       data.cb_flag_clear = inherit_data->cb_flag_clear;
     }
@@ -237,12 +226,10 @@ static void library_foreach_ID_link(Main *bmain,
        * but we might as well use it (Main->relations is always assumed valid,
        * it's responsibility of code creating it to free it,
        * especially if/when it starts modifying Main database). */
-      MainIDRelationsEntry *entry = BLI_ghash_lookup(bmain->relations->relations_from_pointers,
-                                                     id);
-      for (MainIDRelationsEntryItem *to_id_entry = entry->to_ids; to_id_entry != NULL;
-           to_id_entry = to_id_entry->next) {
-        BKE_lib_query_foreachid_process(
-            &data, to_id_entry->id_pointer.to, to_id_entry->usage_flag);
+      auto entry = (MainIDRelationsEntry*)BLI_ghash_lookup(bmain->relations->relations_from_pointers, id);
+      for (auto to_id_entry = entry->to_ids; to_id_entry != NULL; to_id_entry = to_id_entry->next)
+      {
+        BKE_lib_query_foreachid_process(&data, to_id_entry->id_pointer.to, to_id_entry->usage_flag);
       }
       continue;
     }
@@ -257,27 +244,27 @@ static void library_foreach_ID_link(Main *bmain,
                          IDWALK_CB_USER | IDWALK_CB_OVERRIDE_LIBRARY_REFERENCE);
     }
 
-    IDP_foreach_property(id->properties,
-                         IDP_TYPE_FILTER_ID,
-                         BKE_lib_query_idpropertiesForeachIDLink_callback,
-                         &data);
+  //  IDP_foreach_property(id->properties, IDP_TYPE_FILTER_ID, BKE_lib_query_idpropertiesForeachIDLink_callback, &data);
 
-    AnimData *adt = BKE_animdata_from_id(id);
-    if (adt) {
-      BKE_animdata_foreach_id(adt, &data);
-    }
+  //  AnimData *adt = BKE_animdata_from_id(id);
+  //  if (adt) {
+  //    BKE_animdata_foreach_id(adt, &data);
+  //  }
 
-    const IDTypeInfo *id_type = BKE_idtype_get_info_from_id(id);
-    if (id_type->foreach_id != NULL) {
-      id_type->foreach_id(id, &data);
+  //  const IDTypeInfo *id_type = BKE_idtype_get_info_from_id(id);
+  //  if (id_type->foreach_id != NULL) 
+  // {
+  //    id_type->foreach_id(id, &data);
 
-      if (data.status & IDWALK_STOP) {
-        break;
-      }
-    }
+  //    if (data.status & IDWALK_STOP) 
+  // {
+  //      break;
+  //    }
+  //  }
   }
 
-  if (data.ids_handled) {
+  if (data.ids_handled) 
+  {
     BLI_gset_free(data.ids_handled, NULL);
     BLI_LINKSTACK_FREE(data.ids_todo);
   }
@@ -300,13 +287,15 @@ void BKE_library_foreach_ID_link(
  */
 void BKE_library_update_ID_link_user(ID *id_dst, ID *id_src, const int cb_flag)
 {
-  if (cb_flag & IDWALK_CB_USER) {
+  if (cb_flag & IDWALK_CB_USER) 
+  {
     id_us_min(id_src);
-    id_us_plus(id_dst);
+    //id_us_plus(id_dst);
   }
-  else if (cb_flag & IDWALK_CB_USER_ONE) {
-    id_us_ensure_real(id_dst);
-  }
+  //else if (cb_flag & IDWALK_CB_USER_ONE) 
+  //{
+  //  id_us_ensure_real(id_dst);
+  //}
 }
 
 /**
@@ -329,14 +318,14 @@ bool BKE_library_id_can_use_idtype(ID *id_owner, const short id_type_used)
     return true;
   }
 
-  if (ntreeFromID(id_owner)) {
-    return true;
-  }
+  //if (ntreeFromID(id_owner)) {
+  //  return true;
+  //}
 
-  if (BKE_animdata_from_id(id_owner)) {
-    /* AnimationData can use virtually any kind of data-blocks, through drivers especially. */
-    return true;
-  }
+  //if (BKE_animdata_from_id(id_owner)) {
+  //  /* AnimationData can use virtually any kind of data-blocks, through drivers especially. */
+  //  return true;
+  //}
 
   switch ((ID_Type)id_type_owner) {
     case ID_LI:
@@ -363,8 +352,8 @@ bool BKE_library_id_can_use_idtype(ID *id_owner, const short id_type_used)
       return true;
     case ID_ME:
       return ELEM(id_type_used, ID_ME, ID_KE, ID_MA, ID_IM);
-    case ID_CU:
-      return ELEM(id_type_used, ID_OB, ID_KE, ID_MA, ID_VF);
+    //case ID_CU:
+    //  return ELEM(id_type_used, ID_OB, ID_KE, ID_MA, ID_VF);
     case ID_MB:
       return ELEM(id_type_used, ID_MA);
     case ID_MA:
@@ -377,9 +366,9 @@ bool BKE_library_id_can_use_idtype(ID *id_owner, const short id_type_used)
       return (ELEM(id_type_used, ID_TE));
     case ID_CA:
       return ELEM(id_type_used, ID_OB);
-    case ID_KE:
+    //case ID_KE:
       /* Warning! key->from, could be more types in future? */
-      return ELEM(id_type_used, ID_ME, ID_CU, ID_LT);
+      /*return ELEM(id_type_used, ID_ME, ID_CU, ID_LT);*/
     case ID_SCR:
       return ELEM(id_type_used, ID_SCE);
     case ID_WO:
@@ -408,8 +397,8 @@ bool BKE_library_id_can_use_idtype(ID *id_owner, const short id_type_used)
       return ELEM(id_type_used, ID_MA);
     case ID_WS:
       return ELEM(id_type_used, ID_SCR, ID_SCE);
-    case ID_HA:
-      return ELEM(id_type_used, ID_MA);
+    //case ID_HA:
+    //  return ELEM(id_type_used, ID_MA);
     case ID_PT:
       return ELEM(id_type_used, ID_MA);
     case ID_VO:
@@ -440,7 +429,7 @@ bool BKE_library_id_can_use_idtype(ID *id_owner, const short id_type_used)
 typedef struct IDUsersIter {
   ID *id;
 
-  ListBase *lb_array[MAX_LIBARRAY];
+  ListBase *lb_array[INDEX_ID_MAX];
   int lb_idx;
 
   ID *curr_id;
@@ -451,7 +440,7 @@ static int foreach_libblock_id_users_callback(LibraryIDLinkCallbackData *cb_data
 {
   ID **id_p = cb_data->id_pointer;
   const int cb_flag = cb_data->cb_flag;
-  IDUsersIter *iter = cb_data->user_data;
+  auto iter = (IDUsersIter*)cb_data->user_data;
 
   if (*id_p) {
     /* 'Loopback' ID pointers (the ugly 'from' ones, Object->proxy_from and Key->from).
@@ -514,28 +503,29 @@ int BKE_library_ID_use_ID(ID *id_user, ID *id_used)
 static bool library_ID_is_used(Main *bmain, void *idv, const bool check_linked)
 {
   IDUsersIter iter;
-  ListBase *lb_array[MAX_LIBARRAY];
-  ID *id = idv;
+  ListBase *lb_array[INDEX_ID_MAX];
+  ID *id = (ID*)idv;
   int i = set_listbasepointers(bmain, lb_array);
   bool is_defined = false;
 
   iter.id = id;
   iter.count_direct = iter.count_indirect = 0;
   while (i-- && !is_defined) {
-    ID *id_curr = lb_array[i]->first;
+    ID *id_curr = (ID*)lb_array[i]->first;
 
     if (!id_curr || !BKE_library_id_can_use_idtype(id_curr, GS(id->name))) {
       continue;
     }
 
-    for (; id_curr && !is_defined; id_curr = id_curr->next) {
-      if (id_curr == id) {
+    for (; id_curr && !is_defined; id_curr = (ID*)id_curr->next) 
+    {
+      if (id_curr == id) 
+      {
         /* We are not interested in self-usages (mostly from drivers or bone constraints...). */
         continue;
       }
       iter.curr_id = id_curr;
-      BKE_library_foreach_ID_link(
-          bmain, id_curr, foreach_libblock_id_users_callback, &iter, IDWALK_READONLY);
+      BKE_library_foreach_ID_link(bmain, id_curr, foreach_libblock_id_users_callback, &iter, IDWALK_READONLY);
 
       is_defined = ((check_linked ? iter.count_indirect : iter.count_direct) != 0);
     }
@@ -567,22 +557,26 @@ bool BKE_library_ID_is_indirectly_used(Main *bmain, void *idv)
 void BKE_library_ID_test_usages(Main *bmain, void *idv, bool *is_used_local, bool *is_used_linked)
 {
   IDUsersIter iter;
-  ListBase *lb_array[MAX_LIBARRAY];
-  ID *id = idv;
+  ListBase *lb_array[INDEX_ID_MAX];
+  ID *id = (ID*)idv;
   int i = set_listbasepointers(bmain, lb_array);
   bool is_defined = false;
 
   iter.id = id;
   iter.count_direct = iter.count_indirect = 0;
-  while (i-- && !is_defined) {
-    ID *id_curr = lb_array[i]->first;
+  while (i-- && !is_defined) 
+  {
+    ID *id_curr = (ID*)lb_array[i]->first;
 
-    if (!id_curr || !BKE_library_id_can_use_idtype(id_curr, GS(id->name))) {
+    if (!id_curr || !BKE_library_id_can_use_idtype(id_curr, GS(id->name))) 
+    {
       continue;
     }
 
-    for (; id_curr && !is_defined; id_curr = id_curr->next) {
-      if (id_curr == id) {
+    for (; id_curr && !is_defined; id_curr = (ID*)id_curr->next) 
+    {
+      if (id_curr == id) 
+      {
         /* We are not interested in self-usages (mostly from drivers or bone constraints...). */
         continue;
       }
@@ -604,7 +598,7 @@ static int foreach_libblock_used_linked_data_tag_clear_cb(LibraryIDLinkCallbackD
   ID *self_id = cb_data->id_self;
   ID **id_p = cb_data->id_pointer;
   const int cb_flag = cb_data->cb_flag;
-  bool *is_changed = cb_data->user_data;
+  bool *is_changed = (bool*)cb_data->user_data;
 
   if (*id_p) {
     /* The infamous 'from' pointers (Key.from, Object.proxy_from, ...).
@@ -672,16 +666,19 @@ void BKE_library_unused_linked_data_set_tag(Main *bmain, const bool do_init_tag)
  */
 void BKE_library_indirectly_used_data_tag_clear(Main *bmain)
 {
-  ListBase *lb_array[MAX_LIBARRAY];
+  ListBase *lb_array[INDEX_ID_MAX];
 
   bool do_loop = true;
-  while (do_loop) {
+  while (do_loop) 
+  {
     int i = set_listbasepointers(bmain, lb_array);
     do_loop = false;
 
     while (i--) {
-      LISTBASE_FOREACH (ID *, id, lb_array[i]) {
-        if (id->lib == NULL || id->tag & LIB_TAG_DOIT) {
+      LISTBASE_FOREACH (ID *, id, lb_array[i]) 
+      {
+        if (id->lib == NULL || id->tag & LIB_TAG_DOIT) 
+        {
           /* Local or non-indirectly-used ID (so far), no need to check it further. */
           continue;
         }

@@ -1226,6 +1226,15 @@ Object** BKE_collision_objects_create(Depsgraph* depsgraph, Object* self, Collec
     return objects;
 }
 
+void BKE_collision_relations_free(ListBase* relations)
+{
+    if (relations)
+    {
+        BLI_freelistN(relations);
+        MEM_freeN(relations);
+    }
+}
+
 void BKE_collision_objects_free(Object** objects)
 {
     if (objects) {

@@ -460,16 +460,16 @@ typedef struct CDMaskLink {
  * pointed to by md for correct evaluation, assuming the data indicated by
  * final_datamask is required at the end of the stack.
  */
-struct CDMaskLink *BKE_modifier_calc_data_masks(const struct Scene *scene,
-                                                struct Object *ob,
-                                                struct ModifierData *md,
-                                                struct CustomData_MeshMasks *final_datamask,
-                                                int required_mode,
-                                                ModifierData *previewmd,
-                                                const struct CustomData_MeshMasks *previewmask);
-struct ModifierData *BKE_modifier_get_last_preview(const struct Scene *scene,
-                                                   struct ModifierData *md,
-                                                   int required_mode);
+//struct CDMaskLink *BKE_modifier_calc_data_masks(const struct Scene *scene,
+//                                                struct Object *ob,
+//                                                struct ModifierData *md,
+//                                                struct CustomData_MeshMasks *final_datamask,
+//                                                int required_mode,
+//                                                ModifierData *previewmd,
+//                                                const struct CustomData_MeshMasks *previewmask);
+//struct ModifierData *BKE_modifier_get_last_preview(const struct Scene *scene,
+//                                                   struct ModifierData *md,
+//                                                   int required_mode);
 
 typedef struct VirtualModifierData {
   ArmatureModifierData amd;
@@ -478,27 +478,27 @@ typedef struct VirtualModifierData {
   ShapeKeyModifierData smd;
 } VirtualModifierData;
 
-struct ModifierData *BKE_modifiers_get_virtual_modifierlist(const struct Object *ob,
-                                                            struct VirtualModifierData *data);
-
-/** Ensure modifier correctness when changing ob->data. */
-void BKE_modifiers_test_object(struct Object *ob);
-
-/* here for do_versions */
-void BKE_modifier_mdef_compact_influences(struct ModifierData *md);
-
-void BKE_modifier_path_init(char *path, int path_maxlen, const char *name);
-const char *BKE_modifier_path_relbase(struct Main *bmain, struct Object *ob);
-const char *BKE_modifier_path_relbase_from_global(struct Object *ob);
+//struct ModifierData *BKE_modifiers_get_virtual_modifierlist(const struct Object *ob,
+//                                                            struct VirtualModifierData *data);
+//
+///** Ensure modifier correctness when changing ob->data. */
+//void BKE_modifiers_test_object(struct Object *ob);
+//
+///* here for do_versions */
+//void BKE_modifier_mdef_compact_influences(struct ModifierData *md);
+//
+//void BKE_modifier_path_init(char *path, int path_maxlen, const char *name);
+//const char *BKE_modifier_path_relbase(struct Main *bmain, struct Object *ob);
+//const char *BKE_modifier_path_relbase_from_global(struct Object *ob);
 
 /* Accessors of original/evaluated modifiers. */
 
 /* For a given modifier data, get corresponding original one.
  * If the modifier data is already original, return it as-is. */
-struct ModifierData *BKE_modifier_get_original(struct ModifierData *md);
-struct ModifierData *BKE_modifier_get_evaluated(struct Depsgraph *depsgraph,
-                                                struct Object *object,
-                                                struct ModifierData *md);
+//struct ModifierData *BKE_modifier_get_original(struct ModifierData *md);
+//struct ModifierData *BKE_modifier_get_evaluated(struct Depsgraph *depsgraph,
+//                                                struct Object *object,
+//                                                struct ModifierData *md);
 
 /* wrappers for modifier callbacks that ensure valid normals */
 
@@ -506,26 +506,26 @@ struct Mesh *BKE_modifier_modify_mesh(ModifierData *md,
                                       const struct ModifierEvalContext *ctx,
                                       struct Mesh *me);
 
-void BKE_modifier_deform_verts(ModifierData *md,
-                               const struct ModifierEvalContext *ctx,
-                               struct Mesh *me,
-                               float (*vertexCos)[3],
-                               int numVerts);
-
-void BKE_modifier_deform_vertsEM(ModifierData *md,
-                                 const struct ModifierEvalContext *ctx,
-                                 struct BMEditMesh *em,
-                                 struct Mesh *me,
-                                 float (*vertexCos)[3],
-                                 int numVerts);
+//void BKE_modifier_deform_verts(ModifierData *md,
+//                               const struct ModifierEvalContext *ctx,
+//                               struct Mesh *me,
+//                               float (*vertexCos)[3],
+//                               int numVerts);
+//
+//void BKE_modifier_deform_vertsEM(ModifierData *md,
+//                                 const struct ModifierEvalContext *ctx,
+//                                 struct BMEditMesh *em,
+//                                 struct Mesh *me,
+//                                 float (*vertexCos)[3],
+//                                 int numVerts);
 
 struct Mesh *BKE_modifier_get_evaluated_mesh_from_evaluated_object(struct Object *ob_eval,
                                                                    const bool get_cage_mesh);
 
-void BKE_modifier_check_uuids_unique_and_report(const struct Object *object);
-
-void BKE_modifier_blend_write(struct BlendWriter *writer, struct ListBase *modbase);
-void BKE_modifier_blend_read_data(struct BlendDataReader *reader,
-                                  struct ListBase *lb,
-                                  struct Object *ob);
-void BKE_modifier_blend_read_lib(struct BlendLibReader *reader, struct Object *ob);
+//void BKE_modifier_check_uuids_unique_and_report(const struct Object *object);
+//
+//void BKE_modifier_blend_write(struct BlendWriter *writer, struct ListBase *modbase);
+//void BKE_modifier_blend_read_data(struct BlendDataReader *reader,
+//                                  struct ListBase *lb,
+//                                  struct Object *ob);
+//void BKE_modifier_blend_read_lib(struct BlendLibReader *reader, struct Object *ob);

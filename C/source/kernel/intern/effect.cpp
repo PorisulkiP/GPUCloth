@@ -52,7 +52,7 @@ PartDeflect* BKE_partdeflect_new(int type)
 
     pd = (PartDeflect*)MEM_callocN(sizeof(PartDeflect), "PartDeflect");
 
-    pd->forcefield = type;
+    pd->forcefield = short(type);
     pd->pdef_sbdamp = 0.1f;
     pd->pdef_sbift = 0.2f;
     pd->pdef_sboft = 0.02f;
@@ -346,7 +346,7 @@ void pd_point_from_particle(ParticleSimulationData* sim,
     ParticleSettings* part = sim->psys->part;
     point->loc = state->co;
     point->vel = state->vel;
-    point->index = pa - sim->psys->particles;
+    point->index = int(pa - sim->psys->particles);
     point->size = pa->size;
     point->charge = 0.0f;
 
@@ -439,7 +439,8 @@ static float eff_calc_visibility(ListBase* colliders,
     if (!(eff->pd->flag & PFIELD_VISIBILITY)) {
         return visibility;
     }
-    if (!colls) {
+    if (!colls) 
+    {
         colls = BKE_collider_cache_create(eff->depsgraph, eff->ob, NULL);
     }
     if (!colls) {
@@ -525,7 +526,7 @@ static float falloff_func(
         mindist = 0.0;
     }
 
-    return pow((double)(1.0f + fac - mindist), (double)(-power));
+    return (float)pow((double)(1.0f + fac - mindist), (double)(-power));
 }
 
 static float falloff_func_dist(PartDeflect* pd, float fac)
@@ -899,7 +900,7 @@ static void do_physical_effector(EffectorCache* eff,
         mul_v3_fl(force, point->charge * strength * efd->falloff);
         break;
     case PFIELD_LENNARDJ:
-        fac = pow((efd->size + point->size) / efd->distance, 6.0);
+        fac = (float)pow((efd->size + point->size) / efd->distance, 6.0);
 
         fac = -fac * (1.0f - fac) / efd->distance;
 
@@ -1235,22 +1236,26 @@ void BKE_sim_debug_data_clear(void)
 
 void BKE_sim_debug_data_clear_category(const char* category)
 {
-    int category_hash = (int)BLI_ghashutil_strhash_p(category);
+    auto category_hash = (unsigned int)BLI_ghashutil_strhash_p(category);
 
-    if (!_sim_debug_data) {
+    if (!_sim_debug_data) 
+    {
         return;
     }
 
-    if (_sim_debug_data->gh) {
+    if (_sim_debug_data->gh) 
+    {
         GHashIterator iter;
         BLI_ghashIterator_init(&iter, _sim_debug_data->gh);
-        while (!BLI_ghashIterator_done(&iter)) {
+        while (!BLI_ghashIterator_done(&iter)) 
+        {
             const SimDebugElement* elem = (SimDebugElement*)BLI_ghashIterator_getValue(&iter);
 
             /* Removing invalidates the current iterator, so step before removing. */
             BLI_ghashIterator_step(&iter);
 
-            if (elem->category_hash == category_hash) {
+            if (elem->category_hash == category_hash) 
+            {
                 BLI_ghash_remove(_sim_debug_data->gh, elem, NULL, debug_element_free);
             }
         }

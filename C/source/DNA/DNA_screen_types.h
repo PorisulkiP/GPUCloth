@@ -8,7 +8,7 @@
 #pragma once
 
 #include "defs.cuh"
-#include "listBase.cuh"
+#include "listBase.h"
 #include "vec_types.cuh"
 #include "DNA_view2d_types.h"
 
@@ -47,7 +47,7 @@ typedef struct bScreen {
   /** Screen level regions (menus), runtime only. */
   ListBase regionbase;
 
-  struct Scene *scene DNA_DEPRECATED;
+  struct Scene *scene;
 
   /** General flags. */
   short flag;
@@ -386,7 +386,7 @@ typedef struct ScrArea {
   short winx, winy;
 
   /** OLD! 0=no header, 1= down, 2= up. */
-  char headertype DNA_DEPRECATED;
+  char headertype;
   /** Private, for spacetype refresh callback. */
   char do_refresh;
   short flag;

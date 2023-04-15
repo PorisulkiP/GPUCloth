@@ -178,7 +178,7 @@ static float cloth_calc_average_pressure(ClothModifierData* clmd, const float* v
     return total_force / total_area;
 }
 
-int SIM_cloth_solver_init(Object* ob, ClothModifierData* clmd)
+int SIM_cloth_solver_init(ClothModifierData* clmd)
 {
     Cloth* cloth = clmd->clothObject;
     ClothVertex* verts = cloth->verts;

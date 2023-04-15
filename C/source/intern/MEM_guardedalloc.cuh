@@ -10,6 +10,7 @@
  * module, the result is undefined.*/
 extern size_t (*MEM_allocN_len)(const void *vmemh) ATTR_WARN_UNUSED_RESULT;
 
+#pragma warning(disable: 4244)
 
 #define BLI_array_alloca(arr, realsize) alloca(sizeof(*arr) * (realsize))
 

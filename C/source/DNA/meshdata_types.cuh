@@ -73,7 +73,7 @@ typedef struct MPoly {
   /** Keep signed since we need to subtract when getting the previous loop. */
   int totloop;
   short mat_nr;
-  char flag, _pad;
+  char flag;// , _pad;
 } MPoly;
 
 /** #MPoly.flag */
@@ -305,7 +305,7 @@ enum {
  * Use for reading old files and in a handful of cases which should be removed eventually.
  */
 typedef struct MFace {
-  uint v1, v2, v3, v4;
+  int v1, v2, v3, v4;
   short mat_nr;
   /** We keep edcode, for conversion to edges draw flags in old files. */
   char edcode, flag;

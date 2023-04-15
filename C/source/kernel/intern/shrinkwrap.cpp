@@ -129,9 +129,9 @@ bool BKE_shrinkwrap_init_tree( ShrinkwrapTreeData *data, Mesh *mesh, int shrinkT
     }
   }
 
-  if (shrinkType == MOD_SHRINKWRAP_TARGET_PROJECT) {
-    data->boundary = mesh->runtime.shrinkwrap_data;
-  }
+  //if (shrinkType == MOD_SHRINKWRAP_TARGET_PROJECT) {
+  //  data->boundary = mesh->runtime->shrinkwrap_data;
+  //}
 
   return true;
 }
@@ -145,18 +145,18 @@ void BKE_shrinkwrap_free_tree(ShrinkwrapTreeData *data)
 /* Free boundary data for target project */
 void BKE_shrinkwrap_discard_boundary_data(struct Mesh *mesh)
 {
-  struct ShrinkwrapBoundaryData *data = mesh->runtime.shrinkwrap_data;
+  //struct ShrinkwrapBoundaryData *data = mesh->runtime->shrinkwrap_data;
 
-  if (data != NULL) {
-    MEM_freeN((void *)data->edge_is_boundary);
-    MEM_freeN((void *)data->looptri_has_boundary);
-    MEM_freeN((void *)data->vert_boundary_id);
-    MEM_freeN((void *)data->boundary_verts);
+  //if (data != NULL) {
+  //  MEM_freeN((void *)data->edge_is_boundary);
+  //  MEM_freeN((void *)data->looptri_has_boundary);
+  //  MEM_freeN((void *)data->vert_boundary_id);
+  //  MEM_freeN((void *)data->boundary_verts);
 
-    MEM_freeN(data);
-  }
+  //  MEM_freeN(data);
+  //}
 
-  mesh->runtime.shrinkwrap_data = NULL;
+  //mesh->runtime->shrinkwrap_data = NULL;
 }
 
 /* Accumulate edge for average boundary edge direction. */
@@ -315,7 +315,7 @@ void BKE_shrinkwrap_compute_boundary_data(struct Mesh *mesh)
 {
   BKE_shrinkwrap_discard_boundary_data(mesh);
 
-  mesh->runtime.shrinkwrap_data = shrinkwrap_build_boundary_data(mesh);
+  //mesh->runtime->shrinkwrap_data = shrinkwrap_build_boundary_data(mesh);
 }
 
 /**
@@ -769,8 +769,7 @@ static void target_project_tri_clamp(float x[3])
 }
 
 /* Correct the Newton's method step to keep the coordinates within the triangle. */
-static bool target_project_tri_correct(void *UNUSED(userdata),
-                                       const float x[3],
+static bool target_project_tri_correct(const float x[3],
                                        float step[3],
                                        float x_next[3])
 {
@@ -886,15 +885,12 @@ static bool target_project_solve_point_tri(const float *vtri_co[3],
 
   bool ok = BLI_newton3d_solve(target_project_tri_deviation,
                                target_project_tri_jacobian,
-                               target_project_tri_correct,
-                               &tri_data,
-                               epsilon,
-                               20,
-                               trace,
-                               x,
-                               x);
+                               (Newton3D_CorrectionFunc)target_project_tri_correct,
+                               &tri_data, epsilon,
+                               20, trace, x, x);
 
-  if (ok) {
+  if (ok) 
+  {
     copy_v3_v3(r_hit_co, tri_data.co_interp);
     copy_v3_v3(r_hit_no, tri_data.no_interp);
 

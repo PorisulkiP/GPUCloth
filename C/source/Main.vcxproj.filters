@@ -217,9 +217,6 @@
     <ClInclude Include="intern\atomic\intern\atomic_ops_ext.h">
       <Filter>intern</Filter>
     </ClInclude>
-    <ClInclude Include="lib\task.h">
-      <Filter>lib</Filter>
-    </ClInclude>
     <ClInclude Include="lib\task.hh">
       <Filter>lib</Filter>
     </ClInclude>
@@ -289,7 +286,7 @@
     <ClInclude Include="kernel\object.h">
       <Filter>lib</Filter>
     </ClInclude>
-    <ClInclude Include="lib\BLI_map.hpp">
+    <ClInclude Include="lib\BLI_map.hh">
       <Filter>Data_types</Filter>
     </ClInclude>
     <ClInclude Include="lib\BLI_vector.hh">
@@ -342,6 +339,40 @@
     </ClInclude>
     <ClInclude Include="kernel\BKE_DerivedMesh.h">
       <Filter>kernel</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\BLI_assert.h">
+      <Filter>lib</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\BKE_lib_remap.h">
+      <Filter>kernel</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\BLI_linklist_stack.h">
+      <Filter>lib</Filter>
+    </ClInclude>
+    <ClInclude Include="modifiers\MOD_modifiertypes.h">
+      <Filter>modifiers</Filter>
+    </ClInclude>
+    <ClInclude Include="modifiers\intern\MOD_util.h">
+      <Filter>modifiers</Filter>
+    </ClInclude>
+    <ClInclude Include="DNA\DNA_screen_types.h" />
+    <ClInclude Include="DNA\DNA_modifier_defaults.h">
+      <Filter>DNA</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\intern\subdiv_inline.h" />
+    <ClInclude Include="lib\BLI_dynstr.h">
+      <Filter>lib</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\BLI_hash_tables.hh" />
+    <ClInclude Include="lib\BLI_map_slots.hh" />
+    <ClInclude Include="lib\BLI_math_vector_types.hh">
+      <Filter>lib</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\BLI_math_vector.hh">
+      <Filter>lib</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\task.h">
+      <Filter>lib</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -421,6 +452,9 @@
     </Filter>
     <Filter Include="bmesh\tools">
       <UniqueIdentifier>{1c7be30c-4833-499b-bbb9-b1abae0ff55b}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="modifiers">
+      <UniqueIdentifier>{50ad1a43-09e6-4cc8-a610-3897b1282b95}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
@@ -633,6 +667,21 @@
     </ClCompile>
     <ClCompile Include="kernel\intern\mesh_normals.cpp">
       <Filter>kernel\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\intern\lib_remap.cpp">
+      <Filter>kernel\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\intern\lib_query.cpp">
+      <Filter>kernel\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="modifiers\intern\MOD_util.cpp">
+      <Filter>modifiers</Filter>
+    </ClCompile>
+    <ClCompile Include="modifiers\intern\MOD_cloth.cpp">
+      <Filter>modifiers</Filter>
+    </ClCompile>
+    <ClCompile Include="lib\intern\BLI_dynstr.cpp">
+      <Filter>lib\intern</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

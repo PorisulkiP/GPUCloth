@@ -2,6 +2,7 @@
 
 #include "modifier_types.cuh"
 #include "listbase.h"
+#include "mallocn_intern.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -53,24 +54,17 @@ typedef struct CollisionRelation {
   struct Object *ob;
 } CollisionRelation;
 
-struct ListBase *BKE_collision_relations_create(struct Depsgraph *depsgraph,
-                                                struct Collection *collection,
-                                                uint modifier_type);
-inline void BKE_collision_relations_free(struct ListBase *relations)
-{
-    if (relations) {
-        BLI_freelistN(relations);
-        MEM_freeN(relations);
-    }
-}
+//struct ListBase *BKE_collision_relations_create(struct Depsgraph *depsgraph,
+//                                                struct Collection *collection,
+//                                                uint modifier_type);
+
+void BKE_collision_relations_free(struct ListBase* relations);
 
 /* Collision object lists for physics simulation evaluation. */
 
 struct Object **BKE_collision_objects_create(struct Depsgraph *depsgraph,
-                                             struct Object *self,
-                                             struct Collection *collection,
-                                             uint *numcollobj,
-                                             uint modifier_type);
+                                             struct Object *self, struct Collection *collection,
+                                             uint *numcollobj,  uint modifier_type);
 void BKE_collision_objects_free(struct Object **objects);
 
 typedef struct ColliderCache {

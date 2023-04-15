@@ -294,7 +294,7 @@
 //  PARTICLE_P;
 //
 //  /* CACHE LOCATIONS */
-//  if (!mesh_final->runtime.deformed_only) {
+//  if (!mesh_final->runtime->deformed_only) {
 //    /* Will use later to speed up subsurf/evaluated mesh. */
 //    LinkNode *node, *nodedmelem, **nodearray;
 //    int totdmelem, totelem, i, *origindex, *origindex_poly = NULL;
@@ -3284,7 +3284,7 @@ ParticleSystem *psys_get_target_system(Object *ob, ParticleTarget *pt)
 //  mesh = *r_mesh;
 //  if (!mesh) {
 //    *r_mesh = mesh = BKE_mesh_new_nomain(totpoint, totedge, 0, 0, 0);
-//    CustomData_add_layer(&mesh->vdata, CD_MDEFORMVERT, CD_CALLOC, NULL, mesh->totvert);
+//    CustomData_add_layer(&mesh->vdata, CD_MDEFORMVERT, CD_SET_DEFAULT, NULL, mesh->totvert);
 //    BKE_mesh_update_customdata_pointers(mesh, false);
 //  }
 //  mvert = mesh->mvert;

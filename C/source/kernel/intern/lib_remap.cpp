@@ -1,51 +1,27 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- */
-
-/** \file
- * \ingroup bke
- *
- * Contains management of ID's for remapping.
- */
-
 #include "utildefines.h"
 
 #include "DNA_collection_types.h"
 #include "object_types.cuh"
 
-#include "BKE_armature.h"
-#include "BKE_collection.h"
-#include "BKE_curve.h"
-#include "BKE_layer.h"
+//#include "BKE_armature.h"
+//#include "collection.h"
+//#include "BKE_curve.h"
+//#include "BKE_layer.h"
 #include "BKE_lib_id.h"
-#include "BKE_lib_query.h"
+//#include "BKE_lib_query.h"
 #include "BKE_lib_remap.h"
 #include "BKE_main.h"
-#include "BKE_material.h"
-#include "BKE_mball.h"
-#include "BKE_modifier.h"
-#include "BKE_multires.h"
-#include "BKE_node.h"
-#include "BKE_object.h"
+//#include "BKE_material.h"
+//#include "BKE_mball.h"
+//#include "BKE_modifier.h"
+//#include "BKE_multires.h"
+//#include "BKE_node.h"
+#include "object.h"
 
 #include "DEG_depsgraph.h"
 #include "DEG_depsgraph_build.h"
 
 #include "lib_intern.h" /* own include */
-
-static CLG_LogRef LOG = {.identifier = "bke.lib_remap"};
 
 BKE_library_free_notifier_reference_cb free_notifier_reference_cb = NULL;
 
@@ -100,7 +76,7 @@ static int foreach_libblock_remap_callback(LibraryIDLinkCallbackData *cb_data)
   ID *id_owner = cb_data->id_owner;
   ID *id_self = cb_data->id_self;
   ID **id_p = cb_data->id_pointer;
-  IDRemap *id_remap_data = cb_data->user_data;
+  IDRemap *id_remap_data = (IDRemap*)cb_data->user_data;
   ID *old_id = id_remap_data->old_id;
   ID *new_id = id_remap_data->new_id;
 
@@ -128,9 +104,8 @@ static int foreach_libblock_remap_callback(LibraryIDLinkCallbackData *cb_data)
      * on the other hand since they get reset to lib data on file open/reload it is indirect too.
      * Edit Mode is also a 'skip direct' case. */
     const bool is_obj = (GS(id_owner->name) == ID_OB);
-    const bool is_obj_proxy = (is_obj &&
-                               (((Object *)id_owner)->proxy || ((Object *)id_owner)->proxy_group));
-    const bool is_obj_editmode = (is_obj && BKE_object_is_in_editmode((Object *)id_owner));
+    const bool is_obj_proxy = (is_obj && (((Object *)id_owner)->proxy || ((Object *)id_owner)->proxy_group));
+    const bool is_obj_editmode = false;// (is_obj && BKE_object_is_in_editmode((Object*)id_owner));
     const bool is_never_null = ((cb_flag & IDWALK_CB_NEVER_NULL) && (new_id == NULL) &&
                                 (id_remap_data->flag & ID_REMAP_FORCE_NEVER_NULL_USAGE) == 0);
     const bool skip_reference = (id_remap_data->flag & ID_REMAP_SKIP_OVERRIDE_LIBRARY) != 0;
@@ -188,45 +163,51 @@ static int foreach_libblock_remap_callback(LibraryIDLinkCallbackData *cb_data)
         id_remap_data->status |= ID_REMAP_IS_USER_ONE_SKIPPED;
       }
     }
-    else {
-      if (!is_never_null) {
+    else 
+    {
+      if (!is_never_null) 
+      {
         *id_p = new_id;
-        DEG_id_tag_update_ex(id_remap_data->bmain,
-                             id_self,
-                             ID_RECALC_COPY_ON_WRITE | ID_RECALC_TRANSFORM | ID_RECALC_GEOMETRY);
-        if (id_self != id_owner) {
-          DEG_id_tag_update_ex(id_remap_data->bmain,
-                               id_owner,
-                               ID_RECALC_COPY_ON_WRITE | ID_RECALC_TRANSFORM | ID_RECALC_GEOMETRY);
+        //DEG_id_tag_update_ex(id_remap_data->bmain, id_self, ID_RECALC_COPY_ON_WRITE | ID_RECALC_TRANSFORM | ID_RECALC_GEOMETRY);
+        if (id_self != id_owner) 
+        {
+          //DEG_id_tag_update_ex(id_remap_data->bmain, id_owner, ID_RECALC_COPY_ON_WRITE | ID_RECALC_TRANSFORM | ID_RECALC_GEOMETRY);
         }
       }
-      if (cb_flag & IDWALK_CB_USER) {
+      if (cb_flag & IDWALK_CB_USER) 
+      {
         /* NOTE: We don't user-count IDs which are not in the main database.
          * This is because in certain conditions we can have data-blocks in
          * the main which are referencing data-blocks outside of it.
          * For example, BKE_mesh_new_from_object() called on an evaluated
          * object will cause such situation.
          */
-        if ((old_id->tag & LIB_TAG_NO_MAIN) == 0) {
+        if ((old_id->tag & LIB_TAG_NO_MAIN) == 0) 
+        {
           id_us_min(old_id);
         }
-        if (new_id != NULL && (new_id->tag & LIB_TAG_NO_MAIN) == 0) {
+        if (new_id != NULL && (new_id->tag & LIB_TAG_NO_MAIN) == 0) 
+        {
           /* We do not want to handle LIB_TAG_INDIRECT/LIB_TAG_EXTERN here. */
           new_id->us++;
         }
       }
-      else if (cb_flag & IDWALK_CB_USER_ONE) {
-        id_us_ensure_real(new_id);
+      else if (cb_flag & IDWALK_CB_USER_ONE) 
+      {
+        //id_us_ensure_real(new_id);
         /* We cannot affect old_id->us directly, LIB_TAG_EXTRAUSER(_SET)
          * are assumed to be set as needed, that extra user is processed in final handling. */
       }
-      if (!is_indirect || is_obj_proxy) {
+      if (!is_indirect || is_obj_proxy) 
+      {
         id_remap_data->status |= ID_REMAP_IS_LINKED_DIRECT;
       }
       /* We need to remap proxy_from pointer of remapped proxy... sigh. */
-      if (is_obj_proxy && new_id != NULL) {
+      if (is_obj_proxy && new_id != NULL) 
+      {
         Object *ob = (Object *)id_owner;
-        if (ob->proxy == (Object *)new_id) {
+        if (ob->proxy == (Object *)new_id) 
+        {
           ob->proxy->proxy_from = ob;
         }
       }
@@ -238,10 +219,12 @@ static int foreach_libblock_remap_callback(LibraryIDLinkCallbackData *cb_data)
 
 static void libblock_remap_data_preprocess(IDRemap *r_id_remap_data)
 {
-  switch (GS(r_id_remap_data->id_owner->name)) {
+  switch (GS(r_id_remap_data->id_owner->name)) 
+  {
     case ID_OB: {
       ID *old_id = r_id_remap_data->old_id;
-      if (!old_id || GS(old_id->name) == ID_AR) {
+      if (!old_id || GS(old_id->name) == ID_AR) 
+      {
         Object *ob = (Object *)r_id_remap_data->id_owner;
         /* Object's pose holds reference to armature bones. sic */
         /* Note that in theory, we should have to bother about linked/non-linked/never-null/etc.
@@ -249,13 +232,14 @@ static void libblock_remap_data_preprocess(IDRemap *r_id_remap_data)
          * Fortunately, this is just a tag, so we can accept to 'over-tag' a bit for pose recalc,
          * and avoid another complex and risky condition nightmare like the one we have in
          * foreach_libblock_remap_callback(). */
-        if (ob->pose && (!old_id || ob->data == old_id)) {
-          BLI_assert(ob->type == OB_ARMATURE);
-          ob->pose->flag |= POSE_RECALC;
-          /* We need to clear pose bone pointers immediately, some code may access those before
-           * pose is actually recomputed, which can lead to segfault. */
-          BKE_pose_clear_pointers(ob->pose);
-        }
+        //if (ob->pose && (!old_id || ob->data == old_id)) 
+        //{
+        //  BLI_assert(ob->type == OB_ARMATURE);
+        //  ob->pose->flag |= POSE_RECALC;
+        //  /* We need to clear pose bone pointers immediately, some code may access those before
+        //   * pose is actually recomputed, which can lead to segfault. */
+        //  BKE_pose_clear_pointers(ob->pose);
+        //}
       }
       break;
     }
@@ -264,84 +248,91 @@ static void libblock_remap_data_preprocess(IDRemap *r_id_remap_data)
   }
 }
 
+
 /**
  * Can be called with both old_ob and new_ob being NULL,
  * this means we have to check whole Main database then.
  */
-static void libblock_remap_data_postprocess_object_update(Main *bmain,
-                                                          Object *old_ob,
-                                                          Object *new_ob)
+static void libblock_remap_data_postprocess_object_update(Main *bmain, Object *old_ob, Object *new_ob)
 {
-  if (new_ob == NULL) {
-    /* In case we unlinked old_ob (new_ob is NULL), the object has already
-     * been removed from the scenes and their collections. We still have
-     * to remove the NULL children from collections not used in any scene. */
-    BKE_collections_object_remove_nulls(bmain);
-  }
+  //if (!new_ob) 
+  //{
+  //  /* In case we unlinked old_ob (new_ob is NULL), the object has already
+  //   * been removed from the scenes and their collections. We still have
+  //   * to remove the NULL children from collections not used in any scene. */
+  //  BKE_collections_object_remove_nulls(bmain);
+  //}
 
-  BKE_main_collection_sync_remap(bmain);
+  //BKE_main_collection_sync_remap(bmain);
 
-  if (old_ob == NULL) {
-    for (Object *ob = bmain->objects.first; ob != NULL; ob = ob->id.next) {
-      if (ob->type == OB_MBALL && BKE_mball_is_basis(ob)) {
-        DEG_id_tag_update(&ob->id, ID_RECALC_GEOMETRY);
-      }
-    }
-  }
-  else {
-    for (Object *ob = bmain->objects.first; ob != NULL; ob = ob->id.next) {
-      if (ob->type == OB_MBALL && BKE_mball_is_basis_for(ob, old_ob)) {
-        DEG_id_tag_update(&ob->id, ID_RECALC_GEOMETRY);
-        break; /* There is only one basis... */
-      }
-    }
-  }
+  //if (old_ob == NULL) 
+  //{
+  //  for (Object *ob = (Object*)bmain->objects.first; ob != NULL; ob = (Object*)ob->id.next)
+  //  {
+  //    if (ob->type == OB_MBALL && BKE_mball_is_basis(ob)) 
+  //    {
+  //      DEG_id_tag_update(&ob->id, ID_RECALC_GEOMETRY);
+  //    }
+  //  }
+  //}
+  //else {
+  //  for (Object *ob = (Object*)bmain->objects.first; ob != NULL; ob = (Object*)ob->id.next)
+  //  {
+  //    if (ob->type == OB_MBALL && BKE_mball_is_basis_for(ob, old_ob)) 
+  //    {
+  //      DEG_id_tag_update(&ob->id, ID_RECALC_GEOMETRY);
+  //      break; /* There is only one basis... */
+  //    }
+  //  }
+  //}
 }
 
 /* Can be called with both old_collection and new_collection being NULL,
  * this means we have to check whole Main database then. */
 static void libblock_remap_data_postprocess_collection_update(Main *bmain,
-                                                              Collection *UNUSED(old_collection),
+                                                              Collection */*old_collection*/,
                                                               Collection *new_collection)
 {
-  if (new_collection == NULL) {
-    /* XXX Complex cases can lead to NULL pointers in other collections than old_collection,
-     * and BKE_main_collection_sync_remap() does not tolerate any of those, so for now always check
-     * whole existing collections for NULL pointers.
-     * I'd consider optimizing that whole collection remapping process a TODO for later. */
-    BKE_collections_child_remove_nulls(bmain, NULL /*old_collection*/);
-  }
-  else {
-    /* Temp safe fix, but a "tad" brute force... We should probably be able to use parents from
-     * old_collection instead? */
-    BKE_main_collections_parent_relations_rebuild(bmain);
-  }
+  //if (new_collection == NULL) {
+  //  /* XXX Complex cases can lead to NULL pointers in other collections than old_collection,
+  //   * and BKE_main_collection_sync_remap() does not tolerate any of those, so for now always check
+  //   * whole existing collections for NULL pointers.
+  //   * I'd consider optimizing that whole collection remapping process a TODO for later. */
+  //  BKE_collections_child_remove_nulls(bmain, NULL /*old_collection*/);
+  //}
+  //else {
+  //  /* Temp safe fix, but a "tad" brute force... We should probably be able to use parents from
+  //   * old_collection instead? */
+  //  BKE_main_collections_parent_relations_rebuild(bmain);
+  //}
 
-  BKE_main_collection_sync_remap(bmain);
+  //BKE_main_collection_sync_remap(bmain);
 }
 
 static void libblock_remap_data_postprocess_obdata_relink(Main *bmain, Object *ob, ID *new_id)
 {
-  if (ob->data == new_id) {
-    switch (GS(new_id->name)) {
-      case ID_ME:
-        multires_force_sculpt_rebuild(ob);
-        break;
-      case ID_CU:
-        BKE_curve_type_test(ob);
-        break;
-      default:
-        break;
-    }
-    BKE_modifiers_test_object(ob);
-    BKE_object_materials_test(bmain, ob, new_id);
-  }
+  //if (ob->data == new_id) 
+  //{
+  //  switch (GS(new_id->name)) 
+  //  {
+  //    case ID_ME:
+  //      multires_force_sculpt_rebuild(ob);
+  //      break;
+  //    case ID_CU:
+  //      BKE_curve_type_test(ob);
+  //      break;
+  //    default:
+  //      break;
+  //  }
+  //  BKE_modifiers_test_object(ob);
+  //  BKE_object_materials_test(bmain, ob, new_id);
+  //}
 }
 
 static void libblock_remap_data_postprocess_nodetree_update(Main *bmain, ID *new_id)
 {
   /* Update all group nodes using a node group. */
-  ntreeUpdateAllUsers(bmain, new_id);
+  //ntreeUpdateAllUsers(bmain, new_id);
 }
 
 /**
@@ -403,18 +394,16 @@ static void libblock_remap_data(
      * sounds rather unlikely currently, though, so this will do for now. */
     ID *id_curr;
 
-    FOREACH_MAIN_ID_BEGIN (bmain, id_curr) {
-      if (BKE_library_id_can_use_idtype(id_curr, GS(old_id->name))) {
+    FOREACH_MAIN_ID_BEGIN (bmain, id_curr) 
+    {
+      if (BKE_library_id_can_use_idtype(id_curr, GS(old_id->name))) 
+      {
         /* Note that we cannot skip indirect usages of old_id here (if requested),
          * we still need to check it for the user count handling...
          * XXX No more true (except for debug usage of those skipping counters). */
         r_id_remap_data->id_owner = id_curr;
         libblock_remap_data_preprocess(r_id_remap_data);
-        BKE_library_foreach_ID_link(NULL,
-                                    id_curr,
-                                    foreach_libblock_remap_callback,
-                                    (void *)r_id_remap_data,
-                                    foreach_id_flags);
+        BKE_library_foreach_ID_link(NULL, id_curr, foreach_libblock_remap_callback, (void *)r_id_remap_data, foreach_id_flags);
       }
     }
     FOREACH_MAIN_ID_END;
@@ -423,12 +412,13 @@ static void libblock_remap_data(
   /* XXX We may not want to always 'transfer' fake-user from old to new id...
    *     Think for now it's desired behavior though,
    *     we can always add an option (flag) to control this later if needed. */
-  if (old_id && (old_id->flag & LIB_FAKEUSER)) {
-    id_fake_user_clear(old_id);
-    id_fake_user_set(new_id);
-  }
+  //if (old_id && (old_id->flag & LIB_FAKEUSER)) 
+  // {
+  //  id_fake_user_clear(old_id);
+  //  id_fake_user_set(new_id);
+  //}
 
-  id_us_clear_real(old_id);
+  //id_us_clear_real(old_id);
 
   if (new_id && (new_id->tag & LIB_TAG_INDIRECT) &&
       (r_id_remap_data->status & ID_REMAP_IS_LINKED_DIRECT)) {
@@ -453,8 +443,8 @@ static void libblock_remap_data(
 void BKE_libblock_remap_locked(Main *bmain, void *old_idv, void *new_idv, const short remap_flags)
 {
   IDRemap id_remap_data;
-  ID *old_id = old_idv;
-  ID *new_id = new_idv;
+  ID *old_id = (ID*)old_idv;
+  ID *new_id = (ID*)new_idv;
   int skipped_direct, skipped_refcounted;
 
   BLI_assert(old_id != NULL);
@@ -480,20 +470,21 @@ void BKE_libblock_remap_locked(Main *bmain, void *old_idv, void *new_idv, const 
   /* If old_id was used by some ugly 'user_one' stuff (like Image or Clip editors...), and user
    * count has actually been incremented for that, we have to decrease once more its user count...
    * unless we had to skip some 'user_one' cases. */
-  if ((old_id->tag & LIB_TAG_EXTRAUSER_SET) &&
-      !(id_remap_data.status & ID_REMAP_IS_USER_ONE_SKIPPED)) {
-    id_us_clear_real(old_id);
+  if ((old_id->tag & LIB_TAG_EXTRAUSER_SET) && !(id_remap_data.status & ID_REMAP_IS_USER_ONE_SKIPPED)) 
+  {
+    //id_us_clear_real(old_id);
   }
 
-  if (old_id->us - skipped_refcounted < 0) {
-    CLOG_ERROR(&LOG,
-               "Error in remapping process from '%s' (%p) to '%s' (%p): "
-               "wrong user count in old ID after process (summing up to %d)",
-               old_id->name,
-               old_id,
-               new_id ? new_id->name : "<NULL>",
-               new_id,
-               old_id->us - skipped_refcounted);
+  if (old_id->us - skipped_refcounted < 0) 
+  {
+    //CLOG_ERROR(&LOG,
+    //           "Error in remapping process from '%s' (%p) to '%s' (%p): "
+    //           "wrong user count in old ID after process (summing up to %d)",
+    //           old_id->name,
+    //           old_id,
+    //           new_id ? new_id->name : "<NULL>",
+    //           new_id,
+    //           old_id->us - skipped_refcounted);
     BLI_assert(0);
   }
 
@@ -517,13 +508,14 @@ void BKE_libblock_remap_locked(Main *bmain, void *old_idv, void *new_idv, const 
           bmain, (Collection *)old_id, (Collection *)new_id);
       break;
     case ID_ME:
-    case ID_CU:
+    //case ID_CU:
     case ID_MB:
-    case ID_HA:
+    //case ID_HA:
     case ID_PT:
     case ID_VO:
       if (new_id) { /* Only affects us in case obdata was relinked (changed). */
-        for (Object *ob = bmain->objects.first; ob; ob = ob->id.next) {
+        for (Object *ob = (Object*)bmain->objects.first; ob; ob = (Object*)ob->id.next) 
+        {
           libblock_remap_data_postprocess_obdata_relink(bmain, ob, new_id);
         }
       }
@@ -541,7 +533,7 @@ void BKE_libblock_remap_locked(Main *bmain, void *old_idv, void *new_idv, const 
   BKE_main_lock(bmain);
 
   /* Full rebuild of DEG! */
-  DEG_relations_tag_update(bmain);
+  //DEG_relations_tag_update(bmain);
 }
 
 void BKE_libblock_remap(Main *bmain, void *old_idv, void *new_idv, const short remap_flags)
@@ -592,21 +584,22 @@ void BKE_libblock_unlink(Main *bmain,
  *     BKE_id_remap maybe?
  *     ... sigh
  */
-void BKE_libblock_relink_ex(
-    Main *bmain, void *idv, void *old_idv, void *new_idv, const short remap_flags)
+void BKE_libblock_relink_ex(Main *bmain, void *idv, void *old_idv, void *new_idv, const short remap_flags)
 {
-  ID *id = idv;
-  ID *old_id = old_idv;
-  ID *new_id = new_idv;
+  ID *id = (ID*)idv;
+  ID *old_id = (ID*)old_idv;
+  ID *new_id = (ID*)new_idv;
 
   /* No need to lock here, we are only affecting given ID, not bmain database. */
 
   BLI_assert(id);
-  if (old_id) {
+  if (old_id) 
+  {
     BLI_assert((new_id == NULL) || GS(old_id->name) == GS(new_id->name));
     BLI_assert(old_id != new_id);
   }
-  else {
+  else 
+  {
     BLI_assert(new_id == NULL);
   }
 
@@ -626,8 +619,7 @@ void BKE_libblock_relink_ex(
                 bmain, (Object *)old_id, (Object *)new_id);
             break;
           case ID_GR:
-            libblock_remap_data_postprocess_collection_update(
-                bmain, (Collection *)old_id, (Collection *)new_id);
+            libblock_remap_data_postprocess_collection_update(bmain, (Collection *)old_id, (Collection *)new_id);
             break;
           default:
             break;
@@ -649,7 +641,7 @@ void BKE_libblock_relink_ex(
       break;
   }
 
-  DEG_relations_tag_update(bmain);
+  //DEG_relations_tag_update(bmain);
 }
 
 static int id_relink_to_newid_looper(LibraryIDLinkCallbackData *cb_data)
@@ -685,7 +677,8 @@ static int id_relink_to_newid_looper(LibraryIDLinkCallbackData *cb_data)
  */
 void BKE_libblock_relink_to_newid(ID *id)
 {
-  if (ID_IS_LINKED(id)) {
+  if (ID_IS_LINKED(id)) 
+  {
     return;
   }
 

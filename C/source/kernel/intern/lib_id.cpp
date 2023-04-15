@@ -65,7 +65,7 @@ IDTypeInfo IDType_ID_LINK_PLACEHOLDER = {
     .struct_size = sizeof(ID),
     .name = "LinkPlaceholder",
     .name_plural = "link_placeholders",
-    .translation_context = BLT_I18NCONTEXT_ID_ID,
+    .translation_context = "ID",
     .flags = IDTYPE_FLAGS_NO_COPY | IDTYPE_FLAGS_NO_LIBLINKING | IDTYPE_FLAGS_NO_MAKELOCAL,
 
     .init_data = NULL,
@@ -882,7 +882,7 @@ void id_us_min(ID *id)
 // */
 //void BKE_main_id_tag_all(struct Main *mainvar, const int tag, const bool value)
 //{
-//  ListBase *lbarray[MAX_LIBARRAY];
+//  ListBase *lbarray[INDEX_ID_MAX];
 //  int a;
 //
 //  a = set_listbasepointers(mainvar, lbarray);
@@ -915,7 +915,7 @@ void id_us_min(ID *id)
 // */
 //void BKE_main_id_flag_all(Main *bmain, const int flag, const bool value)
 //{
-//  ListBase *lbarray[MAX_LIBARRAY];
+//  ListBase *lbarray[INDEX_ID_MAX];
 //  int a;
 //  a = set_listbasepointers(bmain, lbarray);
 //  while (a--) {
@@ -1836,7 +1836,7 @@ void id_us_min(ID *id)
 //                            const bool untagged_only,
 //                            const bool set_fake)
 //{
-//  ListBase *lbarray[MAX_LIBARRAY];
+//  ListBase *lbarray[INDEX_ID_MAX];
 //
 //  LinkNode *todo_ids = NULL;
 //  LinkNode *copied_ids = NULL;

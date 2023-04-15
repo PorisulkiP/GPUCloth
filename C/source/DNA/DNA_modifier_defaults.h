@@ -1,9 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0-or-later */
-
-/** \file
- * \ingroup DNA
- */
-
 #pragma once
 
 /* Struct members on own line. */
@@ -178,10 +172,6 @@
     .point_cache = NULL, \
     .ptcaches = {NULL, NULL}, \
     .hairdata = NULL, \
-    .hair_grid_min = {0.0f, 0.0f, 0.0f}, \
-    .hair_grid_max = {0.0f, 0.0f, 0.0f}, \
-    .hair_grid_res = {0, 0, 0}, \
-    .hair_grid_cellsize = 0.0f, \
     .solver_result = NULL, \
   }
 

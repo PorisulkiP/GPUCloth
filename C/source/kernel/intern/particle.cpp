@@ -49,6 +49,8 @@
 
 #include "particle_private.h"
 
+#pragma warning(disable: 4244)
+
 static void fluid_free_settings(SPHFluidSettings *fluid);
 
 static void particle_settings_init(ID *id)
@@ -1625,7 +1627,7 @@ int psys_particle_dm_face_lookup(Mesh *mesh_final,
     //index_mf_to_mpoly_deformed = (int*)CustomData_get_layer(&mesh_original->fdata, CD_ORIGINDEX);
   }
   else {
-    BLI_assert(mesh_final->runtime.deformed_only);
+    BLI_assert(mesh_final->runtime->deformed_only);
     index_mf_to_mpoly_deformed = index_mf_to_mpoly;
   }
   BLI_assert(index_mf_to_mpoly_deformed);
@@ -1715,7 +1717,7 @@ static int psys_map_index_on_dm(Mesh *mesh,
     return 0;
   }
 
-  if (mesh->runtime.deformed_only || index_dmcache == DMCACHE_ISCHILD) {
+  if (mesh->runtime->deformed_only || index_dmcache == DMCACHE_ISCHILD) {
     /* for meshes that are either only deformed or for child particles, the
      * index and fw do not require any mapping, so we can directly use it */
     if (from == PART_FROM_VERT) {
@@ -5225,7 +5227,7 @@ void psys_calc_dmcache(Object* ob, Mesh* mesh_final, Mesh* mesh_original, Partic
     PARTICLE_P;
 
     /* CACHE LOCATIONS */
-    if (!mesh_final->runtime.deformed_only) {
+    if (!mesh_final->runtime->deformed_only) {
         /* Will use later to speed up subsurf/evaluated mesh. */
         LinkNode* node, * nodedmelem, ** nodearray;
         int totdmelem, totelem, i;

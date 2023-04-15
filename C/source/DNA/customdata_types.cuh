@@ -2,6 +2,8 @@
 
 #include "defs.cuh"
 
+#define MAX_CUSTOMDATA_LAYER_NAME 64
+
 /** Descriptor and storage for a custom data layer. */
 typedef struct CustomDataLayer {
   /** Type of data in layer. */
@@ -21,12 +23,11 @@ typedef struct CustomDataLayer {
   /** Shape keyblock unique id reference. */
   int uid;
   /** Layer name, MAX_CUSTOMDATA_LAYER_NAME. */
-  char name[64];
+  char name[MAX_CUSTOMDATA_LAYER_NAME];
   /** Layer data. */
   void *data;
 } CustomDataLayer;
 
-#define MAX_CUSTOMDATA_LAYER_NAME 64
 
 typedef struct CustomDataExternal {
   /** FILE_MAX. */
@@ -120,10 +121,11 @@ typedef enum CustomDataType {
   CD_PROP_COLOR = 47,
   CD_PROP_FLOAT3 = 48,
   CD_PROP_FLOAT2 = 49,
-
   CD_PROP_BOOL = 50,
 
-  CD_NUMTYPES = 51,
+  CD_HAIRLENGTH = 51,
+
+  CD_NUMTYPES = 52,
 } CustomDataType;
 
 /* Bits for CustomDataMask */

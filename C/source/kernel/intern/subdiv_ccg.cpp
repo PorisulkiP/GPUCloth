@@ -590,7 +590,7 @@ static void subdiv_ccg_eval_special_grid(CCGEvalGridsData *data, const int face_
 //    return NULL;
 //  }
 //  Mesh *result = BKE_mesh_new_nomain_from_template(coarse_mesh, 0, 0, 0, 0, 0);
-//  result->runtime.subdiv_ccg = subdiv_ccg;
+//  result->runtime->subdiv_ccg = subdiv_ccg;
 //  return result;
 //}
 
@@ -693,10 +693,10 @@ static void subdiv_ccg_recalc_inner_face_normals(SubdivCCG *subdiv_ccg,
           CCG_grid_elem(key, grid, x, y),
       };
       float *co[4] = {
-          CCG_elem_co(key, grid_elements[0]),
-          CCG_elem_co(key, grid_elements[1]),
-          CCG_elem_co(key, grid_elements[2]),
-          CCG_elem_co(key, grid_elements[3]),
+          CCG_elem_co(grid_elements[0]),
+          CCG_elem_co(grid_elements[1]),
+          CCG_elem_co(grid_elements[2]),
+          CCG_elem_co(grid_elements[3]),
       };
       const int face_index = y * grid_size_1 + x;
       float *face_normal = tls->face_normals[face_index];
@@ -754,8 +754,7 @@ static void subdiv_ccg_recalc_inner_normal_task(void *__restrict userdata_v,
   subdiv_ccg_average_inner_face_normals(data->subdiv_ccg, data->key, tls, grid_index);
 }
 
-static void subdiv_ccg_recalc_inner_normal_free(const void *__restrict UNUSED(userdata),
-                                                void *__restrict tls_v)
+static void subdiv_ccg_recalc_inner_normal_free(void *__restrict tls_v)
 {
   RecalcInnerNormalsTLSData *tls = (RecalcInnerNormalsTLSData*)tls_v;
   MEM_SAFE_FREE(tls->face_normals);
@@ -775,9 +774,8 @@ static void subdiv_ccg_recalc_inner_grid_normals(SubdivCCG *subdiv_ccg)
   BLI_parallel_range_settings_defaults(&parallel_range_settings);
   parallel_range_settings.userdata_chunk = &tls_data;
   parallel_range_settings.userdata_chunk_size = sizeof(tls_data);
-  parallel_range_settings.func_free = subdiv_ccg_recalc_inner_normal_free;
-  BLI_task_parallel_range(0,
-                          subdiv_ccg->num_grids,
+  parallel_range_settings.func_free = (TaskParallelFreeFunc)subdiv_ccg_recalc_inner_normal_free;
+  BLI_task_parallel_range(0, subdiv_ccg->num_grids,
                           &data,
                           subdiv_ccg_recalc_inner_normal_task,
                           &parallel_range_settings);
@@ -819,8 +817,7 @@ static void subdiv_ccg_recalc_modified_inner_normal_task(void *__restrict userda
   subdiv_ccg_average_inner_face_grids(subdiv_ccg, key, face);
 }
 
-static void subdiv_ccg_recalc_modified_inner_normal_free(const void *__restrict UNUSED(userdata),
-                                                         void *__restrict tls_v)
+static void subdiv_ccg_recalc_modified_inner_normal_free(void *__restrict tls_v)
 {
   RecalcInnerNormalsTLSData *tls = (RecalcInnerNormalsTLSData*)tls_v;
   MEM_SAFE_FREE(tls->face_normals);
@@ -842,7 +839,7 @@ static void subdiv_ccg_recalc_modified_inner_grid_normals(SubdivCCG *subdiv_ccg,
   BLI_parallel_range_settings_defaults(&parallel_range_settings);
   parallel_range_settings.userdata_chunk = &tls_data;
   parallel_range_settings.userdata_chunk_size = sizeof(tls_data);
-  parallel_range_settings.func_free = subdiv_ccg_recalc_modified_inner_normal_free;
+  parallel_range_settings.func_free = (TaskParallelFreeFunc)subdiv_ccg_recalc_modified_inner_normal_free;
   BLI_task_parallel_range(0,
                           num_effected_faces,
                           &data,
@@ -893,15 +890,14 @@ static void average_grid_element(SubdivCCG *subdiv_ccg,
                                  CCGElem *grid_element_a,
                                  CCGElem *grid_element_b)
 {
-  average_grid_element_value_v3(CCG_elem_co(key, grid_element_a),
-                                CCG_elem_co(key, grid_element_b));
-  if (subdiv_ccg->has_normal) {
-    average_grid_element_value_v3(CCG_elem_no(key, grid_element_a),
-                                  CCG_elem_no(key, grid_element_b));
+  average_grid_element_value_v3(CCG_elem_co(grid_element_a), CCG_elem_co(grid_element_b));
+  if (subdiv_ccg->has_normal) 
+  {
+    average_grid_element_value_v3(CCG_elem_no(key, grid_element_a), CCG_elem_no(key, grid_element_b));
   }
-  if (subdiv_ccg->has_mask) {
-    float mask = (*CCG_elem_mask(key, grid_element_a) + *CCG_elem_mask(key, grid_element_b)) *
-                 0.5f;
+  if (subdiv_ccg->has_mask) 
+  {
+    float mask = (*CCG_elem_mask(key, grid_element_a) + *CCG_elem_mask(key, grid_element_b)) * 0.5f;
     *CCG_elem_mask(key, grid_element_a) = mask;
     *CCG_elem_mask(key, grid_element_b) = mask;
   }
@@ -926,7 +922,7 @@ static void element_accumulator_add(GridElementAccumulator *accumulator,
                                     CCGKey *key,
                                     /*const*/ CCGElem *grid_element)
 {
-  add_v3_v3(accumulator->co, CCG_elem_co(key, grid_element));
+  add_v3_v3(accumulator->co, CCG_elem_co(grid_element));
   if (subdiv_ccg->has_normal) {
     add_v3_v3(accumulator->no, CCG_elem_no(key, grid_element));
   }
@@ -947,7 +943,7 @@ static void element_accumulator_copy(SubdivCCG *subdiv_ccg,
                                      CCGElem *destination,
                                      const GridElementAccumulator *accumulator)
 {
-  copy_v3_v3(CCG_elem_co(key, destination), accumulator->co);
+  copy_v3_v3(CCG_elem_co(destination), accumulator->co);
   if (subdiv_ccg->has_normal) {
     copy_v3_v3(CCG_elem_no(key, destination), accumulator->no);
   }
@@ -991,9 +987,7 @@ static void subdiv_ccg_average_inner_face_grids(SubdivCCG *subdiv_ccg,
   }
 }
 
-static void subdiv_ccg_average_inner_grids_task(void *__restrict userdata_v,
-                                                const int face_index,
-                                                const TaskParallelTLS *__restrict UNUSED(tls_v))
+static void subdiv_ccg_average_inner_grids_task(void *__restrict userdata_v, const int face_index)
 {
   AverageInnerGridsData *data = (AverageInnerGridsData*)userdata_v;
   SubdivCCG *subdiv_ccg = data->subdiv_ccg;

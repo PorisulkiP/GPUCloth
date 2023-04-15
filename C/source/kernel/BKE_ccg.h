@@ -54,7 +54,7 @@ void CCG_key(CCGKey *key, const struct CCGSubSurf *ss, int level);
 void CCG_key_top_level(CCGKey *key, const struct CCGSubSurf *ss);
 
 /* get a pointer to the coordinate, normal, or mask components */
- float *CCG_elem_co(const CCGKey *key, CCGElem *elem);
+ float *CCG_elem_co(CCGElem *elem);
  float *CCG_elem_no(const CCGKey *key, CCGElem *elem);
  float *CCG_elem_mask(const CCGKey *key, CCGElem *elem);
 
@@ -77,7 +77,7 @@ void CCG_key_top_level(CCGKey *key, const struct CCGSubSurf *ss);
 
 /* inline definitions follow */
 
- float *CCG_elem_co(const CCGKey *UNUSED(key), CCGElem *elem)
+ float *CCG_elem_co(CCGElem *elem)
 {
   return (float *)elem;
 }
@@ -107,7 +107,7 @@ void CCG_key_top_level(CCGKey *key, const struct CCGSubSurf *ss);
 
  float *CCG_grid_elem_co(const CCGKey *key, CCGElem *elem, int x, int y)
 {
-  return CCG_elem_co(key, CCG_grid_elem(key, elem, x, y));
+  return CCG_elem_co(CCG_grid_elem(key, elem, x, y));
 }
 
  float *CCG_grid_elem_no(const CCGKey *key, CCGElem *elem, int x, int y)
@@ -122,7 +122,7 @@ void CCG_key_top_level(CCGKey *key, const struct CCGSubSurf *ss);
 
  float *CCG_elem_offset_co(const CCGKey *key, CCGElem *elem, int offset)
 {
-  return CCG_elem_co(key, CCG_elem_offset(key, elem, offset));
+  return CCG_elem_co(CCG_elem_offset(key, elem, offset));
 }
 
  float *CCG_elem_offset_no(const CCGKey *key, CCGElem *elem, int offset)

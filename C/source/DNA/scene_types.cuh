@@ -1660,117 +1660,118 @@ enum {
 };
 
 typedef struct Scene {
-  /** Animation data (must be immediately after id for utilities to use it). */
-  //struct AnimData *adt;
+	ID id;
+	/** Animation data (must be immediately after id for utilities to use it). */
+	//struct AnimData *adt;
 
-  //struct Object *camera;
-  //struct World *world;
+	//struct Object *camera;
+	//struct World *world;
 
-  //struct Scene *set;
+	//struct Scene *set;
 
-  //ListBase base;
-  /** Active base. */
-  //struct Base *basact;
-  //void *_pad1;
+	//ListBase base;
+	/** Active base. */
+	//struct Base *basact;
+	//void *_pad1;
 
-  /** 3d cursor location. */
-  // View3DCursor cursor;
+	/** 3d cursor location. */
+	// View3DCursor cursor;
 
-  /** Bitflags for layer visibility (deprecated). */
-  //uint lay;
-  /** Active layer (deprecated) */
-  //int layact;
-  //char _pad2[4];
+	/** Bitflags for layer visibility (deprecated). */
+	//uint lay;
+	/** Active layer (deprecated) */
+	//int layact;
+	//char _pad2[4];
 
-  /** Various settings. */
-  short flag;
+	/** Various settings. */
+	short flag;
 
-  //char use_nodes;
-  //char _pad3[1];
+	//char use_nodes;
+	//char _pad3[1];
 
-  //struct bNodeTree *nodetree;
+	//struct bNodeTree *nodetree;
 
-  /** Sequence editor data is allocated here. */
-  //struct Editing *ed;
+	/** Sequence editor data is allocated here. */
+	//struct Editing *ed;
 
-  /** Default allocated now. */
-  struct ToolSettings *toolsettings;
-  //void *_pad4;
-  //struct DisplaySafeAreas safe_areas;
+	/** Default allocated now. */
+	struct ToolSettings *toolsettings;
+	//void *_pad4;
+	//struct DisplaySafeAreas safe_areas;
 
-  /* migrate or replace? depends on some internal things... */
-  /* no, is on the right place (ton) */
-  struct RenderData r;
-  //struct AudioData audio;
+	/* migrate or replace? depends on some internal things... */
+	/* no, is on the right place (ton) */
+	struct RenderData r;
+	//struct AudioData audio;
 
-  //ListBase markers;
-  //ListBase transform_spaces;
+	//ListBase markers;
+	//ListBase transform_spaces;
 
-  /** First is the [scene, translate, rotate, scale]. */
-  //TransformOrientationSlot orientation_slots[4];
+	/** First is the [scene, translate, rotate, scale]. */
+	//TransformOrientationSlot orientation_slots[4];
 
-  //void *sound_scene;
-  //void *playback_handle;
-  //void *sound_scrub_handle;
-  //void *speaker_handles;
+	//void *sound_scene;
+	//void *playback_handle;
+	//void *sound_scrub_handle;
+	//void *speaker_handles;
 
-  /** (runtime) info/cache used for presenting playback framerate info to the user. */
-  //void *fps_info;
+	/** (runtime) info/cache used for presenting playback framerate info to the user. */
+	//void *fps_info;
 
-  /* none of the dependency graph  vars is mean to be saved */
-  //struct GHash *depsgraph_hash;
-  //char _pad7[4];
+	/* none of the dependency graph  vars is mean to be saved */
+	//struct GHash *depsgraph_hash;
+	//char _pad7[4];
 
-  /* User-Defined KeyingSets */
-  /**
-   * Index of the active KeyingSet.
-   * first KeyingSet has index 1, 'none' active is 0, 'add new' is -1
-   */
-  //int active_keyingset;
-  /** KeyingSets for this scene */
-  //ListBase keyingsets;
+	/* User-Defined KeyingSets */
+	/**
+	* Index of the active KeyingSet.
+	* first KeyingSet has index 1, 'none' active is 0, 'add new' is -1
+	*/
+	//int active_keyingset;
+	/** KeyingSets for this scene */
+	//ListBase keyingsets;
 
-  /* Units */
-  //struct UnitSettings unit;
+	/* Units */
+	//struct UnitSettings unit;
 
-  /** Grease Pencil - Annotations */
-  //struct bGPdata *gpd;
+	/** Grease Pencil - Annotations */
+	//struct bGPdata *gpd;
 
-  /* Movie Tracking */
-  /** Active movie clip. */
-  //struct MovieClip *clip;
+	/* Movie Tracking */
+	/** Active movie clip. */
+	//struct MovieClip *clip;
 
-  /* Physics simulation settings */
-  struct PhysicsSettings physics_settings;
+	/* Physics simulation settings */
+	struct PhysicsSettings physics_settings;
 
-  //void *_pad8;
-  /* XXX. runtime flag for drawing, actually belongs in the window,
-   * only used by BKE_object_handle_update() */
-  //struct CustomData_MeshMasks customdata_mask;
-  /* XXX. same as above but for temp operator use (gl renders) */
-  //struct CustomData_MeshMasks customdata_mask_modal;
+	//void *_pad8;
+	/* XXX. runtime flag for drawing, actually belongs in the window,
+	* only used by BKE_object_handle_update() */
+	//struct CustomData_MeshMasks customdata_mask;
+	/* XXX. same as above but for temp operator use (gl renders) */
+	//struct CustomData_MeshMasks customdata_mask_modal;
 
-  /* Color Management */
-  //ColorManagedViewSettings view_settings;
-  //ColorManagedDisplaySettings display_settings;
-  //ColorManagedColorspaceSettings sequencer_colorspace_settings;
+	/* Color Management */
+	//ColorManagedViewSettings view_settings;
+	//ColorManagedDisplaySettings display_settings;
+	//ColorManagedColorspaceSettings sequencer_colorspace_settings;
 
-  /* RigidBody simulation world+settings */
-  //struct RigidBodyWorld *rigidbody_world;
+	/* RigidBody simulation world+settings */
+	//struct RigidBodyWorld *rigidbody_world;
 
-  //struct PreviewImage *preview;
+	//struct PreviewImage *preview;
 
-  //ListBase view_layers;
-  /* Not an actual datablock, but memory owned by scene. */
-  //struct Collection *master_collection;
-  //struct SceneCollection *collection;
+	//ListBase view_layers;
+	/* Not an actual datablock, but memory owned by scene. */
+	//struct Collection *master_collection;
+	//struct SceneCollection *collection;
 
-  /** Settings to be override by workspaces. */
-  //void *_pad9;
+	/** Settings to be override by workspaces. */
+	//void *_pad9;
 
-  //struct SceneDisplay display;
-  //struct SceneEEVEE eevee;
-  //struct SceneGpencil grease_pencil_settings;
+	//struct SceneDisplay display;
+	//struct SceneEEVEE eevee;
+	//struct SceneGpencil grease_pencil_settings;
 } Scene;
 
 void print_Scene(Scene* scene)

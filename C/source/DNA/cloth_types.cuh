@@ -233,12 +233,8 @@ typedef struct ClothCollSettings {
   float damping;
   /** For selfcollision. */
   float selfepsilon;
-  float repel_force;
-  float distance_repel;
   /** Collision flags defined in BKE_cloth.h. */
   int flags;
-  /** How many iterations for the selfcollision loop. */
-  short self_loop_count;
   /** How many iterations for the collision loop. */
   short loop_count;
   //char _pad[4];

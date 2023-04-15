@@ -85,12 +85,12 @@ static int ptcache_extra_datasize[] = {
 };
 
 /* forward declarations */
-static int ptcache_file_compressed_read(PTCacheFile *pf, unsigned char *result, uint len);
-static int ptcache_file_compressed_write(PTCacheFile *pf, unsigned char *in, uint in_len, unsigned char *out, int mode);
-static int ptcache_file_write(PTCacheFile *pf, const void *f, uint tot, uint size);
-static int ptcache_file_read(PTCacheFile *pf, void *f, uint tot, uint size);
+//static int ptcache_file_compressed_read(PTCacheFile *pf, unsigned char *result, uint len);
+//static int ptcache_file_compressed_write(PTCacheFile *pf, unsigned char *in, uint in_len, unsigned char *out, int mode);
+//static int ptcache_file_write(PTCacheFile *pf, const void *f, uint tot, uint size);
+//static int ptcache_file_read(PTCacheFile *pf, void *f, uint tot, uint size);
 
-static int ptcache_particle_totpoint(void* psys_v, int UNUSED(cfra))
+static int ptcache_particle_totpoint(void* psys_v)
 {
     ParticleSystem* psys = (ParticleSystem*)psys_v;
     return psys->totpart;
@@ -122,7 +122,7 @@ static int ptcache_particle_totwrite(void* psys_v, int cfra)
     return totwrite;
 }
 
-static void ptcache_particle_extra_read(void* psys_v, PTCacheMem * pm, float UNUSED(cfra))
+static void ptcache_particle_extra_read(void* psys_v, PTCacheMem * pm)
 {
     ParticleSystem* psys = (ParticleSystem*)psys_v;
     PTCacheExtra* extra = (PTCacheExtra*)pm->extradata.first;
@@ -173,7 +173,7 @@ static int ptcache_basic_header_write(PTCacheFile *pf)
   return 1;
 }
 
-static int ptcache_cloth_totpoint(void* cloth_v, int UNUSED(cfra))
+static int ptcache_cloth_totpoint(void* cloth_v)
 {
     ClothModifierData* clmd = (ClothModifierData*)cloth_v;
     return clmd->clothObject ? clmd->clothObject->mvert_num : 0;
@@ -189,7 +189,7 @@ static void ptcache_cloth_error(const ID* owner_id, void* cloth_v, const char* m
     }
 }
 
-static int ptcache_cloth_write(int index, void* cloth_v, void** data, int UNUSED(cfra))
+static int ptcache_cloth_write(int index, void* cloth_v, void** data)
 {
     ClothModifierData* clmd = (ClothModifierData*)cloth_v;
     Cloth* cloth = clmd->clothObject;
@@ -201,8 +201,7 @@ static int ptcache_cloth_write(int index, void* cloth_v, void** data, int UNUSED
 
     return 1;
 }
-static void ptcache_cloth_read(
-    int index, void* cloth_v, void** data, float UNUSED(cfra), const float* old_data)
+static void ptcache_cloth_read(int index, void* cloth_v, void** data, const float* old_data)
 {
     ClothModifierData* clmd = (ClothModifierData*)cloth_v;
     Cloth* cloth = clmd->clothObject;
@@ -278,7 +277,7 @@ static void ptcache_add_extra_data(PTCacheMem* pm,
     BLI_addtail(&pm->extradata, extra);
 }
 
-static void ptcache_particle_extra_write(void* psys_v, PTCacheMem* pm, int UNUSED(cfra))
+static void ptcache_particle_extra_write(void* psys_v, PTCacheMem* pm)
 {
     ParticleSystem* psys = (ParticleSystem*)psys_v;
 
@@ -290,7 +289,7 @@ static void ptcache_particle_extra_write(void* psys_v, PTCacheMem* pm, int UNUSE
     }
 }
 
-static void ptcache_cloth_extra_write(void* cloth_v, PTCacheMem* pm, int UNUSED(cfra))
+static void ptcache_cloth_extra_write(void* cloth_v, PTCacheMem* pm)
 {
     ClothModifierData* clmd = (ClothModifierData*)cloth_v;
     Cloth* cloth = clmd->clothObject;
@@ -299,7 +298,7 @@ static void ptcache_cloth_extra_write(void* cloth_v, PTCacheMem* pm, int UNUSED(
         ptcache_add_extra_data(pm, BPHYS_EXTRA_CLOTH_ACCELERATION, 1, cloth->average_acceleration);
     }
 }
-static void ptcache_cloth_extra_read(void* cloth_v, PTCacheMem* pm, float UNUSED(cfra))
+static void ptcache_cloth_extra_read(void* cloth_v, PTCacheMem* pm)
 {
     ClothModifierData* clmd = (ClothModifierData*)cloth_v;
     Cloth* cloth = clmd->clothObject;
@@ -331,15 +330,15 @@ void BKE_ptcache_id_from_cloth(PTCacheID* pid, Object* ob, ClothModifierData* cl
     pid->totpoint = pid->totwrite = ptcache_cloth_totpoint;
     pid->error = ptcache_cloth_error;
 
-    pid->write_point = ptcache_cloth_write;
-    pid->read_point = ptcache_cloth_read;
+    //pid->write_point = ptcache_cloth_write;
+    //pid->read_point = ptcache_cloth_read;
     pid->interpolate_point = ptcache_cloth_interpolate;
 
     pid->write_stream = NULL;
     pid->read_stream = NULL;
 
-    pid->write_extra_data = ptcache_cloth_extra_write;
-    pid->read_extra_data = ptcache_cloth_extra_read;
+    //pid->write_extra_data = ptcache_cloth_extra_write;
+    //pid->read_extra_data = ptcache_cloth_extra_read;
     pid->interpolate_extra_data = NULL;
 
     pid->write_header = ptcache_basic_header_write;
@@ -491,8 +490,8 @@ void BKE_ptcache_id_from_particles(PTCacheID* pid, Object* ob, ParticleSystem* p
         pid->flag |= PTCACHE_VEL_PER_SEC;
     }
 
-    pid->totpoint = ptcache_particle_totpoint;
-    pid->totwrite = ptcache_particle_totwrite;
+    //pid->totpoint = ptcache_particle_totpoint;
+    //pid->totwrite = ptcache_particle_totwrite;
     //pid->error = ptcache_particle_error;
 
     //pid->write_point = ptcache_particle_write;
@@ -775,7 +774,7 @@ void BKE_ptcache_id_time(PTCacheID* pid, Scene* scene, float cfra, int* startfra
 
 //
 ///* Softbody functions */
-//static int ptcache_softbody_write(int index, void *soft_v, void **data, int UNUSED(cfra))
+//static int ptcache_softbody_write(int index, void *soft_v, void **data)
 //{
 //  SoftBody *soft = soft_v;
 //  BodyPoint *bp = soft->bpoint + index;
@@ -840,7 +839,7 @@ void BKE_ptcache_id_time(PTCacheID* pid, Scene* scene, float cfra, int* startfra
 //  copy_v3_v3(bp->pos, keys->co);
 //  copy_v3_v3(bp->vec, keys->vel);
 //}
-//static int ptcache_softbody_totpoint(void *soft_v, int UNUSED(cfra))
+//static int ptcache_softbody_totpoint(void *soft_v)
 //{
 //  SoftBody *soft = soft_v;
 //  return soft->totpoint;
@@ -1052,7 +1051,7 @@ void BKE_ptcache_id_time(PTCacheID* pid, Scene* scene, float cfra, int* startfra
 //
 
 ///* Rigid Body functions */
-//static int ptcache_rigidbody_write(int index, void *rb_v, void **data, int UNUSED(cfra))
+//static int ptcache_rigidbody_write(int index, void *rb_v, void **data)
 //{
 //  RigidBodyWorld *rbw = rb_v;
 //  Object *ob = NULL;
@@ -1149,7 +1148,7 @@ void BKE_ptcache_id_time(PTCacheID* pid, Scene* scene, float cfra, int* startfra
 //    }
 //  }
 //}
-//static int ptcache_rigidbody_totpoint(void *rb_v, int UNUSED(cfra))
+//static int ptcache_rigidbody_totpoint(void *rb_v)
 //{
 //  RigidBodyWorld *rbw = rb_v;
 //
@@ -1930,7 +1929,7 @@ int BKE_ptcache_read(PTCacheID *pid, float cfra, bool no_extrapolate_old)
   int ret = 0;
 
   /* nothing to read to */
-  if (pid->totpoint(pid->calldata, cfrai) == 0) {
+  if (pid->totpoint(pid->calldata) == 0) {
     return 0;
   }
 
@@ -2194,7 +2193,7 @@ int BKE_ptcache_write(PTCacheID *pid, uint cfra)
     return 0;
   }
 
-  int totpoint = pid->totpoint(pid->calldata, cfra);
+  int totpoint = pid->totpoint(pid->calldata);
   int overwrite = 0, error = 0;
 
   if (totpoint == 0 || (cfra ? pid->data_types == 0 : pid->info_types == 0)) {
@@ -2213,7 +2212,7 @@ int BKE_ptcache_write(PTCacheID *pid, uint cfra)
   //}
 
   /* Mark frames skipped if more than 1 frame forwards since last non-skipped frame. */
-  if (cfra - cache->last_exact == 1 || cfra == cache->startframe) {
+  if (cfra - cache->last_exact == 1 || (int)cfra == cache->startframe) {
     cache->last_exact = cfra;
     cache->flag &= ~PTCACHE_FRAMES_SKIPPED;
   }

@@ -8,14 +8,14 @@
 
 #include "listbase.h"
 //#include "BKE_anim_data.h"
-//#include "BKE_asset.h"
+#include "BLI_assert.h"
 //#include "BKE_idprop.h"
 #include "BKE_idtype.h"
 //#include "BKE_key.h"
 #include "BKE_lib_id.h"
 #include "particle_types.h"
 //#include "BKE_lib_override.h"
-//#include "BKE_lib_remap.h"
+#include "BKE_lib_remap.h"
 //#include "BKE_library.h"
 #include "BKE_main.h"
 
@@ -23,9 +23,132 @@
 
 #include "DEG_depsgraph.h"
 
-#ifdef WITH_PYTHON
-#  include "BPY_extern.h"
-#endif
+void BKE_libblock_free_datablock(ID* id, const int /*flag*/)
+{
+    const IDTypeInfo* idtype_info = BKE_idtype_get_info_from_id(id);
+
+    if (idtype_info) 
+    {
+        if (idtype_info->free_data) 
+        {
+            idtype_info->free_data(id);
+        }
+        return;
+    }
+
+    BLI_assert_msg(0, "IDType Missing IDTypeInfo");
+}
+
+void BKE_id_free_ex(Main* bmain, void* idv, int flag, const bool use_flag_from_idtag)
+{
+    ID* id = (ID*)idv;
+
+    if (use_flag_from_idtag) 
+    {
+        if ((id->tag & LIB_TAG_NO_MAIN) != 0) 
+        {
+            flag |= LIB_ID_FREE_NO_MAIN | LIB_ID_FREE_NO_UI_USER | LIB_ID_FREE_NO_DEG_TAG;
+        }
+        else 
+        {
+            flag &= ~LIB_ID_FREE_NO_MAIN;
+        }
+
+        if ((id->tag & LIB_TAG_NO_USER_REFCOUNT) != 0) 
+        {
+            flag |= LIB_ID_FREE_NO_USER_REFCOUNT;
+        }
+        else 
+        {
+            flag &= ~LIB_ID_FREE_NO_USER_REFCOUNT;
+        }
+
+        if ((id->tag & LIB_TAG_NOT_ALLOCATED) != 0) 
+        {
+            flag |= LIB_ID_FREE_NOT_ALLOCATED;
+        }
+        else 
+        {
+            flag &= ~LIB_ID_FREE_NOT_ALLOCATED;
+        }
+    }
+
+    BLI_assert((flag & LIB_ID_FREE_NO_MAIN) != 0 || bmain != NULL);
+    BLI_assert((flag & LIB_ID_FREE_NO_MAIN) != 0 || (flag & LIB_ID_FREE_NOT_ALLOCATED) == 0);
+    BLI_assert((flag & LIB_ID_FREE_NO_MAIN) != 0 || (flag & LIB_ID_FREE_NO_USER_REFCOUNT) == 0);
+
+    const short type = GS(id->name);
+
+    if (bmain && (flag & LIB_ID_FREE_NO_DEG_TAG) == 0) 
+    {
+        BLI_assert(bmain->is_locked_for_linking == false);
+
+        //DEG_id_type_tag(bmain, type);
+    }
+
+    BKE_libblock_free_data_py(id);
+
+    Key* key = nullptr;// ((flag & LIB_ID_FREE_NO_MAIN) == 0) ? BKE_key_from_id(id) : NULL;
+
+    if ((flag & LIB_ID_FREE_NO_USER_REFCOUNT) == 0) 
+    {
+        BKE_libblock_relink_ex(bmain, id, NULL, NULL, ID_REMAP_SKIP_USER_CLEAR);
+    }
+
+    if ((flag & LIB_ID_FREE_NO_MAIN) == 0 && key != NULL) 
+    {
+        BKE_id_free_ex(bmain, &key->id, flag, use_flag_from_idtag);
+    }
+
+    BKE_libblock_free_datablock(id, flag);
+
+    /* avoid notifying on removed data */
+    if ((flag & LIB_ID_FREE_NO_MAIN) == 0) 
+    {
+        BKE_main_lock(bmain);
+    }
+
+    //if ((flag & LIB_ID_FREE_NO_UI_USER) == 0) 
+    //{
+    //    if (free_notifier_reference_cb) {
+    //        free_notifier_reference_cb(id);
+    //    }
+
+    //    if (remap_editor_id_reference_cb) 
+    //    {
+    //        struct IDRemapper* remapper = BKE_id_remapper_create();
+    //        BKE_id_remapper_add(remapper, id, NULL);
+    //        remap_editor_id_reference_cb(remapper);
+    //        BKE_id_remapper_free(remapper);
+    //    }
+    //}
+
+    //if ((flag & LIB_ID_FREE_NO_MAIN) == 0) 
+    //{
+    //    ListBase* lb = which_libbase(bmain, type);
+    //    BLI_remlink(lb, id);
+    //    if ((flag & LIB_ID_FREE_NO_NAMEMAP_REMOVE) == 0) 
+    //    {
+    //        BKE_main_namemap_remove_name(bmain, id, id->name + 2);
+    //    }
+    //}
+
+    BKE_libblock_free_data(id, (flag & LIB_ID_FREE_NO_USER_REFCOUNT) == 0);
+
+    if ((flag & LIB_ID_FREE_NO_MAIN) == 0) {
+        BKE_main_unlock(bmain);
+    }
+
+    if ((flag & LIB_ID_FREE_NOT_ALLOCATED) == 0) {
+        MEM_freeN(id);
+    }
+}
+
+void BKE_id_free(Main* bmain, void* idv)
+{
+    BKE_id_free_ex(bmain, idv, 0, true);
+}
+
 
 void lib_override_library_property_operation_clear(IDOverrideLibraryPropertyOperation* opop)
 {
@@ -54,9 +177,9 @@ void BKE_lib_override_library_clear(IDOverrideLibrary* override, const bool do_i
 {
     BLI_assert(override != nullptr);
 
-    if (!ELEM(nullptr, override->runtime, override->runtime->rna_path_to_override_properties)) {
-        BLI_ghash_clear(override->runtime->rna_path_to_override_properties, nullptr, nullptr);
-    }
+    //if (!ELEM(nullptr, override->runtime-> override->runtime->rna_path_to_override_properties)) {
+    //    BLI_ghash_clear(override->runtime->rna_path_to_override_properties, nullptr, nullptr);
+    //}
 
     LISTBASE_FOREACH(IDOverrideLibraryProperty*, op, &override->properties) { lib_override_library_property_clear(op); }
     BLI_freelistN(&override->properties);
@@ -71,12 +194,12 @@ void BKE_lib_override_library_free(IDOverrideLibrary** override, const bool do_i
 {
     BLI_assert(*override != nullptr);
 
-    if ((*override)->runtime != nullptr) {
-        if ((*override)->runtime->rna_path_to_override_properties != nullptr) {
-            BLI_ghash_free((*override)->runtime->rna_path_to_override_properties, nullptr, nullptr);
-        }
-        MEM_SAFE_FREE((*override)->runtime);
-    }
+    //if ((*override)->runtime->!= nullptr) {
+    //    if ((*override)->runtime->rna_path_to_override_properties != nullptr) {
+    //        BLI_ghash_free((*override)->runtime->rna_path_to_override_properties, nullptr, nullptr);
+    //    }
+    //    MEM_SAFE_FREE((*override)->runtime)
+    //}
 
     BKE_lib_override_library_clear(*override, do_id_user);
     MEM_freeN(*override);
@@ -101,144 +224,6 @@ void BKE_libblock_free_data(ID *id, const bool do_id_user)
   //}
 
   //BKE_animdata_free(id, do_id_user);
-}
-
-void BKE_libblock_free_datablock(ID *id, const int UNUSED(flag))
-{
-  const IDTypeInfo *idtype_info = (IDTypeInfo*)BKE_idtype_get_info_from_id(id);
-
-  if (idtype_info != NULL) {
-    if (idtype_info->free_data != NULL) {
-      idtype_info->free_data(id);
-    }
-    return;
-  }
-
-  BLI_assert(!"IDType Missing IDTypeInfo");
-}
-
-/**
- * Complete ID freeing, extended version for corner cases.
- * Can override default (and safe!) freeing process, to gain some speed up.
- *
- * At that point, given id is assumed to not be used by any other data-block already
- * (might not be actually true, in case e.g. several inter-related IDs get freed together...).
- * However, they might still be using (referencing) other IDs, this code takes care of it if
- * #LIB_TAG_NO_USER_REFCOUNT is not defined.
- *
- * \param bmain: #Main database containing the freed #ID,
- * can be NULL in case it's a temp ID outside of any #Main.
- * \param idv: Pointer to ID to be freed.
- * \param flag: Set of \a LIB_ID_FREE_... flags controlling/overriding usual freeing process,
- * 0 to get default safe behavior.
- * \param use_flag_from_idtag: Still use freeing info flags from given #ID datablock,
- * even if some overriding ones are passed in \a flag parameter.
- */
-void BKE_id_free_ex(Main *bmain, void *idv, int flag, const bool use_flag_from_idtag)
-{
-  ID *id = (ID*)idv;
-
-  if (use_flag_from_idtag) {
-    if ((id->tag & LIB_TAG_NO_MAIN) != 0) {
-      flag |= LIB_ID_FREE_NO_MAIN | LIB_ID_FREE_NO_UI_USER | LIB_ID_FREE_NO_DEG_TAG;
-    }
-    else {
-      flag &= ~LIB_ID_FREE_NO_MAIN;
-    }
-
-    if ((id->tag & LIB_TAG_NO_USER_REFCOUNT) != 0) {
-      flag |= LIB_ID_FREE_NO_USER_REFCOUNT;
-    }
-    else {
-      flag &= ~LIB_ID_FREE_NO_USER_REFCOUNT;
-    }
-
-    if ((id->tag & LIB_TAG_NOT_ALLOCATED) != 0) {
-      flag |= LIB_ID_FREE_NOT_ALLOCATED;
-    }
-    else {
-      flag &= ~LIB_ID_FREE_NOT_ALLOCATED;
-    }
-  }
-
-  BLI_assert((flag & LIB_ID_FREE_NO_MAIN) != 0 || bmain != NULL);
-  BLI_assert((flag & LIB_ID_FREE_NO_MAIN) != 0 || (flag & LIB_ID_FREE_NOT_ALLOCATED) == 0);
-  BLI_assert((flag & LIB_ID_FREE_NO_MAIN) != 0 || (flag & LIB_ID_FREE_NO_USER_REFCOUNT) == 0);
-
-  const short type = GS(id->name);
-
-  //if (bmain && (flag & LIB_ID_FREE_NO_DEG_TAG) == 0) {
-  //  BLI_assert(bmain->is_locked_for_linking == false);
-
-  //  DEG_id_type_tag(bmain, type);
-  //}
-
-#ifdef WITH_PYTHON
-#  ifdef WITH_PYTHON_SAFETY
-  BPY_id_release(id);
-#  endif
-  if (id->py_instance) {
-    BPY_DECREF_RNA_INVALIDATE(id->py_instance);
-  }
-#endif
-
-  Key* key = NULL; // ((flag & LIB_ID_FREE_NO_MAIN) == 0) ? BKE_key_from_id(id) : NULL;
-
-  //if ((flag & LIB_ID_FREE_NO_USER_REFCOUNT) == 0) 
-  //{
-  //  BKE_libblock_relink_ex(bmain, id, NULL, NULL, 0);
-  //}
-
-  if ((flag & LIB_ID_FREE_NO_MAIN) == 0 && key != NULL) {
-    BKE_id_free_ex(bmain, &key->id, flag, use_flag_from_idtag);
-  }
-
-  BKE_libblock_free_datablock(id, flag);
-
-  /* avoid notifying on removed data */
-  if ((flag & LIB_ID_FREE_NO_MAIN) == 0) {
-    //BKE_main_lock(bmain);
-  }
-
-  //if ((flag & LIB_ID_FREE_NO_UI_USER) == 0) {
-    //if (free_notifier_reference_cb) 
-    //{
-    //  free_notifier_reference_cb(id);
-    //}
-
-  //  if (remap_editor_id_reference_cb) {
-  //    remap_editor_id_reference_cb(id, NULL);
-  //  }
-  //}
-
-  if ((flag & LIB_ID_FREE_NO_MAIN) == 0) {
-    ListBase *lb = which_libbase(bmain, type);
-    BLI_remlink(lb, id);
-  }
-
-  BKE_libblock_free_data(id, (flag & LIB_ID_FREE_NO_USER_REFCOUNT) == 0);
-
-  if ((flag & LIB_ID_FREE_NO_MAIN) == 0) {
-    BKE_main_unlock(bmain);
-  }
-
-  if ((flag & LIB_ID_FREE_NOT_ALLOCATED) == 0) {
-    MEM_freeN(id);
-  }
-}
-
-/**
- * Complete ID freeing, should be usable in most cases (even for out-of-Main IDs).
- *
- * See #BKE_id_free_ex description for full details.
- *
- * \param bmain: Main database containing the freed ID,
- * can be NULL in case it's a temp ID outside of any Main.
- * \param idv: Pointer to ID to be freed.
- */
-void BKE_id_free(Main *bmain, void *idv)
-{
-  BKE_id_free_ex(bmain, idv, 0, true);
 }
 
 /**
@@ -266,7 +251,7 @@ void BKE_id_free_us(Main *bmain, void *idv) /* test users */
 static size_t id_delete(Main *bmain, const bool do_tagged_deletion)
 {
   const int tag = LIB_TAG_DOIT;
-  ListBase *lbarray[MAX_LIBARRAY];
+  ListBase *lbarray[INDEX_ID_MAX];
   Link dummy_link = {0};
   int base_count, i;
 
@@ -402,4 +387,9 @@ void BKE_id_delete(Main *bmain, void *idv)
 size_t BKE_id_multi_tagged_delete(Main *bmain)
 {
   return id_delete(bmain, true);
+}
+
+void BKE_libblock_free_data_py(ID* id)
+{
+    UNUSED_VARS(id);
 }

@@ -3,6 +3,7 @@
 #include "utildefines.h"
 #include "particle_types.h"
 #include "scene_types.cuh"
+#include "strict_flags.cuh"
 
 struct ParticleKey;
 struct ParticleSettings;

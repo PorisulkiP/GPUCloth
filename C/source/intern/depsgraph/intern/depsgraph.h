@@ -6,7 +6,7 @@
 #include "ID.h" /* for ID_Type and INDEX_ID_MAX */
 #include "collision.h"
 #include "DEG_depsgraph.h"
-#include "BLI_map.hpp"
+#include "BLI_map.hh"
 #include "scene.h"
 
 struct ID;
