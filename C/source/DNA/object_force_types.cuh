@@ -66,13 +66,11 @@ typedef struct PartDeflect {
 	/** Damping ratio of the harmonic effector. */
 	float f_damp;
 	/**
-		* How much force is converted into "air flow", i.e.
-		* force used as the velocity of surrounding medium. */
+	* How much force is converted into "air flow", i.e.
+	* force used as the velocity of surrounding medium. */
 	float f_flow;
 	/** How much force is reduced when acting parallel to a surface, e.g. cloth. */
 	float f_wind_factor;
-
-	//char _pad0[4];
 
 	/** Noise size for noise effector, restlength for harmonic effector. */
 	float f_size;
@@ -119,12 +117,6 @@ typedef struct PartDeflect {
 	float clump_fac, clump_pow;
 	float kink_freq, kink_shape, kink_amp, free_end;
 
-	/* texture effector */
-	/** Used for calculating partial derivatives. */
-	//float tex_nabla;
-	/** Texture of the texture effector. */
-	//Tex* tex;
-
 	/* effector noise */
 	/** Random noise generator for e.g. wind. */
 	struct RNG* rng;
@@ -133,24 +125,11 @@ typedef struct PartDeflect {
 	/** Noise random seed. */
 	int seed;
 
-	/* Display Size */
-	/** Runtime only : start of the curve or draw scale. */
-	//float drawvec1[4];
-	/** Runtime only : end of the curve. */
-	//float drawvec2[4];
-	/** Runtime only. */
-	//float drawvec_falloff_min[3];
-	//char _pad1[4];
-	/** Runtime only. */
-	//float drawvec_falloff_max[3];
-	//char _pad2[4];
-
 	/** Force source object. */
 	struct Object* f_source;
 
 	/** Friction of cloth collisions. */
 	float pdef_cfrict;
-	//char _pad[4];
 } PartDeflect;
 
 typedef struct EffectorWeights {

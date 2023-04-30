@@ -183,7 +183,7 @@ void bvhtree_update_from_cloth(ClothModifierData *clmd, bool moving, bool self)
 }
 
 // Симуляция одного кадра
-int do_step_cloth(Depsgraph *depsgraph, Object *ob, ClothModifierData *clmd, Mesh *result, int framenr, int countOfObj)
+int do_step_cloth(Depsgraph *depsgraph, Object *ob, ClothModifierData *clmd, Mesh *result, int framenr)
 {
 	Cloth *cloth = clmd->clothObject;
 	ClothVertex* verts = cloth->verts;
@@ -224,16 +224,13 @@ int do_step_cloth(Depsgraph *depsgraph, Object *ob, ClothModifierData *clmd, Mes
 	TIMEIT_START(cloth_step);
 
 	/* call the solver. */
-	for (uint i = 0; i < countOfObj; i++)
+	if (SIM_cloth_solve(depsgraph, ob, framenr, clmd, effectors))
 	{
-		if (SIM_cloth_solve(depsgraph, ob, framenr, clmd, effectors))
-		{
-			return true;
-		}
-		else
-		{
-			return false;
-		}
+		return true;
+	}
+	else
+	{
+		return false;
 	}
 
 	TIMEIT_END(cloth_step);
@@ -342,12 +339,13 @@ bool clothModifier_do(ClothModifierData *clmd, Depsgraph *depsgraph, Object *ob,
 	//BKE_ptcache_validate(cache, framenr);
 
 	/* do simulation */
-	if (do_step_cloth(depsgraph, ob, clmd, mesh, framenr, 0)) 
+	if (do_step_cloth(depsgraph, ob, clmd, mesh, framenr)) 
 	{
 		// Если симуляция прошла успешно, то проверяем кеш
 		//BKE_ptcache_write(&pid, framenr);
 	}
-	else {
+	else 
+	{
 		// В противном случае всё обнуляем
 		BKE_ptcache_invalidate(cache);
 	}
@@ -818,19 +816,19 @@ static void cloth_update_verts(Object *ob, ClothModifierData *clmd, Mesh *mesh)
 }
 
 /* Write rest vert locations to a copy of the mesh. */
-static Mesh *cloth_make_rest_mesh(ClothModifierData *clmd, Mesh *mesh)
-{
-  Mesh* new_mesh = NULL;// BKE_mesh_copy_for_eval(mesh, false);
-  ClothVertex *verts = clmd->clothObject->verts;
-  MVert *mvert = new_mesh->mvert;
-
-  /* vertex count is already ensured to match */
-  for (unsigned i = 0; i < mesh->totvert; i++, verts++) {
-	copy_v3_v3(mvert[i].co, verts->xrest);
-  }
-
-  return new_mesh;
-}
+//static Mesh *cloth_make_rest_mesh(ClothModifierData *clmd, Mesh *mesh)
+//{
+//  Mesh* new_mesh = BKE_mesh_copy_for_eval(mesh, false);
+//  ClothVertex *verts = clmd->clothObject->verts;
+//  MVert *mvert = new_mesh->mvert;
+//
+//  /* vertex count is already ensured to match */
+//  for (unsigned i = 0; i < mesh->totvert; i++, verts++) {
+//	copy_v3_v3(mvert[i].co, verts->xrest);
+//  }
+//
+//  return new_mesh;
+//}
 
 /* Update spring rest length, for dynamically deformable cloth */
 static void cloth_update_spring_lengths(ClothModifierData *clmd, Mesh *mesh)
@@ -1204,11 +1202,11 @@ bool cloth_build_springs(ClothModifierData *clmd, Mesh *mesh)
 		RNG *rng = nullptr;
 
 		/* If using the rest shape key, it's necessary to make a copy of the mesh. */
-		if (clmd->sim_parms->shapekey_rest && !(clmd->sim_parms->flags & CLOTH_SIMSETTINGS_FLAG_DYNAMIC_BASEMESH)) 
-		{
-			tmp_mesh = cloth_make_rest_mesh(clmd, mesh);
-			//BKE_mesh_calc_normals(tmp_mesh);
-		}
+		//if (clmd->sim_parms->shapekey_rest && !(clmd->sim_parms->flags & CLOTH_SIMSETTINGS_FLAG_DYNAMIC_BASEMESH)) 
+		//{
+		//	tmp_mesh = cloth_make_rest_mesh(clmd, mesh);
+		//	//BKE_mesh_calc_normals(tmp_mesh);
+		//}
 
 		auto existing_vert_pairs = BLI_edgeset_new("cloth_sewing_edges_graph");
 		BKE_bvhtree_from_mesh_get(&treedata, tmp_mesh ? tmp_mesh : mesh, BVHTREE_FROM_LOOPTRI, 2);

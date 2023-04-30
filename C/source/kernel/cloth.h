@@ -121,13 +121,9 @@ typedef struct ColliderContacts {
 } ColliderContacts;
 
 // needed for implicit.c
-int cloth_bvh_collision(struct Depsgraph *depsgraph,
-                        struct Object *ob,
-                        struct ClothModifierData *clmd,
-                        float step,
-                        float dt);
+int cloth_bvh_collision(Depsgraph *depsgraph, Object *ob, ClothModifierData *clmd, float step, float dt);
 
-int do_step_cloth(Depsgraph* depsgraph, Object* ob, ClothModifierData* clmd, Mesh* result, int framenr, int countOfObj);
+int do_step_cloth(Depsgraph* depsgraph, Object* ob, ClothModifierData* clmd, Mesh* result, int framenr);
 
 ////////////////////////////////////////////////
 

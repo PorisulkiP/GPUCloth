@@ -27,7 +27,7 @@ DLLEXPORT int SIM_SetCollisionOBJs();
 
 // Запуск вычислений
 DLLEXPORT bool BuildClothSprings(ClothModifierData* clmd, Mesh* mesh);
-DLLEXPORT int SIM_solver(Depsgraph* depsgraph, Object* ob, ClothModifierData* clmd, Mesh* mesh, int frame, int countOfObj);
+DLLEXPORT int SIM_solver(Depsgraph* depsgraph, Object* ob, ClothModifierData* clmd, Mesh* mesh, int frame);
 
 // TESTS
 DLLEXPORT Mesh* Mesh_test(Mesh* mesh);

@@ -35,9 +35,9 @@ bool BuildClothSprings(ClothModifierData* clmd, Mesh* mesh)
 
 // Запуск вычислений
 // Depsgraph надо заменить на сцену
-int SIM_solver(Depsgraph* depsgraph, Object* ob, ClothModifierData* clmd, Mesh* mesh, int frame, int countOfObj)
+int SIM_solver(Depsgraph* depsgraph, Object* ob, ClothModifierData* clmd, Mesh* mesh, int frame)
 {    
-    return do_step_cloth(depsgraph, ob, clmd, mesh, frame, countOfObj);
+    return do_step_cloth(depsgraph, ob, clmd, mesh, frame);
 }
 
 // Вывод в консоль сообщения о том, что всё работает

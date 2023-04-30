@@ -129,11 +129,6 @@ typedef struct ClothModifierData : ModifierData {
 
 	/* XXX nasty hack, remove once hair can be separated from cloth modifier data */
 	struct ClothHairData* hairdata;
-	/* grid geometry values of hair continuum */
-	//float hair_grid_min[3];
-	//float hair_grid_max[3];
-	//int hair_grid_res[3];
-	//float hair_grid_cellsize;
 
 	struct ClothSolverResult* solver_result;
 } ClothModifierData;
