@@ -127,7 +127,7 @@ int cloth_bvh_collision(struct Depsgraph *depsgraph,
                         float step,
                         float dt);
 
-int do_step_cloth(Depsgraph* depsgraph, Object* ob, ClothModifierData* clmd, Mesh* result, int framenr);
+int do_step_cloth(Depsgraph* depsgraph, Object* ob, ClothModifierData* clmd, Mesh* result, int framenr, int countOfObj);
 
 ////////////////////////////////////////////////
 
@@ -145,7 +145,7 @@ bool cloth_build_springs(ClothModifierData* clmd, Mesh* mesh);
 // needed for modifier.c
 void cloth_free_modifier_extern(struct ClothModifierData *clmd);
 void cloth_free_modifier(struct ClothModifierData *clmd);
-Cloth* clothModifier_do(struct ClothModifierData *clmd, struct Depsgraph *depsgraph, struct Object *ob, struct Mesh *me);
+bool clothModifier_do(struct ClothModifierData *clmd, struct Depsgraph *depsgraph, struct Object *ob, struct Mesh *me);
 
 int cloth_uses_vgroup(struct ClothModifierData *clmd);
 

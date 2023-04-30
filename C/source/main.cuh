@@ -1,7 +1,7 @@
 ﻿#pragma once
 #include "cloth_settings.h"
 #include "meshdata_types.cuh"
-#include "SIM_mass_spring.cuh"
+#include "SIM_mass_spring.h"
 
 #include <vector>
 
@@ -27,7 +27,7 @@ DLLEXPORT int SIM_SetCollisionOBJs();
 
 // Запуск вычислений
 DLLEXPORT bool BuildClothSprings(ClothModifierData* clmd, Mesh* mesh);
-DLLEXPORT int SIM_solver(Depsgraph* depsgraph, Object* ob, ClothModifierData* clmd, Mesh* mesh, int frame);
+DLLEXPORT int SIM_solver(Depsgraph* depsgraph, Object* ob, ClothModifierData* clmd, Mesh* mesh, int frame, int countOfObj);
 
 // TESTS
 DLLEXPORT Mesh* Mesh_test(Mesh* mesh);

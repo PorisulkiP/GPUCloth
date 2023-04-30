@@ -9,7 +9,6 @@
 #include "cloth_types.cuh"
 #include "defaults.cuh"
 #include "modifier_types.cuh"
-#include "DNA_modifier_defaults.h"
 #include "mesh_types.h"
 #include "object_force_types.cuh"
 #include "object_types.cuh"
@@ -71,53 +70,6 @@ EffectorWeights* BKE_effector_add_weights(Collection* collection)
     return weights;
 }
 
-#define SDNA_TYPE_CHECKED(v) (&(v))
-
-static const ClothSimSettings DNA_DEFAULT_ClothSimSettings = _DNA_DEFAULT_ClothSimSettings;
-static const ClothCollSettings DNA_DEFAULT_ClothCollSettings = _DNA_DEFAULT_ClothCollSettings;
-static const ClothModifierData DNA_DEFAULT_ClothModifierData = _DNA_DEFAULT_ClothModifierData;
-
-enum {
-    _SDNA_TYPE_ClothSimSettings = 0,
-    _SDNA_TYPE_ClothCollSettings = 1,
-    _SDNA_TYPE_ClothModifierData = 2,
-    SDNA_TYPE_MAX = 3,
-};
-
-const void* DNA_default_table[SDNA_TYPE_MAX] =
-{
-    &DNA_DEFAULT_ClothSimSettings,
-    &DNA_DEFAULT_ClothCollSettings,
-    &DNA_DEFAULT_ClothModifierData,
-};
-
-uint8_t* _DNA_struct_default_alloc_impl(const uint8_t* data_src, size_t size, const char* alloc_str)
-{
-    uint8_t* data_dst = (uint8_t*)MEM_mallocN(size, alloc_str);
-    memcpy(data_dst, data_src, size);
-    return data_dst;
-}
-
-
-/**
- * Wrap with macro that casts correctly.
- */
-#define DNA_struct_default_get(struct_name) \
-  (const struct_name *)DNA_default_table[SDNA_TYPE_FROM_STRUCT(struct_name)]
-
-#define DNA_struct_default_alloc(struct_name) \
-  (struct_name *)_DNA_struct_default_alloc_impl( \
-      (const uint8_t *)DNA_default_table[SDNA_TYPE_FROM_STRUCT(struct_name)], \
-      sizeof(struct_name), \
-      __func__)
-
-#define MEMCPY_STRUCT_AFTER(struct_dst, struct_src, member) \
-  { \
-    CHECK_TYPE_NONCONST(struct_dst); ((void)(struct_dst == struct_src), \
-     memcpy((char *)(struct_dst) + OFFSETOF_STRUCT_AFTER(struct_dst, member), \
-            (const char *)(struct_src) + OFFSETOF_STRUCT_AFTER(struct_dst, member), \
-            sizeof(*(struct_dst)) - OFFSETOF_STRUCT_AFTER(struct_dst, member))); \
-  }  ((void)0)
 
 static void initData(ModifierData *md)
 {

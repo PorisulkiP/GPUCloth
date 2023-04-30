@@ -4,7 +4,7 @@
     <ClInclude Include="cloth\cloth_settings.h">
       <Filter>Cloth</Filter>
     </ClInclude>
-    <ClInclude Include="cloth\SIM_mass_spring.cuh">
+    <ClInclude Include="cloth\SIM_mass_spring.h">
       <Filter>SIM</Filter>
     </ClInclude>
     <ClInclude Include="main.cuh">
@@ -355,16 +355,12 @@
     <ClInclude Include="modifiers\intern\MOD_util.h">
       <Filter>modifiers</Filter>
     </ClInclude>
-    <ClInclude Include="DNA\DNA_screen_types.h" />
     <ClInclude Include="DNA\DNA_modifier_defaults.h">
       <Filter>DNA</Filter>
     </ClInclude>
-    <ClInclude Include="kernel\intern\subdiv_inline.h" />
     <ClInclude Include="lib\BLI_dynstr.h">
       <Filter>lib</Filter>
     </ClInclude>
-    <ClInclude Include="lib\BLI_hash_tables.hh" />
-    <ClInclude Include="lib\BLI_map_slots.hh" />
     <ClInclude Include="lib\BLI_math_vector_types.hh">
       <Filter>lib</Filter>
     </ClInclude>
@@ -374,9 +370,31 @@
     <ClInclude Include="lib\task.h">
       <Filter>lib</Filter>
     </ClInclude>
+    <ClInclude Include="lib\BLI_alloca.h">
+      <Filter>lib</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\BLI_allocator.hh">
+      <Filter>lib</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\BLI_hash_tables.hh">
+      <Filter>lib</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\BLI_map_slots.hh">
+      <Filter>lib</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\BLI_string_ref.hh">
+      <Filter>lib</Filter>
+    </ClInclude>
+    <ClInclude Include="DNA\DNA_screen_types.h">
+      <Filter>DNA</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\intern\subdiv_inline.h">
+      <Filter>kernel\intern</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\PIL_time_utildefines.h" />
   </ItemGroup>
   <ItemGroup>
-    <CudaCompile Include="cloth\SIM_mass_spring.cu">
+    <CudaCompile Include="cloth\SIM_mass_spring.cpp">
       <Filter>SIM</Filter>
     </CudaCompile>
     <CudaCompile Include="main.cu">

@@ -88,13 +88,16 @@ struct TimeSourceNode : public Node {
 
 	void flush_update_tag(Depsgraph* graph)
 	{
-		if (!tagged_for_update) {
+		if (!tagged_for_update) 
+		{
 			return;
 		}
-		for (Relation* rel : outlinks) {
-			Node* node = rel->to;
-			//node->tag_update(graph, DEG_UPDATE_SOURCE_TIME);
-		}
+		tag_update(graph, DEG_UPDATE_SOURCE_TIME);
+		//for (Relation* rel : outlinks) 
+		//{
+		//	Node* node = rel->to;
+		//	tag_update(graph, DEG_UPDATE_SOURCE_TIME);
+		//}
 	}
 };
 

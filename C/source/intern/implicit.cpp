@@ -17,7 +17,7 @@
 #include "collision.h"
 #include "effect.h"
 
-#include "SIM_mass_spring.cuh"
+#include "SIM_mass_spring.h"
 
 static float I[3][3] = { {1, 0, 0}, {0, 1, 0}, {0, 0, 1} };
 static float ZERO[3][3] = { {0, 0, 0}, {0, 0, 0}, {0, 0, 0} };

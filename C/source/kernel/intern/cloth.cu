@@ -24,8 +24,11 @@
 #include "memarena.h"
 #include "customdata.h"
 
-#include "SIM_mass_spring.cuh"
+#include "SIM_mass_spring.h"
 #include "BKE_lib_id.h"
+
+#include "MOD_util.h"
+#include "PIL_time_utildefines.h"
 
 /** Compared against total loops. */
 #define MESH_FACE_TESSELLATE_THREADED_LIMIT 4096
@@ -46,7 +49,8 @@ typedef struct BendSpringRef {
 
 static BVHTree *bvhtree_build_from_cloth(ClothModifierData *clmd, float epsilon)
 {
-  if (!clmd) {
+  if (!clmd) 
+  {
 	return NULL;
   }
 
@@ -179,64 +183,80 @@ void bvhtree_update_from_cloth(ClothModifierData *clmd, bool moving, bool self)
 }
 
 // Симуляция одного кадра
-int do_step_cloth(Depsgraph *depsgraph, Object *ob, ClothModifierData *clmd, Mesh *result, int framenr)
+int do_step_cloth(Depsgraph *depsgraph, Object *ob, ClothModifierData *clmd, Mesh *result, int framenr, int countOfObj)
 {
-  Cloth *cloth = clmd->clothObject;
-  ClothVertex* verts = cloth->verts;
-  MVert *mvert = result->mvert;
+	Cloth *cloth = clmd->clothObject;
+	ClothVertex* verts = cloth->verts;
+	MVert *mvert = result->mvert;
 
-  /* Принудительно верните все закрепленные вершины в их ограниченное местоположение. */
-  for (uint i = 0; i < clmd->clothObject->mvert_num; ++i, ++verts)
-  {
-	// save the previous position.
-	// сохранение предыдущую позицию.
-	copy_v3_v3(verts->xold, verts->xconst);
-	copy_v3_v3(verts->txold, verts->x);
+	/* Принудительно верните все закрепленные вершины в их ограниченное местоположение. */
+	for (uint i = 0; i < clmd->clothObject->mvert_num; ++i, ++verts)
+	{
+		// save the previous position.
+		// сохранение предыдущую позицию.
+		copy_v3_v3(verts->xold, verts->xconst);
+		copy_v3_v3(verts->txold, verts->x);
 
-	// Get the current position.
-	// Получение текущей позиции.
-	copy_v3_v3(verts->xconst, mvert[i].co);
-	mul_m4_v3(ob->obmat, verts->xconst);
-  }
-  // Получение эффектов, которые могут влиять на ткань
-  // пока nullptr
-  ListBase* effectors = effectors_create(depsgraph, ob, NULL, clmd->sim_parms->effector_weights, false);
+		// Get the current position.
+		// Получение текущей позиции.
+		copy_v3_v3(verts->xconst, mvert[i].co);
+		mul_m4_v3(ob->obmat, verts->xconst);
+	}
+	// Получение эффектов, которые могут влиять на ткань
+	// пока nullptr
+	ListBase* effectors = effectors_create(depsgraph, ob, NULL, clmd->sim_parms->effector_weights, false);
 
-  if (clmd->sim_parms->flags & CLOTH_SIMSETTINGS_FLAG_DYNAMIC_BASEMESH) 
-  {
-	// Копирование данных вершин из ClothModifierData* clmd в Mesh *result
-	cloth_update_verts(ob, clmd, result);
-  }
+	if (clmd->sim_parms->flags & CLOTH_SIMSETTINGS_FLAG_DYNAMIC_BASEMESH) 
+	{
+		// Копирование данных вершин из ClothModifierData* clmd в Mesh *result
+		cloth_update_verts(ob, clmd, result);
+	}
 
-  if ((clmd->sim_parms->flags & CLOTH_SIMSETTINGS_FLAG_DYNAMIC_BASEMESH) ||
-	  (clmd->sim_parms->vgroup_shrink > 0) || (clmd->sim_parms->shrink_min != 0.0f)) 
-  {
-	cloth_update_spring_lengths(clmd, result);
-  }
+	if ((clmd->sim_parms->flags & CLOTH_SIMSETTINGS_FLAG_DYNAMIC_BASEMESH) ||
+		(clmd->sim_parms->vgroup_shrink > 0) || (clmd->sim_parms->shrink_min != 0.0f)) 
+	{
+		cloth_update_spring_lengths(clmd, result);
+	}
 
-  cloth_update_springs(clmd);
+	cloth_update_springs(clmd);
 
-  // Засечение времени симуляции
-  // TIMEIT_START(cloth_step)
+	// Засечение времени симуляции
+	TIMEIT_START(cloth_step);
 
-  /* call the solver. */
-  if (SIM_cloth_solve(depsgraph, ob, framenr, clmd, effectors))
-  {
-	  return 1;
-  }
-  else
-  {
-	  return 0;
-  }
+	/* call the solver. */
+	for (uint i = 0; i < countOfObj; i++)
+	{
+		if (SIM_cloth_solve(depsgraph, ob, framenr, clmd, effectors))
+		{
+			return true;
+		}
+		else
+		{
+			return false;
+		}
+	}
 
-  // TIMEIT_END(cloth_step)
-  // printf ( "%f\n", ( float ) tval() );
+	TIMEIT_END(cloth_step);
+
+	if (effectors)
+	{
+		LISTBASE_FOREACH(EffectorCache*, eff, effectors)
+		{
+			if (eff->guide_data) 
+			{
+				MEM_freeN(eff->guide_data);
+			}
+		}
+
+		BLI_freelistN(effectors);
+		MEM_freeN(effectors);
+	}
 }
 
 /************************************************
  * clothModifier_do - main simulation function
  ************************************************/
-Cloth* clothModifier_do(ClothModifierData *clmd, Depsgraph *depsgraph, Object *ob, Mesh *mesh)
+bool clothModifier_do(ClothModifierData *clmd, Depsgraph *depsgraph, Object *ob, Mesh *mesh)
 {
 	PointCache *cache;
 	PTCacheID pid;
@@ -267,7 +287,7 @@ Cloth* clothModifier_do(ClothModifierData *clmd, Depsgraph *depsgraph, Object *o
 	if (framenr < startframe) 
 	{
 		BKE_ptcache_invalidate(cache);
-		return nullptr;
+		return false;
 	}
 
 	// Если кадр начала и текущй равны
@@ -277,7 +297,7 @@ Cloth* clothModifier_do(ClothModifierData *clmd, Depsgraph *depsgraph, Object *o
 		BKE_ptcache_validate(cache, framenr);
 		cache->flag &= ~PTCACHE_REDO_NEEDED;
 		clmd->clothObject->last_frame = framenr;
-		return nullptr;
+		return false;
 	}
 
   // try to read from cache
@@ -322,7 +342,7 @@ Cloth* clothModifier_do(ClothModifierData *clmd, Depsgraph *depsgraph, Object *o
 	//BKE_ptcache_validate(cache, framenr);
 
 	/* do simulation */
-	if (do_step_cloth(depsgraph, ob, clmd, mesh, framenr)) 
+	if (do_step_cloth(depsgraph, ob, clmd, mesh, framenr, 0)) 
 	{
 		// Если симуляция прошла успешно, то проверяем кеш
 		//BKE_ptcache_write(&pid, framenr);
@@ -518,13 +538,13 @@ static void cloth_free_edgelist(LinkNodePair *edgelist, uint mvert_num)
   }
 }
 
-static void cloth_free_errorsprings(Cloth *cloth,
-									LinkNodePair *edgelist,
-									BendSpringRef *spring_ref)
+static void cloth_free_errorsprings(Cloth *cloth,LinkNodePair *edgelist,BendSpringRef *spring_ref)
 {
-  if (cloth->springs != NULL) {
+  if (cloth->springs != NULL) 
+  {
 	LinkNode *search = cloth->springs;
-	while (search) {
+	while (search)
+	{
 	  ClothSpring *spring = (ClothSpring*)search->link;
 
 	  MEM_SAFE_FREE(spring->pa);
@@ -542,27 +562,27 @@ static void cloth_free_errorsprings(Cloth *cloth,
 
   MEM_SAFE_FREE(spring_ref);
 
-  if (cloth->edgeset) {
+  if (cloth->edgeset) 
+  {
 	BLI_edgeset_free(cloth->edgeset);
 	cloth->edgeset = NULL;
   }
 }
 
- void cloth_bend_poly_dir(
-	ClothVertex *verts, int i, int j, const int *inds, int len, float r_dir[3])
+ void cloth_bend_poly_dir(ClothVertex *verts, int i, int j, const int *inds, int len, float r_dir[3])
 {
   float cent[3] = {0};
   float fact = 1.0f / len;
 
-  for (int x = 0; x < len; x++) {
+  for (int x = 0; x < len; x++) 
+  {
 	madd_v3_v3fl(cent, verts[inds[x]].xrest, fact);
   }
 
   normal_tri_v3(r_dir, verts[i].xrest, verts[j].xrest, cent);
 }
 
-static float cloth_spring_angle(
-	ClothVertex *verts, int i, int j, int *i_a, int *i_b, int len_a, int len_b)
+static float cloth_spring_angle(ClothVertex *verts, int i, int j, int *i_a, int *i_b, int len_a, int len_b)
 {
   float dir_a[3], dir_b[3];
   float tmp[3], vec_e[3];
@@ -592,7 +612,8 @@ static void cloth_hair_update_bending_targets(ClothModifierData *clmd)
   float hair_frame[3][3], dir_old[3], dir_new[3];
   int prev_mn; /* to find hair chains */
 
-  if (!clmd->hairdata) {
+  if (!clmd->hairdata) 
+  {
 	return;
   }
 
@@ -605,18 +626,21 @@ static void cloth_hair_update_bending_targets(ClothModifierData *clmd)
    */
 
   prev_mn = -1;
-  for (search = cloth->springs; search; search = search->next) {
+  for (search = cloth->springs; search; search = search->next) 
+  {
 	ClothSpring *spring = (ClothSpring*)search->link;
 	ClothHairData *hair_ij, *hair_kl;
 	bool is_root = spring->kl != prev_mn;
 
-	if (spring->type != CLOTH_SPRING_TYPE_BENDING_HAIR) {
+	if (spring->type != CLOTH_SPRING_TYPE_BENDING_HAIR) 
+	{
 	  continue;
 	}
 
 	hair_ij = &clmd->hairdata[spring->ij];
 	hair_kl = &clmd->hairdata[spring->kl];
-	if (is_root) {
+	if (is_root) 
+	{
 	  /* initial hair frame from root orientation */
 	  copy_m3_m3(hair_frame, hair_ij->rot);
 	  /* surface normal is the initial direction,
@@ -699,73 +723,82 @@ static void cloth_hair_update_bending_rest_targets(ClothModifierData *clmd)
 }
 
 /* update stiffness if vertex group values are changing from frame to frame */
-static void cloth_update_springs(ClothModifierData *clmd)
+static void cloth_update_springs(ClothModifierData* clmd)
 {
-  Cloth *cloth = clmd->clothObject;
-  LinkNode *search = NULL;
+	Cloth* cloth = clmd->clothObject;
+	LinkNode* search = nullptr;
 
-  search = cloth->springs;
-  while (search) {
-	ClothSpring *spring = (ClothSpring*)search->link;
+	search = cloth->springs;
+	while (search) {
+		ClothSpring* spring = static_cast<ClothSpring*>(search->link);
 
-	spring->lin_stiffness = 0.0f;
+		spring->lin_stiffness = 0.0f;
 
-	if (clmd->sim_parms->bending_model == CLOTH_BENDING_ANGULAR) {
-	  if (spring->type & CLOTH_SPRING_TYPE_BENDING) {
-		spring->ang_stiffness = (cloth->verts[spring->kl].bend_stiff +
-								 cloth->verts[spring->ij].bend_stiff) /
-								2.0f;
-	  }
+		if (clmd->sim_parms->bending_model == CLOTH_BENDING_ANGULAR) 
+		{
+			if (spring->type & CLOTH_SPRING_TYPE_BENDING) 
+			{
+				spring->ang_stiffness = (cloth->verts[spring->kl].bend_stiff +
+										 cloth->verts[spring->ij].bend_stiff) /
+										 2.0f;
+			}
+		}
+
+		if (spring->type & CLOTH_SPRING_TYPE_STRUCTURAL) 
+		{
+			spring->lin_stiffness = (cloth->verts[spring->kl].struct_stiff +
+									 cloth->verts[spring->ij].struct_stiff) /
+									 2.0f;
+		}
+		else if (spring->type & CLOTH_SPRING_TYPE_SHEAR) 
+		{
+			spring->lin_stiffness = (cloth->verts[spring->kl].shear_stiff +
+									 cloth->verts[spring->ij].shear_stiff) /
+									 2.0f;
+		}
+		else if (spring->type == CLOTH_SPRING_TYPE_BENDING) 
+		{
+			spring->lin_stiffness = (cloth->verts[spring->kl].bend_stiff +
+									 cloth->verts[spring->ij].bend_stiff) /
+									 2.0f;
+		}
+		else if (spring->type & CLOTH_SPRING_TYPE_INTERNAL) 
+		{
+			spring->lin_stiffness = (cloth->verts[spring->kl].internal_stiff +
+									 cloth->verts[spring->ij].internal_stiff) /
+									 2.0f;
+		}
+		else if (spring->type == CLOTH_SPRING_TYPE_BENDING_HAIR) 
+		{
+			ClothVertex* v1 = &cloth->verts[spring->ij];
+			ClothVertex* v2 = &cloth->verts[spring->kl];
+			if (clmd->hairdata) {
+				/* copy extra hair data to generic cloth vertices */
+				v1->bend_stiff = clmd->hairdata[spring->ij].bending_stiffness;
+				v2->bend_stiff = clmd->hairdata[spring->kl].bending_stiffness;
+			}
+			spring->lin_stiffness = (v1->bend_stiff + v2->bend_stiff) / 2.0f;
+		}
+		else if (spring->type == CLOTH_SPRING_TYPE_GOAL) 
+		{
+			/* WARNING: Appending NEW goal springs does not work
+			 * because implicit solver would need reset! */
+
+			 /* Activate / Deactivate existing springs */
+			if (!(cloth->verts[spring->ij].flags & CLOTH_VERT_FLAG_PINNED) &&
+				 (cloth->verts[spring->ij].goal > ALMOST_ZERO)) 
+			{
+				spring->flags &= ~CLOTH_SPRING_FLAG_DEACTIVATE;
+			}
+			else {
+				spring->flags |= CLOTH_SPRING_FLAG_DEACTIVATE;
+			}
+		}
+
+		search = search->next;
 	}
 
-	if (spring->type & CLOTH_SPRING_TYPE_STRUCTURAL) {
-	  spring->lin_stiffness = (cloth->verts[spring->kl].struct_stiff +
-							   cloth->verts[spring->ij].struct_stiff) /
-							  2.0f;
-	}
-	else if (spring->type & CLOTH_SPRING_TYPE_SHEAR) {
-	  spring->lin_stiffness = (cloth->verts[spring->kl].shear_stiff +
-							   cloth->verts[spring->ij].shear_stiff) /
-							  2.0f;
-	}
-	else if (spring->type == CLOTH_SPRING_TYPE_BENDING) {
-	  spring->lin_stiffness = (cloth->verts[spring->kl].bend_stiff +
-							   cloth->verts[spring->ij].bend_stiff) /
-							  2.0f;
-	}
-	else if (spring->type & CLOTH_SPRING_TYPE_INTERNAL) {
-	  spring->lin_stiffness = (cloth->verts[spring->kl].internal_stiff +
-							   cloth->verts[spring->ij].internal_stiff) /
-							  2.0f;
-	}
-	else if (spring->type == CLOTH_SPRING_TYPE_BENDING_HAIR) {
-	  ClothVertex *v1 = &cloth->verts[spring->ij];
-	  ClothVertex *v2 = &cloth->verts[spring->kl];
-	  if (clmd->hairdata) {
-		/* copy extra hair data to generic cloth vertices */
-		v1->bend_stiff = clmd->hairdata[spring->ij].bending_stiffness;
-		v2->bend_stiff = clmd->hairdata[spring->kl].bending_stiffness;
-	  }
-	  spring->lin_stiffness = (v1->bend_stiff + v2->bend_stiff) / 2.0f;
-	}
-	else if (spring->type == CLOTH_SPRING_TYPE_GOAL) {
-	  /* Warning: Appending NEW goal springs does not work
-	   * because implicit solver would need reset! */
-
-	  /* Activate / Deactivate existing springs */
-	  if ((!(cloth->verts[spring->ij].flags & CLOTH_VERT_FLAG_PINNED)) &&
-		  (cloth->verts[spring->ij].goal > ALMOST_ZERO)) {
-		spring->flags &= ~CLOTH_SPRING_FLAG_DEACTIVATE;
-	  }
-	  else {
-		spring->flags |= CLOTH_SPRING_FLAG_DEACTIVATE;
-	  }
-	}
-
-	search = search->next;
-  }
-
-  cloth_hair_update_bending_targets(clmd);
+	cloth_hair_update_bending_targets(clmd);
 }
 
 // Update rest verts, for dynamically deformable cloth
@@ -1586,6 +1619,16 @@ bool cloth_from_object(ClothModifierData* clmd, Mesh* mesh)
 
 	cloth_from_mesh(clmd, mesh);
 
+	if (!clmd->sim_parms)
+	{
+		clmd->sim_parms = (ClothSimSettings*)_DNA_struct_default_alloc_impl((const uint8_t*)DNA_default_table[_SDNA_TYPE_ClothSimSettings], sizeof(ClothSimSettings), "");
+	}
+
+	if (!clmd->coll_parms)
+	{
+		clmd->coll_parms = (ClothCollSettings*)_DNA_struct_default_alloc_impl((const uint8_t*)DNA_default_table[_SDNA_TYPE_ClothCollSettings], sizeof(ClothCollSettings), "");
+	}
+
 	/* create springs */
 	clmd->clothObject->springs = NULL;
 	clmd->clothObject->numsprings = -1;
@@ -1661,11 +1704,7 @@ bool cloth_from_object(ClothModifierData* clmd, Mesh* mesh)
 
 	/* init our solver */
 	SIM_cloth_solver_init(clmd);
-
-	//if (!first) 
-	//{
 	SIM_cloth_solver_set_positions(clmd);
-	//}
 
 	clmd->clothObject->bvhtree = bvhtree_build_from_cloth(clmd, clmd->coll_parms->epsilon);
 	clmd->clothObject->bvhselftree = bvhtree_build_from_cloth(clmd, clmd->coll_parms->selfepsilon);

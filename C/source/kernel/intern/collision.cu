@@ -1461,153 +1461,173 @@ static bool cloth_bvh_self_overlap_cb(void *userdata, int index_a, int index_b, 
   return false;
 }
 
+///<summary>
+/// Функция cloth_bvh_collision обрабатывает столкновения объекта с модификатором Cloth с другими объектами и самого объекта с собой.
+/// </summary>
+/// <param name="depsgraph">Указатель на граф зависимостей сцены.</param>
+/// <param name="ob">Указатель на объект, для которого проводится симуляция.</param>
+/// <param name="clmd">Указатель на структуру данных модификатора Cloth.</param>
+/// <param name="step">Текущий шаг симуляции.</param>
+/// <param name="dt">Время между кадрами симуляции.</param>
+/// <returns>Возвращает 1, если произошло хотя бы одно столкновение, иначе возвращает 0.</returns>
 int cloth_bvh_collision(Depsgraph *depsgraph, Object *ob, ClothModifierData *clmd, float step, float dt)
 {
-  Cloth *cloth = clmd->clothObject;
-  BVHTree *cloth_bvh = cloth->bvhtree;
-  uint i = 0, mvert_num = 0;
-  int rounds = 0;
-  ClothVertex *verts = NULL;
-  int ret = 0, ret2 = 0;
-  Object **collobjs = NULL;
-  uint numcollobj = 0;
-  uint *coll_counts_obj = NULL;
-  BVHTreeOverlap **overlap_obj = NULL;
-  uint coll_count_self = 0;
-  BVHTreeOverlap *overlap_self = NULL;
+    Cloth* cloth = clmd->clothObject;
+    BVHTree* cloth_bvh = cloth->bvhtree;
+    uint i = 0, mvert_num = 0;
+    int rounds = 0;
+    ClothVertex* verts = NULL;
+    int ret = 0, ret2 = 0;
+    Object** collobjs = NULL;
+    uint numcollobj = 0;
+    uint* coll_counts_obj = NULL;
+    BVHTreeOverlap** overlap_obj = NULL;
+    uint coll_count_self = 0;
+    BVHTreeOverlap* overlap_self = NULL;
 
-  if ((clmd->sim_parms->flags & CLOTH_SIMSETTINGS_FLAG_COLLOBJ) || cloth_bvh == NULL) { return 0; }
+    // Выход, если коллизия с объектами отключена или BVH дерево ткани отсутствует
+    if ((clmd->sim_parms->flags & CLOTH_SIMSETTINGS_FLAG_COLLOBJ) || cloth_bvh == NULL) { return 0; }
 
-  verts = cloth->verts;
-  mvert_num = cloth->mvert_num;
+    verts = cloth->verts;
+    mvert_num = cloth->mvert_num;
 
-  if (clmd->coll_parms->flags & CLOTH_COLLSETTINGS_FLAG_ENABLED) {
-    bvhtree_update_from_cloth(clmd, false, false);
-    collobjs = BKE_collision_objects_create(depsgraph, ob, clmd->coll_parms->group, &numcollobj, eModifierType_Collision);
+    // Обработка коллизий с объектами
+    if (clmd->coll_parms->flags & CLOTH_COLLSETTINGS_FLAG_ENABLED) {
+        bvhtree_update_from_cloth(clmd, false, false);
+        collobjs = BKE_collision_objects_create(depsgraph, ob, clmd->coll_parms->group, &numcollobj, eModifierType_Collision);
 
-    if (collobjs) {
-      coll_counts_obj = (uint*)MEM_callocN(sizeof(uint) * numcollobj, "CollCounts");
-      overlap_obj = (BVHTreeOverlap**)MEM_callocN(sizeof(*overlap_obj) * numcollobj, "BVHOverlap");
+        if (collobjs) {
+            coll_counts_obj = (uint*)MEM_callocN(sizeof(uint) * numcollobj, "CollCounts");
+            overlap_obj = (BVHTreeOverlap**)MEM_callocN(sizeof(*overlap_obj) * numcollobj, "BVHOverlap");
 
-      for (i = 0; i < numcollobj; i++) {
-        Object *collob = collobjs[i];
-        CollisionModifierData* collmd = nullptr;// (CollisionModifierData*)BKE_modifiers_findby_type(collob, eModifierType_Collision);
+            for (i = 0; i < numcollobj; i++) {
+                Object* collob = collobjs[i];
+                CollisionModifierData* collmd = nullptr;// (CollisionModifierData*)BKE_modifiers_findby_type(collob, eModifierType_Collision);
 
-        if (!collmd->bvhtree) { continue; }
+                if (!collmd->bvhtree) { continue; }
 
-        /* Move object to position (step) in time. */
-        collision_move_object(collmd, step + dt, step, false);
+                // Перемещение объекта на позицию (step) во времени
+                collision_move_object(collmd, step + dt, step, false);
 
-        overlap_obj[i] = BLI_bvhtree_overlap(cloth_bvh, collmd->bvhtree, &coll_counts_obj[i], cloth_bvh_obj_overlap_cb, clmd);
-      }
-    }
-  }
-
-  if (clmd->coll_parms->flags & CLOTH_COLLSETTINGS_FLAG_SELF) {
-    bvhtree_update_from_cloth(clmd, false, true);
-
-    overlap_self = BLI_bvhtree_overlap(
-        cloth->bvhselftree, cloth->bvhselftree, &coll_count_self, cloth_bvh_self_overlap_cb, clmd);
-  }
-
-  do {
-    ret2 = 0;
-
-    /* Object collisions. */
-    if ((clmd->coll_parms->flags & CLOTH_COLLSETTINGS_FLAG_ENABLED) && collobjs) {
-      CollPair **collisions;
-      bool collided = false;
-
-      collisions = (CollPair**)MEM_callocN(sizeof(CollPair *) * numcollobj, "CollPair");
-
-      for (i = 0; i < numcollobj; i++) {
-        Object *collob = collobjs[i];
-        CollisionModifierData* collmd = NULL;//(CollisionModifierData*)BKE_modifiers_findby_type(collob, eModifierType_Collision);
-
-        if (!collmd->bvhtree) {
-          continue;
+                overlap_obj[i] = BLI_bvhtree_overlap(cloth_bvh, collmd->bvhtree, &coll_counts_obj[i], cloth_bvh_obj_overlap_cb, clmd);
+            }
         }
-
-        if (coll_counts_obj[i] && overlap_obj[i]) {
-          collided = cloth_bvh_objcollisions_nearcheck(
-                         clmd,
-                         collmd,
-                         &collisions[i],
-                         coll_counts_obj[i],
-                         overlap_obj[i],
-                         (collob->pd->flag & PFIELD_CLOTH_USE_CULLING),
-                         (collob->pd->flag & PFIELD_CLOTH_USE_NORMAL)) ||
-                     collided;
-        }
-      }
-
-      if (collided) {
-        ret += cloth_bvh_objcollisions_resolve(
-            clmd, collobjs, collisions, coll_counts_obj, numcollobj, dt);
-        ret2 += ret;
-      }
-
-      for (i = 0; i < numcollobj; i++) {
-        MEM_SAFE_FREE(collisions[i]);
-      }
-
-      MEM_freeN(collisions);
     }
 
-    /* Self collisions. */
+    // Обработка самоколлизий
     if (clmd->coll_parms->flags & CLOTH_COLLSETTINGS_FLAG_SELF) {
-      CollPair *collisions = NULL;
+        bvhtree_update_from_cloth(clmd, false, true);
 
-      verts = cloth->verts;
-      mvert_num = cloth->mvert_num;
+        overlap_self = BLI_bvhtree_overlap(
+            cloth->bvhselftree, cloth->bvhselftree, &coll_count_self, cloth_bvh_self_overlap_cb, clmd);
+    }
 
-      if (cloth->bvhselftree) {
-        if (coll_count_self && overlap_self) {
-          collisions = (CollPair *)MEM_mallocN(sizeof(CollPair) * coll_count_self,
-                                               "collision array");
+    do {
+        ret2 = 0;
 
-          if (cloth_bvh_selfcollisions_nearcheck(
-                  clmd, collisions, coll_count_self, overlap_self)) {
-            ret += cloth_bvh_selfcollisions_resolve(clmd, collisions, coll_count_self, dt);
-            ret2 += ret;
-          }
+        // Обработка коллизий с объектами
+        if ((clmd->coll_parms->flags & CLOTH_COLLSETTINGS_FLAG_ENABLED) && collobjs) {
+            CollPair** collisions;
+            bool collided = false;
+            collisions = (CollPair**)MEM_callocN(sizeof(CollPair*) * numcollobj, "CollPair");
+
+            for (i = 0; i < numcollobj; i++) {
+                Object* collob = collobjs[i];
+                CollisionModifierData* collmd = NULL;//(CollisionModifierData*)BKE_modifiers_findby_type(collob, eModifierType_Collision);
+
+                if (!collmd->bvhtree) {
+                    continue;
+                }
+
+                if (coll_counts_obj[i] && overlap_obj[i]) {
+                    collided = cloth_bvh_objcollisions_nearcheck(
+                        clmd,
+                        collmd,
+                        &collisions[i],
+                        coll_counts_obj[i],
+                        overlap_obj[i],
+                        (collob->pd->flag & PFIELD_CLOTH_USE_CULLING),
+                        (collob->pd->flag & PFIELD_CLOTH_USE_NORMAL)) ||
+                        collided;
+                }
+            }
+
+            // Разрешение коллизий с объектами, если они произошли
+            if (collided) {
+                ret += cloth_bvh_objcollisions_resolve(
+                    clmd, collobjs, collisions, coll_counts_obj, numcollobj, dt);
+                ret2 += ret;
+            }
+
+            for (i = 0; i < numcollobj; i++) {
+                MEM_SAFE_FREE(collisions[i]);
+            }
+
+            MEM_freeN(collisions);
         }
-      }
 
-      MEM_SAFE_FREE(collisions);
-    }
+        // Обработка самоколлизий
+        if (clmd->coll_parms->flags & CLOTH_COLLSETTINGS_FLAG_SELF) 
+        {
+            CollPair* collisions = NULL;
 
-    /* Apply all collision resolution. */
-    if (ret2) {
-      for (i = 0; i < mvert_num; i++) {
-        if (clmd->sim_parms->vgroup_mass > 0) {
-          if (verts[i].flags & CLOTH_VERT_FLAG_PINNED) {
-            continue;
-          }
+            verts = cloth->verts;
+            mvert_num = cloth->mvert_num;
+
+            if (cloth->bvhselftree) 
+            {
+                if (coll_count_self && overlap_self) {
+                    collisions = (CollPair*)MEM_mallocN(sizeof(CollPair) * coll_count_self, "collision array");
+
+                    // Проверка и разрешение самоколлизий, если они произошли
+                    if (cloth_bvh_selfcollisions_nearcheck(clmd, collisions, coll_count_self, overlap_self)) 
+                    {
+                        ret += cloth_bvh_selfcollisions_resolve(clmd, collisions, coll_count_self, dt);
+                        ret2 += ret;
+                    }
+                }
+            }
+
+            MEM_SAFE_FREE(collisions);
         }
 
-        add_v3_v3v3(verts[i].tx, verts[i].txold, verts[i].tv);
-      }
+        // Применение всех разрешений коллизий
+        if (ret2) 
+        {
+            for (i = 0; i < mvert_num; i++) 
+            {
+                if (clmd->sim_parms->vgroup_mass > 0) 
+                {
+                    if (verts[i].flags & CLOTH_VERT_FLAG_PINNED) 
+                    {
+                        continue;
+                    }
+                }
+                add_v3_v3v3(verts[i].tx, verts[i].txold, verts[i].tv);
+            }
+        }
+
+        rounds++;
+    } while (ret2 && (clmd->coll_parms->loop_count > rounds));
+
+    // Очистка памяти и выход из функции
+    if (overlap_obj) 
+    {
+        for (i = 0; i < numcollobj; i++) 
+        {
+            MEM_SAFE_FREE(overlap_obj[i]);
+        }
+
+        MEM_freeN(overlap_obj);
     }
 
-    rounds++;
-  } while (ret2 && (clmd->coll_parms->loop_count > rounds));
+    MEM_SAFE_FREE(coll_counts_obj);
 
-  if (overlap_obj) {
-    for (i = 0; i < numcollobj; i++) {
-      MEM_SAFE_FREE(overlap_obj[i]);
-    }
+    MEM_SAFE_FREE(overlap_self);
 
-    MEM_freeN(overlap_obj);
-  }
+    BKE_collision_objects_free(collobjs);
 
-  MEM_SAFE_FREE(coll_counts_obj);
-
-  MEM_SAFE_FREE(overlap_self);
-
-  BKE_collision_objects_free(collobjs);
-
-  return MIN2(ret, 1);
+    return MIN2(ret, 1);
 }
 
  void max_v3_v3v3(float r[3], const float a[3], const float b[3])
