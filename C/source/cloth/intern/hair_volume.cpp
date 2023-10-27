@@ -1,10 +1,9 @@
 #include "MEM_guardedalloc.cuh"
 
 #include "B_math.h"
-#include "utildefines.h"
 
-#include "effect.h"
-#include "implicit.h"
+#include "implicit.cuh"
+#include "mallocn_intern.cuh"
 
 float I[3][3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
 
@@ -81,79 +80,79 @@ struct HairGrid {
                                       float density_gradient[3],
                                       float velocity_gradient[3][3])
 {
-  HairGridVert data[8];
-  float uvw[3], muvw[3];
-  int res2 = res[1] * res[0];
-  int offset;
+  //HairGridVert data[8];
+  //float uvw[3], muvw[3];
+  //int res2 = res[1] * res[0];
+  //int offset;
 
-  offset = hair_grid_interp_weights(res, gmin, scale, vec, uvw);
-  muvw[0] = 1.0f - uvw[0];
-  muvw[1] = 1.0f - uvw[1];
-  muvw[2] = 1.0f - uvw[2];
+  //offset = hair_grid_interp_weights(res, gmin, scale, vec, uvw);
+  //muvw[0] = 1.0f - uvw[0];
+  //muvw[1] = 1.0f - uvw[1];
+  //muvw[2] = 1.0f - uvw[2];
 
-  data[0] = grid[offset];
-  data[1] = grid[offset + 1];
-  data[2] = grid[offset + res[0]];
-  data[3] = grid[offset + res[0] + 1];
-  data[4] = grid[offset + res2];
-  data[5] = grid[offset + res2 + 1];
-  data[6] = grid[offset + res2 + res[0]];
-  data[7] = grid[offset + res2 + res[0] + 1];
+  //data[0] = grid[offset];
+  //data[1] = grid[offset + 1];
+  //data[2] = grid[offset + res[0]];
+  //data[3] = grid[offset + res[0] + 1];
+  //data[4] = grid[offset + res2];
+  //data[5] = grid[offset + res2 + 1];
+  //data[6] = grid[offset + res2 + res[0]];
+  //data[7] = grid[offset + res2 + res[0] + 1];
 
-  if (density) {
-    *density = muvw[2] * (muvw[1] * (muvw[0] * data[0].density + uvw[0] * data[1].density) +
-                          uvw[1] * (muvw[0] * data[2].density + uvw[0] * data[3].density)) +
-               uvw[2] * (muvw[1] * (muvw[0] * data[4].density + uvw[0] * data[5].density) +
-                         uvw[1] * (muvw[0] * data[6].density + uvw[0] * data[7].density));
-  }
+  //if (density) {
+  //  *density = muvw[2] * (muvw[1] * (muvw[0] * data[0].density + uvw[0] * data[1].density) +
+  //                        uvw[1] * (muvw[0] * data[2].density + uvw[0] * data[3].density)) +
+  //             uvw[2] * (muvw[1] * (muvw[0] * data[4].density + uvw[0] * data[5].density) +
+  //                       uvw[1] * (muvw[0] * data[6].density + uvw[0] * data[7].density));
+  //}
 
-  if (velocity) {
-    int k;
-    for (k = 0; k < 3; k++) {
-      velocity[k] = muvw[2] *
-                        (muvw[1] * (muvw[0] * data[0].velocity[k] + uvw[0] * data[1].velocity[k]) +
-                         uvw[1] * (muvw[0] * data[2].velocity[k] + uvw[0] * data[3].velocity[k])) +
-                    uvw[2] *
-                        (muvw[1] * (muvw[0] * data[4].velocity[k] + uvw[0] * data[5].velocity[k]) +
-                         uvw[1] * (muvw[0] * data[6].velocity[k] + uvw[0] * data[7].velocity[k]));
-    }
-  }
+  //if (velocity) {
+  //  int k;
+  //  for (k = 0; k < 3; k++) {
+  //    velocity[k] = muvw[2] *
+  //                      (muvw[1] * (muvw[0] * data[0].velocity[k] + uvw[0] * data[1].velocity[k]) +
+  //                       uvw[1] * (muvw[0] * data[2].velocity[k] + uvw[0] * data[3].velocity[k])) +
+  //                  uvw[2] *
+  //                      (muvw[1] * (muvw[0] * data[4].velocity[k] + uvw[0] * data[5].velocity[k]) +
+  //                       uvw[1] * (muvw[0] * data[6].velocity[k] + uvw[0] * data[7].velocity[k]));
+  //  }
+  //}
 
-  if (vel_smooth) {
-    int k;
-    for (k = 0; k < 3; k++) {
-      vel_smooth[k] = muvw[2] * (muvw[1] * (muvw[0] * data[0].velocity_smooth[k] +
-                                            uvw[0] * data[1].velocity_smooth[k]) +
-                                 uvw[1] * (muvw[0] * data[2].velocity_smooth[k] +
-                                           uvw[0] * data[3].velocity_smooth[k])) +
-                      uvw[2] * (muvw[1] * (muvw[0] * data[4].velocity_smooth[k] +
-                                           uvw[0] * data[5].velocity_smooth[k]) +
-                                uvw[1] * (muvw[0] * data[6].velocity_smooth[k] +
-                                          uvw[0] * data[7].velocity_smooth[k]));
-    }
-  }
+  //if (vel_smooth) {
+  //  int k;
+  //  for (k = 0; k < 3; k++) {
+  //    vel_smooth[k] = muvw[2] * (muvw[1] * (muvw[0] * data[0].velocity_smooth[k] +
+  //                                          uvw[0] * data[1].velocity_smooth[k]) +
+  //                               uvw[1] * (muvw[0] * data[2].velocity_smooth[k] +
+  //                                         uvw[0] * data[3].velocity_smooth[k])) +
+  //                    uvw[2] * (muvw[1] * (muvw[0] * data[4].velocity_smooth[k] +
+  //                                         uvw[0] * data[5].velocity_smooth[k]) +
+  //                              uvw[1] * (muvw[0] * data[6].velocity_smooth[k] +
+  //                                        uvw[0] * data[7].velocity_smooth[k]));
+  //  }
+  //}
 
-  if (density_gradient) {
-    density_gradient[0] = muvw[1] * muvw[2] * (data[0].density - data[1].density) +
-                          uvw[1] * muvw[2] * (data[2].density - data[3].density) +
-                          muvw[1] * uvw[2] * (data[4].density - data[5].density) +
-                          uvw[1] * uvw[2] * (data[6].density - data[7].density);
+  //if (density_gradient) {
+  //  density_gradient[0] = muvw[1] * muvw[2] * (data[0].density - data[1].density) +
+  //                        uvw[1] * muvw[2] * (data[2].density - data[3].density) +
+  //                        muvw[1] * uvw[2] * (data[4].density - data[5].density) +
+  //                        uvw[1] * uvw[2] * (data[6].density - data[7].density);
 
-    density_gradient[1] = muvw[2] * muvw[0] * (data[0].density - data[2].density) +
-                          uvw[2] * muvw[0] * (data[4].density - data[6].density) +
-                          muvw[2] * uvw[0] * (data[1].density - data[3].density) +
-                          uvw[2] * uvw[0] * (data[5].density - data[7].density);
+  //  density_gradient[1] = muvw[2] * muvw[0] * (data[0].density - data[2].density) +
+  //                        uvw[2] * muvw[0] * (data[4].density - data[6].density) +
+  //                        muvw[2] * uvw[0] * (data[1].density - data[3].density) +
+  //                        uvw[2] * uvw[0] * (data[5].density - data[7].density);
 
-    density_gradient[2] = muvw[2] * muvw[0] * (data[0].density - data[4].density) +
-                          uvw[2] * muvw[0] * (data[1].density - data[5].density) +
-                          muvw[2] * uvw[0] * (data[2].density - data[6].density) +
-                          uvw[2] * uvw[0] * (data[3].density - data[7].density);
-  }
+  //  density_gradient[2] = muvw[2] * muvw[0] * (data[0].density - data[4].density) +
+  //                        uvw[2] * muvw[0] * (data[1].density - data[5].density) +
+  //                        muvw[2] * uvw[0] * (data[2].density - data[6].density) +
+  //                        uvw[2] * uvw[0] * (data[3].density - data[7].density);
+  //}
 
-  if (velocity_gradient) {
-    /* XXX TODO: */
-    zero_m3(velocity_gradient);
-  }
+  //if (velocity_gradient) {
+  //  /* XXX TODO: */
+  //  zero_m3(velocity_gradient);
+  //}
 }
 
 void SIM_hair_volume_vertex_grid_forces(HairGrid *grid,
@@ -166,33 +165,33 @@ void SIM_hair_volume_vertex_grid_forces(HairGrid *grid,
                                         float dfdx[3][3],
                                         float dfdv[3][3])
 {
-  float gdensity, gvelocity[3], ggrad[3], gvelgrad[3][3], gradlen;
+  //float gdensity, gvelocity[3], ggrad[3], gvelgrad[3][3], gradlen;
 
-  hair_grid_interpolate(grid->verts,
-                        grid->res,
-                        grid->gmin,
-                        grid->inv_cellsize,
-                        x,
-                        &gdensity,
-                        gvelocity,
-                        nullptr,
-                        ggrad,
-                        gvelgrad);
+  //hair_grid_interpolate(grid->verts,
+  //                      grid->res,
+  //                      grid->gmin,
+  //                      grid->inv_cellsize,
+  //                      x,
+  //                      &gdensity,
+  //                      gvelocity,
+  //                      nullptr,
+  //                      ggrad,
+  //                      gvelgrad);
 
-  zero_v3(f);
-  sub_v3_v3(gvelocity, v);
-  mul_v3_v3fl(f, gvelocity, smoothfac);
+  //zero_v3(f);
+  //sub_v3_v3(gvelocity, v);
+  //mul_v3_v3fl(f, gvelocity, smoothfac);
 
-  gradlen = normalize_v3(ggrad) - minpressure;
-  if (gradlen > 0.0f) {
-    mul_v3_fl(ggrad, gradlen);
-    madd_v3_v3fl(f, ggrad, pressurefac);
-  }
+  //gradlen = normalize_v3(ggrad) - minpressure;
+  //if (gradlen > 0.0f) {
+  //  mul_v3_fl(ggrad, gradlen);
+  //  madd_v3_v3fl(f, ggrad, pressurefac);
+  //}
 
-  zero_m3(dfdx);
+  //zero_m3(dfdx);
 
-  sub_m3_m3m3(dfdv, gvelgrad, I);
-  mul_m3_fl(dfdv, smoothfac);
+  //sub_m3_m3m3(dfdv, gvelgrad, I);
+  //mul_m3_fl(dfdv, smoothfac);
 }
 
 void SIM_hair_volume_grid_interpolate(HairGrid *grid,
@@ -244,14 +243,14 @@ void SIM_hair_volume_grid_velocity(
 
 void SIM_hair_volume_grid_clear(HairGrid *grid)
 {
-  const int size = hair_grid_size(grid->res);
-  int i;
-  for (i = 0; i < size; i++) {
-    zero_v3(grid->verts[i].velocity);
-    zero_v3(grid->verts[i].velocity_smooth);
-    grid->verts[i].density = 0.0f;
-    grid->verts[i].samples = 0;
-  }
+  //const int size = hair_grid_size(grid->res);
+  //int i;
+  //for (i = 0; i < size; i++) {
+  //  zero_v3(grid->verts[i].velocity);
+  //  zero_v3(grid->verts[i].velocity_smooth);
+  //  grid->verts[i].density = 0.0f;
+  //  grid->verts[i].samples = 0;
+  //}
 }
 
  bool hair_grid_point_valid(const float vec[3], const float gmin[3], const float gmax[3])
@@ -447,207 +446,207 @@ bool SIM_hair_volume_solve_divergence(HairGrid *grid,
                                       float target_density,
                                       float target_strength)
 {
-  //const float flowfac = grid->cellsize;
-  const float inv_flowfac = 1.0f / grid->cellsize;
-
-  // const int num_cells = hair_grid_size(grid->res);
-  const int res[3] = {grid->res[0], grid->res[1], grid->res[2]};
-  const int resA[3] = {grid->res[0] + 2, grid->res[1] + 2, grid->res[2] + 2};
-
-  const int stride0 = 1;
-  const int stride1 = grid->res[0];
-  const int stride2 = grid->res[1] * grid->res[0];
-  const int strideA0 = 1;
-  const int strideA1 = grid->res[0] + 2;
-  const int strideA2 = (grid->res[1] + 2) * (grid->res[0] + 2);
-
-  const int num_cells = res[0] * res[1] * res[2];
-  //const int num_cellsA = (res[0] + 2) * (res[1] + 2) * (res[2] + 2);
-
-  HairGridVert *vert_start = grid->verts - (stride0 + stride1 + stride2);
-  HairGridVert *vert;
-  int i, j, k;
-
-#define MARGIN_i0 (i < 1)
-#define MARGIN_j0 (j < 1)
-#define MARGIN_k0 (k < 1)
-#define MARGIN_i1 (i >= resA[0] - 1)
-#define MARGIN_j1 (j >= resA[1] - 1)
-#define MARGIN_k1 (k >= resA[2] - 1)
-
-#define NEIGHBOR_MARGIN_i0 (i < 2)
-#define NEIGHBOR_MARGIN_j0 (j < 2)
-#define NEIGHBOR_MARGIN_k0 (k < 2)
-#define NEIGHBOR_MARGIN_i1 (i >= resA[0] - 2)
-#define NEIGHBOR_MARGIN_j1 (j >= resA[1] - 2)
-#define NEIGHBOR_MARGIN_k1 (k >= resA[2] - 2)
-
-  BLI_assert(num_cells >= 1);
-
-  /* Calculate divergence */
-  //lVector B(num_cellsA);
-  //for (k = 0; k < resA[2]; k++) {
-  //  for (j = 0; j < resA[1]; j++) {
-  //    for (i = 0; i < resA[0]; i++) {
-  //      int u = i * strideA0 + j * strideA1 + k * strideA2;
-  //      bool is_margin = MARGIN_i0 || MARGIN_i1 || MARGIN_j0 || MARGIN_j1 || MARGIN_k0 ||
-  //                       MARGIN_k1;
-
-  //      if (is_margin) {
-  //        //B[u] = 0.0f;
-  //        continue;
-  //      }
-
-  //      vert = vert_start + i * stride0 + j * stride1 + k * stride2;
-
-  //      const float *v0 = vert->velocity;
-  //      float dx = 0.0f, dy = 0.0f, dz = 0.0f;
-  //      if (!NEIGHBOR_MARGIN_i0) {
-  //        dx += v0[0] - (vert - stride0)->velocity[0];
-  //      }
-  //      if (!NEIGHBOR_MARGIN_i1) {
-  //        dx += (vert + stride0)->velocity[0] - v0[0];
-  //      }
-  //      if (!NEIGHBOR_MARGIN_j0) {
-  //        dy += v0[1] - (vert - stride1)->velocity[1];
-  //      }
-  //      if (!NEIGHBOR_MARGIN_j1) {
-  //        dy += (vert + stride1)->velocity[1] - v0[1];
-  //      }
-  //      if (!NEIGHBOR_MARGIN_k0) {
-  //        dz += v0[2] - (vert - stride2)->velocity[2];
-  //      }
-  //      if (!NEIGHBOR_MARGIN_k1) {
-  //        dz += (vert + stride2)->velocity[2] - v0[2];
-  //      }
-
-  //      float divergence = -0.5f * flowfac * (dx + dy + dz);
-
-  //      /* adjustment term for target density */
-  //      float target = hair_volume_density_divergence(
-  //          vert->density, target_density, target_strength);
-
-  //      /* B vector contains the finite difference approximation of the velocity divergence.
-  //       * NOTE: according to the discretized Navier-Stokes equation the rhs vector
-  //       * and resulting pressure gradient should be multiplied by the (inverse) density;
-  //       * however, this is already included in the weighting of hair velocities on the grid!
-  //       */
-  //      B[u] = divergence - target;
-  //    }
-  //  }
-  //}
-
-  //lMatrix A(num_cellsA, num_cellsA);
-
-  for (k = 0; k < resA[2]; k++) {
-      for (j = 0; j < resA[1]; j++) {
-          for (i = 0; i < resA[0]; i++) {
-              int u = i * strideA0 + j * strideA1 + k * strideA2;
-              bool is_margin = MARGIN_i0 || MARGIN_i1 || MARGIN_j0 || MARGIN_j1 || MARGIN_k0 ||
-                  MARGIN_k1;
-
-              vert = vert_start + i * stride0 + j * stride1 + k * stride2;
-              if (!is_margin && vert->density > density_threshold) {
-                  int neighbors_lo = 0;
-                  int neighbors_hi = 0;
-                  //int non_solid_neighbors = 0;
-                  int neighbor_lo_index[3];
-                  int neighbor_hi_index[3];
-                  //int n;
-
-                  /* check for upper bounds in advance
-                   * to get the correct number of neighbors,
-                   * needed for the diagonal element
-                   */
-                  if (!NEIGHBOR_MARGIN_k0 && (vert - stride2)->density > density_threshold) {
-                      neighbor_lo_index[neighbors_lo++] = u - strideA2;
-                  }
-                  if (!NEIGHBOR_MARGIN_j0 && (vert - stride1)->density > density_threshold) {
-                      neighbor_lo_index[neighbors_lo++] = u - strideA1;
-                  }
-                  if (!NEIGHBOR_MARGIN_i0 && (vert - stride0)->density > density_threshold) {
-                      neighbor_lo_index[neighbors_lo++] = u - strideA0;
-                  }
-                  if (!NEIGHBOR_MARGIN_i1 && (vert + stride0)->density > density_threshold) {
-                      neighbor_hi_index[neighbors_hi++] = u + strideA0;
-                  }
-                  if (!NEIGHBOR_MARGIN_j1 && (vert + stride1)->density > density_threshold) {
-                      neighbor_hi_index[neighbors_hi++] = u + strideA1;
-                  }
-                  if (!NEIGHBOR_MARGIN_k1 && (vert + stride2)->density > density_threshold) {
-                      neighbor_hi_index[neighbors_hi++] = u + strideA2;
-                  }
-
-                  // int liquid_neighbors = neighbors_lo + neighbors_hi;
-                  //non_solid_neighbors = 6;
-
-                  //for (n = 0; n < neighbors_lo; n++) {
-                  //  A.insert(neighbor_lo_index[n], u) = -1.0f;
-                  //}
-                  //A.insert(u, u) = (float)non_solid_neighbors;
-                  //for (n = 0; n < neighbors_hi; n++) {
-                  //  A.insert(neighbor_hi_index[n], u) = -1.0f;
-                  //}
-              }
-              else { //A.insert(u, u) = 1.0f; }
-              }
-          }
-      }
-  }
-
-  //ConjugateGradient cg;
-  //cg.setMaxIterations(100);
-  //cg.setTolerance(0.01f);
-
-  //cg.compute(A);
-
-  //Eigen::VectorXf p = cg.solve(B);
-
-  //if (cg.info() == Eigen::Success) {
-  //  /* Calculate velocity = grad(p) */
-  //  for (k = 0; k < resA[2]; k++) {
-  //    for (j = 0; j < resA[1]; j++) {
-  //      for (i = 0; i < resA[0]; i++) {
-  //        int u = i * strideA0 + j * strideA1 + k * strideA2;
-  //        bool is_margin = MARGIN_i0 || MARGIN_i1 || MARGIN_j0 || MARGIN_j1 || MARGIN_k0 ||
-  //                         MARGIN_k1;
-  //        if (is_margin) {
-  //          continue;
-  //        }
-
-  //        vert = vert_start + i * stride0 + j * stride1 + k * stride2;
-  //        if (vert->density > density_threshold) {
-  //          float p_left = p[u - strideA0];
-  //          float p_right = p[u + strideA0];
-  //          float p_down = p[u - strideA1];
-  //          float p_up = p[u + strideA1];
-  //          float p_bottom = p[u - strideA2];
-  //          float p_top = p[u + strideA2];
-
-  //          /* finite difference estimate of pressure gradient */
-  //          float dvel[3];
-  //          dvel[0] = p_right - p_left;
-  //          dvel[1] = p_up - p_down;
-  //          dvel[2] = p_top - p_bottom;
-  //          mul_v3_fl(dvel, -0.5f * inv_flowfac);
-
-  //          /* pressure gradient describes velocity delta */
-  //          add_v3_v3v3(vert->velocity_smooth, vert->velocity, dvel);
-  //        }
-  //        else {
-  //          zero_v3(vert->velocity_smooth);
-  //        }
-  //      }
-  //    }
-  //  }
-  //  return true;
-  //}
-
-  /* Clear result in case of error */
-  for (i = 0, vert = grid->verts; i < num_cells; i++, vert++) 
-  {
-    zero_v3(vert->velocity_smooth);
-  }
+//  //const float flowfac = grid->cellsize;
+//  const float inv_flowfac = 1.0f / grid->cellsize;
+//
+//  // const int num_cells = hair_grid_size(grid->res);
+//  const int res[3] = {grid->res[0], grid->res[1], grid->res[2]};
+//  const int resA[3] = {grid->res[0] + 2, grid->res[1] + 2, grid->res[2] + 2};
+//
+//  const int stride0 = 1;
+//  const int stride1 = grid->res[0];
+//  const int stride2 = grid->res[1] * grid->res[0];
+//  const int strideA0 = 1;
+//  const int strideA1 = grid->res[0] + 2;
+//  const int strideA2 = (grid->res[1] + 2) * (grid->res[0] + 2);
+//
+//  const int num_cells = res[0] * res[1] * res[2];
+//  //const int num_cellsA = (res[0] + 2) * (res[1] + 2) * (res[2] + 2);
+//
+//  HairGridVert *vert_start = grid->verts - (stride0 + stride1 + stride2);
+//  HairGridVert *vert;
+//  int i, j, k;
+//
+//#define MARGIN_i0 (i < 1)
+//#define MARGIN_j0 (j < 1)
+//#define MARGIN_k0 (k < 1)
+//#define MARGIN_i1 (i >= resA[0] - 1)
+//#define MARGIN_j1 (j >= resA[1] - 1)
+//#define MARGIN_k1 (k >= resA[2] - 1)
+//
+//#define NEIGHBOR_MARGIN_i0 (i < 2)
+//#define NEIGHBOR_MARGIN_j0 (j < 2)
+//#define NEIGHBOR_MARGIN_k0 (k < 2)
+//#define NEIGHBOR_MARGIN_i1 (i >= resA[0] - 2)
+//#define NEIGHBOR_MARGIN_j1 (j >= resA[1] - 2)
+//#define NEIGHBOR_MARGIN_k1 (k >= resA[2] - 2)
+//
+//  BLI_assert(num_cells >= 1);
+//
+//  /* Calculate divergence */
+//  //lVector B(num_cellsA);
+//  //for (k = 0; k < resA[2]; k++) {
+//  //  for (j = 0; j < resA[1]; j++) {
+//  //    for (i = 0; i < resA[0]; i++) {
+//  //      int u = i * strideA0 + j * strideA1 + k * strideA2;
+//  //      bool is_margin = MARGIN_i0 || MARGIN_i1 || MARGIN_j0 || MARGIN_j1 || MARGIN_k0 ||
+//  //                       MARGIN_k1;
+//
+//  //      if (is_margin) {
+//  //        //B[u] = 0.0f;
+//  //        continue;
+//  //      }
+//
+//  //      vert = vert_start + i * stride0 + j * stride1 + k * stride2;
+//
+//  //      const float *v0 = vert->velocity;
+//  //      float dx = 0.0f, dy = 0.0f, dz = 0.0f;
+//  //      if (!NEIGHBOR_MARGIN_i0) {
+//  //        dx += v0[0] - (vert - stride0)->velocity[0];
+//  //      }
+//  //      if (!NEIGHBOR_MARGIN_i1) {
+//  //        dx += (vert + stride0)->velocity[0] - v0[0];
+//  //      }
+//  //      if (!NEIGHBOR_MARGIN_j0) {
+//  //        dy += v0[1] - (vert - stride1)->velocity[1];
+//  //      }
+//  //      if (!NEIGHBOR_MARGIN_j1) {
+//  //        dy += (vert + stride1)->velocity[1] - v0[1];
+//  //      }
+//  //      if (!NEIGHBOR_MARGIN_k0) {
+//  //        dz += v0[2] - (vert - stride2)->velocity[2];
+//  //      }
+//  //      if (!NEIGHBOR_MARGIN_k1) {
+//  //        dz += (vert + stride2)->velocity[2] - v0[2];
+//  //      }
+//
+//  //      float divergence = -0.5f * flowfac * (dx + dy + dz);
+//
+//  //      /* adjustment term for target density */
+//  //      float target = hair_volume_density_divergence(
+//  //          vert->density, target_density, target_strength);
+//
+//  //      /* B vector contains the finite difference approximation of the velocity divergence.
+//  //       * NOTE: according to the discretized Navier-Stokes equation the rhs vector
+//  //       * and resulting pressure gradient should be multiplied by the (inverse) density;
+//  //       * however, this is already included in the weighting of hair velocities on the grid!
+//  //       */
+//  //      B[u] = divergence - target;
+//  //    }
+//  //  }
+//  //}
+//
+//  //lMatrix A(num_cellsA, num_cellsA);
+//
+//  for (k = 0; k < resA[2]; k++) {
+//      for (j = 0; j < resA[1]; j++) {
+//          for (i = 0; i < resA[0]; i++) {
+//              int u = i * strideA0 + j * strideA1 + k * strideA2;
+//              bool is_margin = MARGIN_i0 || MARGIN_i1 || MARGIN_j0 || MARGIN_j1 || MARGIN_k0 ||
+//                  MARGIN_k1;
+//
+//              vert = vert_start + i * stride0 + j * stride1 + k * stride2;
+//              if (!is_margin && vert->density > density_threshold) {
+//                  int neighbors_lo = 0;
+//                  int neighbors_hi = 0;
+//                  //int non_solid_neighbors = 0;
+//                  int neighbor_lo_index[3];
+//                  int neighbor_hi_index[3];
+//                  //int n;
+//
+//                  /* check for upper bounds in advance
+//                   * to get the correct number of neighbors,
+//                   * needed for the diagonal element
+//                   */
+//                  if (!NEIGHBOR_MARGIN_k0 && (vert - stride2)->density > density_threshold) {
+//                      neighbor_lo_index[neighbors_lo++] = u - strideA2;
+//                  }
+//                  if (!NEIGHBOR_MARGIN_j0 && (vert - stride1)->density > density_threshold) {
+//                      neighbor_lo_index[neighbors_lo++] = u - strideA1;
+//                  }
+//                  if (!NEIGHBOR_MARGIN_i0 && (vert - stride0)->density > density_threshold) {
+//                      neighbor_lo_index[neighbors_lo++] = u - strideA0;
+//                  }
+//                  if (!NEIGHBOR_MARGIN_i1 && (vert + stride0)->density > density_threshold) {
+//                      neighbor_hi_index[neighbors_hi++] = u + strideA0;
+//                  }
+//                  if (!NEIGHBOR_MARGIN_j1 && (vert + stride1)->density > density_threshold) {
+//                      neighbor_hi_index[neighbors_hi++] = u + strideA1;
+//                  }
+//                  if (!NEIGHBOR_MARGIN_k1 && (vert + stride2)->density > density_threshold) {
+//                      neighbor_hi_index[neighbors_hi++] = u + strideA2;
+//                  }
+//
+//                  // int liquid_neighbors = neighbors_lo + neighbors_hi;
+//                  //non_solid_neighbors = 6;
+//
+//                  //for (n = 0; n < neighbors_lo; n++) {
+//                  //  A.insert(neighbor_lo_index[n], u) = -1.0f;
+//                  //}
+//                  //A.insert(u, u) = (float)non_solid_neighbors;
+//                  //for (n = 0; n < neighbors_hi; n++) {
+//                  //  A.insert(neighbor_hi_index[n], u) = -1.0f;
+//                  //}
+//              }
+//              else { //A.insert(u, u) = 1.0f; }
+//              }
+//          }
+//      }
+//  }
+//
+//  //ConjugateGradient cg;
+//  //cg.setMaxIterations(100);
+//  //cg.setTolerance(0.01f);
+//
+//  //cg.compute(A);
+//
+//  //Eigen::VectorXf p = cg.solve(B);
+//
+//  //if (cg.info() == Eigen::Success) {
+//  //  /* Calculate velocity = grad(p) */
+//  //  for (k = 0; k < resA[2]; k++) {
+//  //    for (j = 0; j < resA[1]; j++) {
+//  //      for (i = 0; i < resA[0]; i++) {
+//  //        int u = i * strideA0 + j * strideA1 + k * strideA2;
+//  //        bool is_margin = MARGIN_i0 || MARGIN_i1 || MARGIN_j0 || MARGIN_j1 || MARGIN_k0 ||
+//  //                         MARGIN_k1;
+//  //        if (is_margin) {
+//  //          continue;
+//  //        }
+//
+//  //        vert = vert_start + i * stride0 + j * stride1 + k * stride2;
+//  //        if (vert->density > density_threshold) {
+//  //          float p_left = p[u - strideA0];
+//  //          float p_right = p[u + strideA0];
+//  //          float p_down = p[u - strideA1];
+//  //          float p_up = p[u + strideA1];
+//  //          float p_bottom = p[u - strideA2];
+//  //          float p_top = p[u + strideA2];
+//
+//  //          /* finite difference estimate of pressure gradient */
+//  //          float dvel[3];
+//  //          dvel[0] = p_right - p_left;
+//  //          dvel[1] = p_up - p_down;
+//  //          dvel[2] = p_top - p_bottom;
+//  //          mul_v3_fl(dvel, -0.5f * inv_flowfac);
+//
+//  //          /* pressure gradient describes velocity delta */
+//  //          add_v3_v3v3(vert->velocity_smooth, vert->velocity, dvel);
+//  //        }
+//  //        else {
+//  //          zero_v3(vert->velocity_smooth);
+//  //        }
+//  //      }
+//  //    }
+//  //  }
+//  //  return true;
+//  //}
+//
+//  /* Clear result in case of error */
+//  for (i = 0, vert = grid->verts; i < num_cells; i++, vert++) 
+//  {
+//    zero_v3(vert->velocity_smooth);
+//  }
 
   return false;
 }
@@ -702,7 +701,7 @@ HairGrid *SIM_hair_volume_create_vertex_grid(float cellsize,
   copy_v3_v3(grid->gmax, gmax_margin);
   grid->cellsize = cellsize;
   grid->inv_cellsize = scale;
-  grid->verts = (HairGridVert *)MEM_callocN(sizeof(HairGridVert) * size, "hair voxel data");
+  grid->verts = (HairGridVert *)MEM_lockfree_callocN(sizeof(HairGridVert) * size, "hair voxel data");
 
   return grid;
 }
@@ -711,14 +710,13 @@ void SIM_hair_volume_free_vertex_grid(HairGrid *grid)
 {
   if (grid) {
     if (grid->verts) {
-      MEM_freeN(grid->verts);
+      MEM_lockfree_freeN(grid->verts);
     }
-    MEM_freeN(grid);
+    MEM_lockfree_freeN(grid);
   }
 }
 
-void SIM_hair_volume_grid_geometry(
-    HairGrid *grid, float *cellsize, int res[3], float gmin[3], float gmax[3])
+void SIM_hair_volume_grid_geometry(HairGrid *grid, float *cellsize, int res[3], float gmin[3], float gmax[3])
 {
   if (cellsize) {
     *cellsize = grid->cellsize;

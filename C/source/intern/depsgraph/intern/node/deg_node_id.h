@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ghash.h"
+#include "ghash.cuh"
 #include "sys_types.cuh"
 #include "ID.h"
 #include "node/deg_node.h"

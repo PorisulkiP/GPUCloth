@@ -19,7 +19,7 @@
 
 //#include "BLI_alloca.h"
 //#include "BLI_blenlib.h"
-#include "ghash.h"
+#include "ghash.cuh"
 #include "linklist.cuh"
 #include "memarena.h"
 //#include "BLI_string_utils.h"
@@ -44,16 +44,16 @@
 //#include "BKE_node.h"
 //#include "BKE_rigidbody.h"
 
-#include "DEG_depsgraph.h"
+#include "DEG_depsgraph.cuh"
 
 #include "RNA_access.h"
 
-#include "atomic_ops.h"
+#include "atomic_ops.cuh"
 
 //#define DEBUG_TIME
 
 #ifdef DEBUG_TIME
-#  include "PIL_time_utildefines.h"
+#  include "PIL_time_utildefines.cuh"
 #endif
 
 
@@ -936,7 +936,7 @@ void id_us_min(ID *id)
 //  }
 //
 //  /* Fill an array because renaming sorts. */
-//  ID **id_array = MEM_mallocN(sizeof(*id_array) * lb_len, __func__);
+//  ID **id_array = MEM_lockfree_mallocN(sizeof(*id_array) * lb_len, __func__);
 //  GSet *gset = BLI_gset_str_new_ex(__func__, lb_len);
 //  int i = 0;
 //  LISTBASE_FOREACH (ID *, id, lb) {
@@ -951,7 +951,7 @@ void id_us_min(ID *id)
 //    }
 //  }
 //  BLI_gset_free(gset, NULL);
-//  MEM_freeN(id_array);
+//  MEM_lockfree_freeN(id_array);
 //}
 //
 //void BKE_main_lib_objects_recalc_all(Main *bmain)
@@ -1007,7 +1007,7 @@ void id_us_min(ID *id)
 //  const char *name;
 //  size_t size = BKE_libblock_get_alloc_info(type, &name);
 //  if (size != 0) {
-//    return MEM_callocN(size, name);
+//    return MEM_lockfree_callocN(size, name);
 //  }
 //  BLI_assert(!"Request to allocate unknown data type");
 //  return NULL;

@@ -18,7 +18,7 @@
 //#include "BKE_node.h"
 #include "object.h"
 
-#include "DEG_depsgraph.h"
+#include "DEG_depsgraph.cuh"
 #include "DEG_depsgraph_build.h"
 
 #include "lib_intern.h" /* own include */
@@ -104,7 +104,7 @@ static int foreach_libblock_remap_callback(LibraryIDLinkCallbackData *cb_data)
      * on the other hand since they get reset to lib data on file open/reload it is indirect too.
      * Edit Mode is also a 'skip direct' case. */
     const bool is_obj = (GS(id_owner->name) == ID_OB);
-    const bool is_obj_proxy = (is_obj && (((Object *)id_owner)->proxy || ((Object *)id_owner)->proxy_group));
+    const bool is_obj_proxy = false;// (is_obj && (((Object*)id_owner)->proxy || ((Object*)id_owner)->proxy_group));
     const bool is_obj_editmode = false;// (is_obj && BKE_object_is_in_editmode((Object*)id_owner));
     const bool is_never_null = ((cb_flag & IDWALK_CB_NEVER_NULL) && (new_id == NULL) &&
                                 (id_remap_data->flag & ID_REMAP_FORCE_NEVER_NULL_USAGE) == 0);
@@ -140,14 +140,14 @@ static int foreach_libblock_remap_callback(LibraryIDLinkCallbackData *cb_data)
         (skip_indirect && is_indirect) || (is_reference && skip_reference)) {
       if (is_indirect) {
         id_remap_data->skipped_indirect++;
-        if (is_obj) {
-          Object *ob = (Object *)id_owner;
-          if (ob->data == *id_p && ob->proxy != NULL) {
-            /* And another 'Proudly brought to you by Proxy Hell' hack!
-             * This will allow us to avoid clearing 'LIB_EXTERN' flag of obdata of proxies... */
-            id_remap_data->skipped_direct++;
-          }
-        }
+        //if (is_obj) {
+        //  Object *ob = (Object *)id_owner;
+        //  if (ob->data == *id_p && ob->proxy != NULL) {
+        //    /* And another 'Proudly brought to you by Proxy Hell' hack!
+        //     * This will allow us to avoid clearing 'LIB_EXTERN' flag of obdata of proxies... */
+        //    id_remap_data->skipped_direct++;
+        //  }
+        //}
       }
       else if (is_never_null || is_obj_editmode || is_reference) {
         id_remap_data->skipped_direct++;
@@ -202,15 +202,15 @@ static int foreach_libblock_remap_callback(LibraryIDLinkCallbackData *cb_data)
       {
         id_remap_data->status |= ID_REMAP_IS_LINKED_DIRECT;
       }
-      /* We need to remap proxy_from pointer of remapped proxy... sigh. */
-      if (is_obj_proxy && new_id != NULL) 
-      {
-        Object *ob = (Object *)id_owner;
-        if (ob->proxy == (Object *)new_id) 
-        {
-          ob->proxy->proxy_from = ob;
-        }
-      }
+      ///* We need to remap proxy_from pointer of remapped proxy... sigh. */
+      //if (is_obj_proxy && new_id != NULL) 
+      //{
+      //  Object *ob = (Object *)id_owner;
+      //  if (ob->proxy == (Object *)new_id) 
+      //  {
+      //    ob->proxy->proxy_from = ob;
+      //  }
+      //}
     }
   }
 

@@ -83,11 +83,10 @@
 
 #define _DNA_DEFAULT_ClothSimSettings \
   { \
-    .cache = NULL, \
     .mingoal = 0.0f, \
     .Cvi = 1.0f, \
     .gravity = {0.0f, 0.0f, -9.81f}, \
-    .dt = 0.0f, \
+    .dt = 0.01f, \
     .mass = 0.3f, \
     .shear = 5.0f, \
     .bending = 0.5f, \
@@ -139,13 +138,14 @@
     .compression_damp = 5.0f, \
     .shear_damp = 5.0f, \
     .internal_spring_max_length = 0.0f, \
-    .internal_spring_max_diversion = M_PI_4, \
+    .internal_spring_max_diversion = (float)M_PI_4, \
     .vgroup_intern = 0, \
     .internal_tension = 15.0f, \
     .internal_compression = 15.0f, \
     .max_internal_tension = 15.0f, \
     .max_internal_compression = 15.0f, \
   }
+// .cache = NULL, \
 
 #define _DNA_DEFAULT_ClothCollSettings \
   { \
@@ -171,7 +171,6 @@
     .coll_parms = NULL, \
     .point_cache = NULL, \
     .ptcaches = {NULL, NULL}, \
-    .hairdata = NULL, \
     .solver_result = NULL, \
   }
 

@@ -26,7 +26,7 @@ struct View3D;
 struct ViewLayer;
 
 /* Active modifier. */
-void BKE_object_modifier_set_active(struct Object *ob, struct ModifierData *md)
+inline void BKE_object_modifier_set_active(struct Object *ob, struct ModifierData *md)
 {
     if (md != nullptr) { md->flag |= eModifierFlag_Active; }
 }
@@ -47,7 +47,7 @@ typedef struct ObjectTfmProtectedChannels {
   float rotAngle, drotAngle;
 } ObjectTfmProtectedChannels;
 
-struct Mesh *BKE_object_get_evaluated_mesh(struct Object *object)
+__host__ __device__ inline struct Mesh *BKE_object_get_evaluated_mesh(struct Object *object)
 {
     Mesh* mesh = nullptr; // BKE_object_get_evaluated_mesh_no_subsurf(object);
     if (!mesh) { return nullptr; }
@@ -76,10 +76,10 @@ typedef enum eObjectSet {
 } eObjectSet;
 
 
-void BKE_object_modifiers_lib_link_common(void *userData,
-                                          struct Object *ob,
-                                          struct ID **idpoin,
-                                          int cb_flag)
+inline void BKE_object_modifiers_lib_link_common(void *userData,
+                                                 struct Object *ob,
+                                                 struct ID **idpoin,
+                                                 int cb_flag)
 {
     //BlendLibReader* reader = (BlendLibReader*)userData;
     //if (*idpoin != nullptr && (cb_flag & IDWALK_CB_USER) != 0) {

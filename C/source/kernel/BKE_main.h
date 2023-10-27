@@ -1,5 +1,5 @@
 #pragma once
-#include "listBase.h"
+#include "listbase.cuh"
 
 #include "compiler_attrs.cuh"
 #include "sys_types.cuh"

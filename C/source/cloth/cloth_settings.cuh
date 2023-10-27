@@ -81,7 +81,7 @@ struct ClothSpring {
 typedef struct Cloth {
 	// Вершины, которые представляют эту ткань.
 	// The vertices that represent this cloth.
-	struct ClothVertex* verts;
+	ClothVertex* verts;
 	// Пружины, соединяющие сетку.
 	// The springs connecting the mesh.
 	struct LinkNode* springs;
@@ -103,6 +103,6 @@ typedef struct Cloth {
 	int last_frame;
 	float initial_mesh_volume;      /* Initial volume of the mesh. Used for pressure */
 	float average_acceleration[3];  /* Moving average of overall acceleration. */
-	struct MEdge* edges;            /* Used for hair collisions. */
-	struct EdgeSet* sew_edge_graph; /* Sewing edges represented using a GHash */
+	MEdge* edges;            /* Used for hair collisions. */
+	EdgeSet* sew_edge_graph; /* Sewing edges represented using a GHash */
 } Cloth;

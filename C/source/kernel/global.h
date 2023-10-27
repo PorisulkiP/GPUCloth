@@ -1,7 +1,7 @@
 #pragma once
 
 #include "utildefines.h"
-#include "listBase.h"
+#include "listbase.cuh"
 
 
 struct Main;

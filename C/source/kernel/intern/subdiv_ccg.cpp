@@ -7,7 +7,7 @@
 
 #include "math_bits.cuh"
 #include "math_vector.cuh"
-#include "task.h"
+#include "task.cuh"
 
 #include "BKE_DerivedMesh.h"
 #include "BKE_ccg.h"
@@ -108,8 +108,8 @@ static void subdiv_ccg_init_layers(SubdivCCG *subdiv_ccg, const SubdivToCCGSetti
 //  const int grid_area = grid_size * grid_size;
 //  subdiv_ccg->grid_element_size = element_size;
 //  subdiv_ccg->num_grids = num_grids;
-//  subdiv_ccg->grids = MEM_calloc_arrayN(num_grids, sizeof(CCGElem *), "subdiv ccg grids");
-//  subdiv_ccg->grids_storage = MEM_calloc_arrayN(
+//  subdiv_ccg->grids = MEM_lockfree_calloc_arrayN(num_grids, sizeof(CCGElem *), "subdiv ccg grids");
+//  subdiv_ccg->grids_storage = MEM_lockfree_calloc_arrayN(
 //      num_grids, ((size_t)grid_area) * element_size, "subdiv ccg grids storage");
 //  const size_t grid_size_in_bytes = (size_t)grid_area * element_size;
 //  for (int grid_index = 0; grid_index < num_grids; grid_index++) {
@@ -117,10 +117,10 @@ static void subdiv_ccg_init_layers(SubdivCCG *subdiv_ccg, const SubdivToCCGSetti
 //    subdiv_ccg->grids[grid_index] = (CCGElem *)&subdiv_ccg->grids_storage[grid_offset];
 //  }
 //  /* Grid material flags. */
-//  subdiv_ccg->grid_flag_mats = MEM_calloc_arrayN(
+//  subdiv_ccg->grid_flag_mats = MEM_lockfree_calloc_arrayN(
 //      num_grids, sizeof(DMFlagMat), "ccg grid material flags");
 //  /* Grid hidden flags. */
-//  subdiv_ccg->grid_hidden = MEM_calloc_arrayN(
+//  subdiv_ccg->grid_hidden = MEM_lockfree_calloc_arrayN(
 //      num_grids, sizeof(BLI_bitmap *), "ccg grid material flags");
 //  for (int grid_index = 0; grid_index < num_grids; grid_index++) {
 //    subdiv_ccg->grid_hidden[grid_index] = BLI_BITMAP_NEW(grid_area, "ccg grid hidden");
@@ -129,8 +129,8 @@ static void subdiv_ccg_init_layers(SubdivCCG *subdiv_ccg, const SubdivToCCGSetti
 //  /* Allocate memory for faces. */
 //  subdiv_ccg->num_faces = num_faces;
 //  if (num_faces) {
-//    subdiv_ccg->faces = MEM_calloc_arrayN(num_faces, sizeof(SubdivCCGFace), "Subdiv CCG faces");
-//    subdiv_ccg->grid_faces = MEM_calloc_arrayN(
+//    subdiv_ccg->faces = MEM_lockfree_calloc_arrayN(num_faces, sizeof(SubdivCCGFace), "Subdiv CCG faces");
+//    subdiv_ccg->grid_faces = MEM_lockfree_calloc_arrayN(
 //        num_grids, sizeof(SubdivCCGFace *), "Subdiv CCG grid faces");
 //  }
 //}
@@ -347,7 +347,7 @@ static void subdiv_ccg_eval_special_grid(CCGEvalGridsData *data, const int face_
 //  /* Make sure heap ius big enough. */
 //  if (size > storage->heap_storage_size) {
 //    MEM_SAFE_FREE(storage->heap_storage);
-//    storage->heap_storage = MEM_malloc_arrayN(size, sizeof(int), "int storage");
+//    storage->heap_storage = MEM_lockfree_malloc_arrayN(size, sizeof(int), "int storage");
 //    storage->heap_storage_size = size;
 //  }
 //  return storage->heap_storage;
@@ -361,7 +361,7 @@ static void subdiv_ccg_eval_special_grid(CCGEvalGridsData *data, const int face_
 //static void subdiv_ccg_allocate_adjacent_edges(SubdivCCG *subdiv_ccg, const int num_edges)
 //{
 //  subdiv_ccg->num_adjacent_edges = num_edges;
-//  subdiv_ccg->adjacent_edges = MEM_calloc_arrayN(
+//  subdiv_ccg->adjacent_edges = MEM_lockfree_calloc_arrayN(
 //      subdiv_ccg->num_adjacent_edges, sizeof(*subdiv_ccg->adjacent_edges), "ccg adjacent edges");
 //}
 //
@@ -389,7 +389,7 @@ static void subdiv_ccg_eval_special_grid(CCGEvalGridsData *data, const int face_
 //  adjacent_edge->boundary_coords = MEM_reallocN(adjacent_edge->boundary_coords,
 //                                                adjacent_edge->num_adjacent_faces *
 //                                                    sizeof(*adjacent_edge->boundary_coords));
-//  adjacent_edge->boundary_coords[adjacent_face_index] = MEM_malloc_arrayN(
+//  adjacent_edge->boundary_coords[adjacent_face_index] = MEM_lockfree_malloc_arrayN(
 //      grid_size * 2, sizeof(SubdivCCGCoord), "ccg adjacent boundary");
 //  return adjacent_edge->boundary_coords[adjacent_face_index];
 //}
@@ -470,7 +470,7 @@ static void subdiv_ccg_eval_special_grid(CCGEvalGridsData *data, const int face_
 //static void subdiv_ccg_allocate_adjacent_vertices(SubdivCCG *subdiv_ccg, const int num_vertices)
 //{
 //  subdiv_ccg->num_adjacent_vertices = num_vertices;
-//  subdiv_ccg->adjacent_vertices = MEM_calloc_arrayN(subdiv_ccg->num_adjacent_vertices,
+//  subdiv_ccg->adjacent_vertices = MEM_lockfree_calloc_arrayN(subdiv_ccg->num_adjacent_vertices,
 //                                                    sizeof(*subdiv_ccg->adjacent_vertices),
 //                                                    "ccg adjacent vertices");
 //}
@@ -547,7 +547,7 @@ static void subdiv_ccg_eval_special_grid(CCGEvalGridsData *data, const int face_
 //                             SubdivCCGMaterialFlagsEvaluator *material_flags_evaluator)
 //{
 //  BKE_subdiv_stats_begin(&subdiv->stats, SUBDIV_STATS_SUBDIV_TO_CCG);
-//  SubdivCCG *subdiv_ccg = MEM_callocN(sizeof(SubdivCCG), "subdiv ccg");
+//  SubdivCCG *subdiv_ccg = MEM_lockfree_callocN(sizeof(SubdivCCG), "subdiv ccg");
 //  subdiv_ccg->subdiv = subdiv;
 //  subdiv_ccg->level = bitscan_forward_i(settings->resolution - 1);
 //  subdiv_ccg->grid_size = BKE_subdiv_grid_size_from_level(subdiv_ccg->level);
@@ -630,7 +630,7 @@ void BKE_subdiv_ccg_destroy(SubdivCCG *subdiv_ccg)
   }
   MEM_SAFE_FREE(subdiv_ccg->adjacent_vertices);
   MEM_SAFE_FREE(subdiv_ccg->cache_.start_face_grid_index);
-  MEM_freeN(subdiv_ccg);
+  MEM_lockfree_freeN(subdiv_ccg);
 }
 
 void BKE_subdiv_ccg_key(CCGKey *key, const SubdivCCG *subdiv_ccg, int level)
@@ -682,7 +682,7 @@ static void subdiv_ccg_recalc_inner_face_normals(SubdivCCG *subdiv_ccg,
   const int grid_size_1 = grid_size - 1;
   CCGElem *grid = subdiv_ccg->grids[grid_index];
   if (tls->face_normals == NULL) {
-    tls->face_normals = (float(*)[3])MEM_malloc_arrayN(grid_size_1 * grid_size_1, sizeof(float[3]), "CCG TLS normals");
+    tls->face_normals = (float(*)[3])MEM_lockfree_malloc_arrayN(grid_size_1 * grid_size_1, sizeof(float[3]), "CCG TLS normals");
   }
   for (int y = 0; y < grid_size - 1; y++) {
     for (int x = 0; x < grid_size - 1; x++) {
@@ -1018,7 +1018,7 @@ typedef struct AverageGridsBoundariesTLSData {
 //    return;
 //  }
 //  if (tls->accumulators == NULL) {
-//    tls->accumulators = MEM_calloc_arrayN(
+//    tls->accumulators = MEM_lockfree_calloc_arrayN(
 //        sizeof(GridElementAccumulator), grid_size2, "average accumulators");
 //  }
 //  else {
@@ -1260,7 +1260,7 @@ typedef struct AverageGridsBoundariesTLSData {
 //    neighbors->coords = neighbors->coords_fixed;
 //  }
 //  else {
-//    neighbors->coords = MEM_mallocN(sizeof(*neighbors->coords) * size,
+//    neighbors->coords = MEM_lockfree_mallocN(sizeof(*neighbors->coords) * size,
 //                                    "SubdivCCGNeighbors.coords");
 //  }
 //}
@@ -1813,7 +1813,7 @@ typedef struct AverageGridsBoundariesTLSData {
 //
 //    const int num_coarse_faces = topology_refiner->getNumFaces(topology_refiner);
 //
-//    subdiv_ccg->cache_.start_face_grid_index = MEM_malloc_arrayN(
+//    subdiv_ccg->cache_.start_face_grid_index = MEM_lockfree_malloc_arrayN(
 //        sizeof(int), num_coarse_faces, "start_face_grid_index");
 //
 //    int start_grid_index = 0;

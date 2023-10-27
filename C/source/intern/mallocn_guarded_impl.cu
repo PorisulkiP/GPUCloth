@@ -1,8 +1,8 @@
-#include <stdarg.h>
-#include <stddef.h> /* offsetof */
-#include <stdio.h>  /* printf */
-#include <stdlib.h>
-#include <string.h> /* memcpy */
+#include <cstdarg>
+#include <cstddef> /* offsetof */
+#include <cstdio>  /* printf */
+#include <cstdlib>
+#include <cstring> /* memcpy */
 #include <sys/types.h>
 
 
@@ -10,13 +10,14 @@
 #include <pthread.h>
 
 #include "MEM_guardedalloc.cuh"
-#include "intern/atomic_ops_ext.h"
+#include "intern/atomic_ops_ext.cuh"
 
 /* to ensure strict conversions */
 #include "strict_flags.cuh"
 
-#include "atomic_ops.h"
-#include "mallocn_intern.h"
+#include "atomic_ops.cuh"
+#include "mallocn_intern.cuh"
+#include "mallocn_inline.cuh"
 
 #ifdef DEBUG_BACKTRACE
 #  define BACKTRACE_SIZE 100
@@ -145,7 +146,7 @@ static bool malloc_debug_memset = false;
 #ifdef __GNUC__
 __attribute__((format(printf, 1, 2)))
 #endif
-static void
+__host__ __device__ static void
 print_error(const char *str, ...)
 {
   char buf[1024];
@@ -166,17 +167,17 @@ print_error(const char *str, ...)
 
 static pthread_mutex_t thread_lock = PTHREAD_MUTEX_INITIALIZER;
 
-static void mem_lock_thread(void)
+__host__ __device__ static void mem_lock_thread(void)
 {
     pthread_mutex_lock(&thread_lock);
 }
 
-static void mem_unlock_thread(void)
+__host__ __device__ static void mem_unlock_thread(void)
 {
     pthread_mutex_unlock(&thread_lock);
 }
 
-bool MEM_guarded_consistency_check(void)
+__host__ __device__ bool MEM_guarded_consistency_check(void)
 {
   const char *err_val = NULL;
   MemHead *listend;
@@ -189,17 +190,17 @@ bool MEM_guarded_consistency_check(void)
   return (err_val == NULL);
 }
 
-void MEM_guarded_set_error_callback(void (*func)(const char *))
+__host__ __device__ void MEM_guarded_set_error_callback(void (*func)(const char *))
 {
   error_callback = func;
 }
 
-void MEM_guarded_set_memory_debug(void)
+__host__ __device__ void MEM_guarded_set_memory_debug(void)
 {
   malloc_debug_memset = true;
 }
 
-size_t MEM_guarded_allocN_len(const void *vmemh)
+__host__ __device__ size_t MEM_guarded_allocN_len(const void *vmemh)
 {
   if (vmemh) {
     const MemHead *memh = (MemHead*)vmemh;
@@ -211,7 +212,7 @@ size_t MEM_guarded_allocN_len(const void *vmemh)
   return 0;
 }
 
-void *MEM_guarded_dupallocN(const void *vmemh)
+__host__ __device__ void *MEM_guarded_dupallocN(const void *vmemh)
 {
   void *newp = NULL;
 
@@ -260,7 +261,7 @@ void *MEM_guarded_dupallocN(const void *vmemh)
   return newp;
 }
 
-void *MEM_guarded_reallocN_id(void *vmemh, size_t len, const char *str)
+__host__ __device__ void *MEM_guarded_reallocN_id(void *vmemh, size_t len, const char *str)
 {
   void *newp = NULL;
 
@@ -295,7 +296,7 @@ void *MEM_guarded_reallocN_id(void *vmemh, size_t len, const char *str)
   return newp;
 }
 
-void *MEM_guarded_recallocN_id(void *vmemh, size_t len, const char *str)
+__host__ __device__ void *MEM_guarded_recallocN_id(void *vmemh, size_t len, const char *str)
 {
   void *newp = NULL;
 
@@ -367,7 +368,7 @@ static void print_memhead_backtrace(MemHead *memh)
 #  endif /* defined(__linux__) || defined(__APPLE__) */
 #endif   /* DEBUG_BACKTRACE */
 
-static void make_memhead_header(MemHead *memh, size_t len, const char *str)
+__host__ __device__ static void make_memhead_header(MemHead *memh, size_t len, const char *str)
 {
   MemTail *memt;
 
@@ -402,7 +403,7 @@ static void make_memhead_header(MemHead *memh, size_t len, const char *str)
   mem_unlock_thread();
 }
 
-void *MEM_guarded_mallocN(size_t len, const char *str)
+__host__ __device__ void *MEM_guarded_mallocN(size_t len, const char *str)
 {
   MemHead *memh;
 
@@ -430,7 +431,7 @@ void *MEM_guarded_mallocN(size_t len, const char *str)
   return NULL;
 }
 
-void *MEM_guarded_malloc_arrayN(size_t len, size_t size, const char *str)
+__host__ __device__ void *MEM_guarded_malloc_arrayN(size_t len, size_t size, const char *str)
 {
   size_t total_size;
   if (UNLIKELY(!MEM_size_safe_multiply(len, size, &total_size))) {
@@ -448,7 +449,7 @@ void *MEM_guarded_malloc_arrayN(size_t len, size_t size, const char *str)
   return MEM_guarded_mallocN(total_size, str);
 }
 
-void *MEM_guarded_mallocN_aligned(size_t len, size_t alignment, const char *str)
+__host__ __device__ void *MEM_guarded_mallocN_aligned(size_t len, size_t alignment, const char *str)
 {
   /* We only support alignment to a power of two. */
   assert(IS_POW2(alignment));
@@ -503,7 +504,7 @@ void *MEM_guarded_mallocN_aligned(size_t len, size_t alignment, const char *str)
   return NULL;
 }
 
-void *MEM_guarded_callocN(size_t len, const char *str)
+__host__ __device__ void *MEM_guarded_callocN(size_t len, const char *str)
 {
   MemHead *memh;
 
@@ -527,7 +528,7 @@ void *MEM_guarded_callocN(size_t len, const char *str)
   return NULL;
 }
 
-void *MEM_guarded_calloc_arrayN(size_t len, size_t size, const char *str)
+__host__ __device__ void *MEM_guarded_calloc_arrayN(size_t len, size_t size, const char *str)
 {
   size_t total_size;
   if (UNLIKELY(!MEM_size_safe_multiply(len, size, &total_size))) {
@@ -552,7 +553,7 @@ typedef struct MemPrintBlock {
   int items;
 } MemPrintBlock;
 
-static int compare_name(const void *p1, const void *p2)
+__host__ __device__ static int compare_name(const void *p1, const void *p2)
 {
   const MemPrintBlock *pb1 = (const MemPrintBlock *)p1;
   const MemPrintBlock *pb2 = (const MemPrintBlock *)p2;
@@ -560,7 +561,7 @@ static int compare_name(const void *p1, const void *p2)
   return strcmp(pb1->name, pb2->name);
 }
 
-static int compare_len(const void *p1, const void *p2)
+__host__ __device__ static int compare_len(const void *p1, const void *p2)
 {
   const MemPrintBlock *pb1 = (const MemPrintBlock *)p1;
   const MemPrintBlock *pb2 = (const MemPrintBlock *)p2;
@@ -575,7 +576,7 @@ static int compare_len(const void *p1, const void *p2)
   return -1;
 }
 
-void MEM_guarded_printmemlist_stats(void)
+__host__ __device__ void MEM_guarded_printmemlist_stats(void)
 {
   MemHead *membl;
   MemPrintBlock *pb, *printblock;
@@ -678,7 +679,7 @@ void MEM_guarded_printmemlist_stats(void)
 #endif
 }
 
-static const char mem_printmemlist_pydict_script[] =
+static constexpr char MEM_lockfree_printmemlist_pydict_script[] =
     "mb_userinfo = {}\n"
     "totmem = 0\n"
     "for mb_item in membase:\n"
@@ -699,7 +700,7 @@ static const char mem_printmemlist_pydict_script[] =
     "              (item[0], item[1][0], item[1][1]))\n";
 
 /* Prints in python syntax for easy */
-static void MEM_guarded_printmemlist_internal(int pydict)
+__host__ __device__ static void MEM_guarded_printmemlist_internal(int pydict)
 {
   MemHead *membl;
 
@@ -750,13 +751,13 @@ static void MEM_guarded_printmemlist_internal(int pydict)
   }
   if (pydict) {
     print_error("]\n\n");
-    print_error(mem_printmemlist_pydict_script);
+    print_error(MEM_lockfree_printmemlist_pydict_script);
   }
 
   mem_unlock_thread();
 }
 
-void MEM_guarded_callbackmemlist(void (*func)(void *))
+__host__ __device__ void MEM_guarded_callbackmemlist(void (*func)(void *))
 {
   MemHead *membl;
 
@@ -780,16 +781,16 @@ void MEM_guarded_callbackmemlist(void (*func)(void *))
   mem_unlock_thread();
 }
 
-void MEM_guarded_printmemlist(void)
+__host__ __device__ void MEM_guarded_printmemlist(void)
 {
   MEM_guarded_printmemlist_internal(0);
 }
-void MEM_guarded_printmemlist_pydict(void)
+__host__ __device__ void MEM_guarded_printmemlist_pydict(void)
 {
   MEM_guarded_printmemlist_internal(1);
 }
 
-void MEM_guarded_freeN(void *vmemh)
+__host__ __device__ void MEM_guarded_freeN(void *vmemh)
 {
   MemTail *memt;
   MemHead *memh = (MemHead*)vmemh;
@@ -864,7 +865,7 @@ void MEM_guarded_freeN(void *vmemh)
 /* local functions                                                       */
 /* --------------------------------------------------------------------- */
 
-static void addtail(volatile localListBase *listbase, void *vlink)
+__host__ __device__ static void addtail(volatile localListBase *listbase, void *vlink)
 {
   struct localLink *link = (localLink*)vlink;
 
@@ -880,7 +881,7 @@ static void addtail(volatile localListBase *listbase, void *vlink)
   listbase->last = link;
 }
 
-static void remlink(volatile localListBase *listbase, void *vlink)
+__host__ __device__ static void remlink(volatile localListBase *listbase, void *vlink)
 {
   struct localLink *link = (localLink*)vlink;
 
@@ -899,7 +900,7 @@ static void remlink(volatile localListBase *listbase, void *vlink)
   }
 }
 
-static void rem_memblock(MemHead *memh)
+__host__ __device__ static void rem_memblock(MemHead *memh)
 {
   mem_lock_thread();
   remlink(membase, &memh->next);
@@ -932,7 +933,7 @@ static void rem_memblock(MemHead *memh)
   }
 }
 
-static void MemorY_ErroR(const char *block, const char *error)
+__host__ __device__ static void MemorY_ErroR(const char *block, const char *error)
 {
   print_error("Memoryblock %s: %s\n", block, error);
 
@@ -941,7 +942,7 @@ static void MemorY_ErroR(const char *block, const char *error)
 #endif
 }
 
-static const char *check_memlist(MemHead *memh)
+__host__ __device__ static const char *check_memlist(MemHead *memh)
 {
   MemHead *forw, *back, *forwok, *backok;
   const char *name;
@@ -1073,7 +1074,7 @@ static const char *check_memlist(MemHead *memh)
   return name;
 }
 
-size_t MEM_guarded_get_peak_memory(void)
+__host__ __device__ size_t MEM_guarded_get_peak_memory(void)
 {
   size_t _peak_mem;
 
@@ -1084,14 +1085,14 @@ size_t MEM_guarded_get_peak_memory(void)
   return _peak_mem;
 }
 
-void MEM_guarded_reset_peak_memory(void)
+__host__ __device__ void MEM_guarded_reset_peak_memory(void)
 {
   mem_lock_thread();
   peak_mem = mem_in_use;
   mem_unlock_thread();
 }
 
-size_t MEM_guarded_get_memory_in_use(void)
+__host__ __device__ size_t MEM_guarded_get_memory_in_use(void)
 {
   size_t _mem_in_use;
 
@@ -1102,7 +1103,7 @@ size_t MEM_guarded_get_memory_in_use(void)
   return _mem_in_use;
 }
 
-uint MEM_guarded_get_memory_blocks_in_use(void)
+__host__ __device__ uint MEM_guarded_get_memory_blocks_in_use(void)
 {
   uint _totblock;
 
@@ -1114,7 +1115,7 @@ uint MEM_guarded_get_memory_blocks_in_use(void)
 }
 
 #ifndef NDEBUG
-const char *MEM_guarded_name_ptr(void *vmemh)
+__host__ __device__ const char *MEM_guarded_name_ptr(void *vmemh)
 {
   if (vmemh) {
     MemHead *memh = (MemHead*)vmemh;

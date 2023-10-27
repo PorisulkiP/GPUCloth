@@ -237,7 +237,7 @@ extern float PSYS_FRAND_BASE[PSYS_FRAND_COUNT];
 
 void BKE_particle_init_rng(void);
 
-float psys_frand(ParticleSystem *psys, uint seed)
+inline float psys_frand(ParticleSystem *psys, uint seed)
 {
   /* XXX far from ideal, this simply scrambles particle random numbers a bit
    * to avoid obvious correlations.
@@ -249,7 +249,7 @@ float psys_frand(ParticleSystem *psys, uint seed)
   return PSYS_FRAND_BASE[(offset + seed * multiplier) % PSYS_FRAND_COUNT];
 }
 
- void psys_frand_vec(ParticleSystem *psys, uint seed, float vec[3])
+inline void psys_frand_vec(ParticleSystem *psys, uint seed, float vec[3])
 {
   uint offset = PSYS_FRAND_SEED_OFFSET[psys->seed % PSYS_FRAND_COUNT];
   uint multiplier = PSYS_FRAND_SEED_MULTIPLIER[psys->seed % PSYS_FRAND_COUNT];
@@ -263,22 +263,22 @@ float psys_frand(ParticleSystem *psys, uint seed)
 int count_particles(struct ParticleSystem *psys);
 int count_particles_mod(struct ParticleSystem *psys, int totgr, int cur);
 
-int get_render_child_particle_number(const RenderData* r, int child_num, bool for_render)
+inline int get_render_child_particle_number(const RenderData* r, int child_num, bool for_render)
 {
     if (r->mode & R_SIMPLIFY) {
         if (for_render) {
-            return (int)(r->simplify_particles_render * child_num);
+            return static_cast<int>(r->simplify_particles_render * child_num);
         }
 
-        return (int)(r->simplify_particles * child_num);
+        return static_cast<int>(r->simplify_particles * child_num);
     }
 
     return child_num;
 }
 
-int psys_get_child_number(struct Scene *scene,
-                          struct ParticleSystem *psys,
-                          const bool use_render_params)
+inline int psys_get_child_number(struct Scene *scene,
+                                 struct ParticleSystem *psys,
+                                 const bool use_render_params)
 {
     int child_num;
 
@@ -295,9 +295,10 @@ int psys_get_child_number(struct Scene *scene,
 
     return child_num; //get_render_child_particle_number(&scene->r, child_num, use_render_params);
 }
-int psys_get_tot_child(struct Scene *scene,
-                       struct ParticleSystem *psys,
-                       const bool use_render_params)
+
+inline int psys_get_tot_child(struct Scene *scene,
+                              struct ParticleSystem *psys,
+                              const bool use_render_params)
 {
     return psys->totpart * psys_get_child_number(scene, psys, use_render_params);
 }
@@ -468,7 +469,7 @@ void psys_apply_hair_lattice(struct Depsgraph *depsgraph,
                              struct ParticleSystem *psys);
 
 /* particle_system.c */
-struct ParticleSystem *psys_get_target_system(struct Object *ob, struct ParticleTarget *pt);
+inline ParticleSystem *psys_get_target_system(struct Object *ob, struct ParticleTarget *pt);
 //void psys_count_keyed_targets(struct ParticleSimulationData *sim);
 //void psys_update_particle_tree(struct ParticleSystem *psys, float cfra);
 //void psys_changed_type(struct Object *ob, struct ParticleSystem *psys);

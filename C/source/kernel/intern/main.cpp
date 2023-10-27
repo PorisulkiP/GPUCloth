@@ -3,7 +3,7 @@
 #include "MEM_guardedalloc.cuh"
 
 #include "BLI_blenlib.h"
-#include "ghash.h"
+#include "ghash.cuh"
 #include "mempool.cuh"
 #include "threads.h"
 
@@ -13,14 +13,15 @@
 #include "BKE_lib_id.h"
 //#include "BKE_lib_query.h"
 #include "BKE_main.h"
+#include "mallocn_intern.cuh"
 
 //#include "IMB_imbuf.h"
 //#include "IMB_imbuf_types.h"
 
 Main *BKE_main_new(void)
 {
-  Main *bmain = (Main*)MEM_callocN(sizeof(Main), "new main");
-  bmain->lock = (MainLock*)MEM_mallocN(sizeof(SpinLock), "main lock");
+  Main *bmain = (Main*)MEM_lockfree_callocN(sizeof(Main), "new main");
+  bmain->lock = (MainLock*)MEM_lockfree_mallocN(sizeof(SpinLock), "main lock");
   BLI_spin_init((SpinLock *)bmain->lock);
   return bmain;
 }
@@ -170,8 +171,8 @@ void BKE_main_free(Main *mainvar)
   }
 
   BLI_spin_end((SpinLock *)mainvar->lock);
-  MEM_freeN(mainvar->lock);
-  MEM_freeN(mainvar);
+  MEM_lockfree_freeN(mainvar->lock);
+  MEM_lockfree_freeN(mainvar);
 }
 
 void BKE_main_lock(struct Main *bmain)
@@ -198,7 +199,7 @@ void BKE_main_unlock(struct Main *bmain)
 //    {
 //      if (!BLI_ghash_ensure_p(
 //              bmain_relations->relations_from_pointers, id_self, (void ***)&entry_p)) {
-//        *entry_p = MEM_callocN(sizeof(**entry_p), __func__);
+//        *entry_p = MEM_lockfree_callocN(sizeof(**entry_p), __func__);
 //        (*entry_p)->session_uuid = id_self->session_uuid;
 //      }
 //      else {
@@ -216,7 +217,7 @@ void BKE_main_unlock(struct Main *bmain)
 //    if (*id_pointer != NULL) {
 //      if (!BLI_ghash_ensure_p(
 //              bmain_relations->relations_from_pointers, *id_pointer, (void ***)&entry_p)) {
-//        *entry_p = MEM_callocN(sizeof(**entry_p), __func__);
+//        *entry_p = MEM_lockfree_callocN(sizeof(**entry_p), __func__);
 //        (*entry_p)->session_uuid = (*id_pointer)->session_uuid;
 //      }
 //      else {
@@ -242,7 +243,7 @@ void BKE_main_relations_create(Main *bmain, const short flag)
     BKE_main_relations_free(bmain);
   }
 
-  bmain->relations = (MainIDRelations*)MEM_mallocN(sizeof(*bmain->relations), __func__);
+  bmain->relations = (MainIDRelations*)MEM_lockfree_mallocN(sizeof(*bmain->relations), __func__);
   bmain->relations->relations_from_pointers = BLI_ghash_new(
       BLI_ghashutil_ptrhash, BLI_ghashutil_ptrcmp, __func__);
   bmain->relations->entry_items_pool = BLI_mempool_create(
@@ -257,7 +258,7 @@ void BKE_main_relations_create(Main *bmain, const short flag)
   //  /* Ensure all IDs do have an entry, even if they are not connected to any other. */
   //  MainIDRelationsEntry **entry_p;
   //  if (!BLI_ghash_ensure_p(bmain->relations->relations_from_pointers, id, (void ***)&entry_p)) {
-  //    *entry_p = MEM_callocN(sizeof(**entry_p), __func__);
+  //    *entry_p = MEM_lockfree_callocN(sizeof(**entry_p), __func__);
   //    (*entry_p)->session_uuid = id->session_uuid;
   //  }
   //  else {
@@ -274,10 +275,10 @@ void BKE_main_relations_free(Main *bmain)
 {
   if (bmain->relations != NULL) {
     if (bmain->relations->relations_from_pointers != NULL) {
-      BLI_ghash_free(bmain->relations->relations_from_pointers, NULL, MEM_freeN);
+      BLI_ghash_free(bmain->relations->relations_from_pointers, NULL, MEM_lockfree_freeN);
     }
     BLI_mempool_destroy(bmain->relations->entry_items_pool);
-    MEM_freeN(bmain->relations);
+    MEM_lockfree_freeN(bmain->relations);
     bmain->relations = NULL;
   }
 }
@@ -346,7 +347,7 @@ BlendThumbnail *BKE_main_thumbnail_from_imbuf(Main *bmain, ImBuf *img)
   if (img) 
   {
     //const size_t sz = BLEN_THUMB_MEMSIZE(img->x, img->y);
-    //data = (BlendThumbnail*)MEM_mallocN(sz, __func__);
+    //data = (BlendThumbnail*)MEM_lockfree_mallocN(sz, __func__);
 
     //IMB_rect_from_float(img); /* Just in case... */
     //data->width = img->x;
@@ -392,7 +393,7 @@ void BKE_main_thumbnail_create(struct Main *bmain)
 {
   MEM_SAFE_FREE(bmain->blen_thumb);
 
-  bmain->blen_thumb = (BlendThumbnail*)MEM_callocN(BLEN_THUMB_MEMSIZE(BLEN_THUMB_SIZE, BLEN_THUMB_SIZE), __func__);
+  bmain->blen_thumb = (BlendThumbnail*)MEM_lockfree_callocN(BLEN_THUMB_MEMSIZE(BLEN_THUMB_SIZE, BLEN_THUMB_SIZE), __func__);
   bmain->blen_thumb->width = BLEN_THUMB_SIZE;
   bmain->blen_thumb->height = BLEN_THUMB_SIZE;
 }

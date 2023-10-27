@@ -1,7 +1,7 @@
 #pragma once
 
 //#include "BLI_bitmap.h"
-#include "kdopbvh.h"
+#include "kdopbvh.cuh"
 #include "threads.h"
 
 

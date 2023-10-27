@@ -1,35 +1,25 @@
-#include <float.h>
-#include <math.h>
-#include <stdarg.h>
-#include <stddef.h>
-#include <stdlib.h>
-#include <string.h>
+#include <string>
 
 #include "MEM_guardedalloc.cuh"
 
-#include "cloth_types.cuh"
-#include "object_force_types.cuh"
 #include "object_types.cuh"
-#include "scene_types.cuh"
 #include "mesh_types.h"
 
-#include "listbase.h"
+#include "listbase.cuh"
 #include "utildefines.h"
-#include "effect.h"
 #include "bmesh.h"
 #include "object.h"
-#include "pointcache.h"
 #include "modifier.h"
-#include "task.hh"
+#include "task.cuh"
 
 /* may move these, only for BKE_modifier_path_relbase */
-#include "BKE_main.h"
 /* end */
 
-#include "DEG_depsgraph.h"
-#include "DEG_depsgraph_query.h"
+#include "DEG_depsgraph.cuh"
 
+#include "MOD_util.h"
 #include "MOD_modifiertypes.h"
+#include "task.hh"
 
 static ModifierTypeInfo *modifier_types[NUM_MODIFIER_TYPES] = {NULL};
 static VirtualModifierData virtualModifierCommonData;
@@ -90,7 +80,7 @@ void BKE_modifier_type_panel_id(ModifierType type, char *r_idname)
 ModifierData *BKE_modifier_new(int type)
 {
   const ModifierTypeInfo *mti = (ModifierTypeInfo*)BKE_modifier_get_info((ModifierType)type);
-  ModifierData *md = (ModifierData*)MEM_callocN(mti->structSize, mti->structName);
+  ModifierData *md = (ModifierData*)MEM_lockfree_callocN(mti->structSize, mti->structName);
 
   /* note, this name must be made unique later */
   strncpy(md->name, mti->name, sizeof(md->name));
@@ -117,7 +107,7 @@ ModifierData *BKE_modifier_new(int type)
 
 void BKE_modifier_free(ModifierData *md)
 {
-  MEM_freeN(md);
+  MEM_lockfree_freeN(md);
 }
 
 /**
@@ -190,14 +180,14 @@ void BKE_modifier_remove_from_list(Object *ob, ModifierData *md)
 //
 ModifierData *BKE_modifiers_findby_type(Object *ob, ModifierType type)
 {
-  LISTBASE_FOREACH (ModifierData *, md, &ob->modifiers) 
-  {
-    if (md->type == type) 
-    {
-      return md;
-    }
-  }
-  return NULL;
+  //LISTBASE_FOREACH (ModifierData *, md, &ob->modifiers) 
+  //{
+  //  if (md->type == type) 
+  //  {
+  //    return md;
+  //  }
+  //}
+  return nullptr;
 }
 //
 //ModifierData *BKE_modifiers_findby_name(Object *ob, const char *name)
@@ -209,7 +199,7 @@ ModifierData *BKE_modifiers_findby_type(Object *ob, ModifierType type)
 //{
 //  LISTBASE_FOREACH (ModifierData *, md, &ob->modifiers) {
 //    if (md->error) {
-//      MEM_freeN(md->error);
+//      MEM_lockfree_freeN(md->error);
 //      md->error = NULL;
 //    }
 //  }
@@ -349,7 +339,7 @@ ModifierData *BKE_modifiers_findby_type(Object *ob, ModifierType type)
 //  buffer[sizeof(buffer) - 1] = '\0';
 //
 //  if (md->error) {
-//    MEM_freeN(md->error);
+//    MEM_lockfree_freeN(md->error);
 //  }
 //
 //  md->error = BLI_strdup(buffer);
@@ -512,7 +502,7 @@ ModifierData *BKE_modifiers_findby_type(Object *ob, ModifierType type)
 //  for (; md; md = md->next) {
 //    const ModifierTypeInfo *mti = BKE_modifier_get_info(md->type);
 //
-//    curr = MEM_callocN(sizeof(CDMaskLink), "CDMaskLink");
+//    curr = MEM_lockfree_callocN(sizeof(CDMaskLink), "CDMaskLink");
 //
 //    if (BKE_modifier_is_enabled(scene, md, required_mode)) {
 //      if (mti->type == eModifierTypeType_OnlyDeform) {
@@ -1086,25 +1076,23 @@ BMEditMesh* BKE_editmesh_from_object(Object* ob)
  * \param get_cage_mesh: Return evaluated mesh with only deforming modifiers applied
  * (i.e. mesh topology remains the same as original one, a.k.a. 'cage' mesh).
  */
-Mesh *BKE_modifier_get_evaluated_mesh_from_evaluated_object(Object *ob_eval,
-                                                            const bool get_cage_mesh)
+Mesh *BKE_modifier_get_evaluated_mesh_from_evaluated_object(Object *ob_eval, const bool get_cage_mesh)
 {
-  Mesh *me = NULL;
+  Mesh *me = nullptr;
 
-  if ((ob_eval->type == OB_MESH) && (ob_eval->mode & OB_MODE_EDIT)) {
-    /* In EditMode, evaluated mesh is stored in BMEditMesh, not the object... */
-    BMEditMesh *em = BKE_editmesh_from_object(ob_eval);
-    /* 'em' might not exist yet in some cases, just after loading a .blend file, see T57878. */
-    if (em != NULL) {
-      me = (get_cage_mesh && em->mesh_eval_cage != NULL) ? em->mesh_eval_cage :
-                                                           em->mesh_eval_final;
-    }
-  }
-  if (me == NULL) {
-    me = (get_cage_mesh && ob_eval->runtime.mesh_deform_eval != NULL) ?
-             ob_eval->runtime.mesh_deform_eval :
-             BKE_object_get_evaluated_mesh(ob_eval);
-  }
+  //if ((ob_eval->type == OB_MESH) && (ob_eval->mode & OB_MODE_EDIT)) {
+  //  /* In EditMode, evaluated mesh is stored in BMEditMesh, not the object... */
+  //  BMEditMesh *em = BKE_editmesh_from_object(ob_eval);
+  //  /* 'em' might not exist yet in some cases, just after loading a .blend file, see T57878. */
+  //  if (em != nullptr) 
+  //  {
+  //    me = (get_cage_mesh && em->mesh_eval_cage != nullptr) ? em->mesh_eval_cage :  em->mesh_eval_final;
+  //  }
+  //}
+  //if (me == nullptr) 
+  //{
+  //  me = (get_cage_mesh && ob_eval->runtime.mesh_deform_eval != NULL) ? ob_eval->runtime.mesh_deform_eval :  BKE_object_get_evaluated_mesh(ob_eval);
+  //}
 
   return me;
 }
@@ -1364,7 +1352,7 @@ Mesh *BKE_modifier_get_evaluated_mesh_from_evaluated_object(Object *ob_eval,
 //  }
 //
 //  /* Free old modifier data. */
-//  MEM_freeN(old_modifier_data);
+//  MEM_lockfree_freeN(old_modifier_data);
 //
 //  return new_modifier_data;
 //}

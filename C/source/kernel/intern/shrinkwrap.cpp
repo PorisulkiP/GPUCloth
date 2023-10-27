@@ -1,9 +1,6 @@
 #include <float.h>
-#include <math.h>
-#include <memory.h>
 #include <stdio.h>
 #include <string.h>
-#include <time.h>
 
 #include "mesh_types.h"
 #include "meshdata_types.cuh"
@@ -12,7 +9,7 @@
 
 #include "b_math.h"
 #include "math_solvers.cuh"
-#include "task.h"
+#include "task.cuh"
 #include "utildefines.h"
 
 //#include "BKE_DerivedMesh.h"
@@ -30,15 +27,14 @@
 //#include "BKE_mesh_wrapper.h"
 //#include "BKE_subsurf.h"
 
-#include "DEG_depsgraph_query.h"
-
-#include "MEM_guardedalloc.cuh"
+#include "DEG_depsgraph_query.cuh"
+#include "mallocn_intern.cuh"
 
 //#include "strict_flags.h"
 
 /* for timing... */
 #if 0
-#  include "PIL_time_utildefines.h"
+#  include "PIL_time_utildefines.cuh"
 #else
 #  define TIMEIT_BENCH(expr, id) (expr)
 #endif
@@ -148,12 +144,12 @@ void BKE_shrinkwrap_discard_boundary_data(struct Mesh *mesh)
   //struct ShrinkwrapBoundaryData *data = mesh->runtime->shrinkwrap_data;
 
   //if (data != NULL) {
-  //  MEM_freeN((void *)data->edge_is_boundary);
-  //  MEM_freeN((void *)data->looptri_has_boundary);
-  //  MEM_freeN((void *)data->vert_boundary_id);
-  //  MEM_freeN((void *)data->boundary_verts);
+  //  MEM_lockfree_freeN((void *)data->edge_is_boundary);
+  //  MEM_lockfree_freeN((void *)data->looptri_has_boundary);
+  //  MEM_lockfree_freeN((void *)data->vert_boundary_id);
+  //  MEM_lockfree_freeN((void *)data->boundary_verts);
 
-  //  MEM_freeN(data);
+  //  MEM_lockfree_freeN(data);
   //}
 
   //mesh->runtime->shrinkwrap_data = NULL;
@@ -190,7 +186,7 @@ static ShrinkwrapBoundaryData *shrinkwrap_build_boundary_data(struct Mesh *mesh)
   const MVert *mvert = mesh->mvert;
 
   /* Count faces per edge (up to 2). */
-  char *edge_mode = (char*)MEM_calloc_arrayN((size_t)mesh->totedge, sizeof(char), __func__);
+  char *edge_mode = (char*)MEM_lockfree_calloc_arrayN((size_t)mesh->totedge, sizeof(char), __func__);
 
   for (int i = 0; i < mesh->totloop; i++) {
     unsigned int eidx = mloop[i].e;
@@ -201,8 +197,7 @@ static ShrinkwrapBoundaryData *shrinkwrap_build_boundary_data(struct Mesh *mesh)
   }
 
   /* Build the boundary edge bitmask. */
-  BLI_bitmap *edge_is_boundary = BLI_BITMAP_NEW(mesh->totedge,
-                                                "ShrinkwrapBoundaryData::edge_is_boundary");
+  BLI_bitmap *edge_is_boundary = BLI_BITMAP_NEW(mesh->totedge, "ShrinkwrapBoundaryData::edge_is_boundary");
   unsigned int num_boundary_edges = 0;
 
   for (int i = 0; i < mesh->totedge; i++) {
@@ -216,14 +211,13 @@ static ShrinkwrapBoundaryData *shrinkwrap_build_boundary_data(struct Mesh *mesh)
 
   /* If no boundary, return NULL. */
   if (num_boundary_edges == 0) {
-    MEM_freeN(edge_is_boundary);
-    MEM_freeN(edge_mode);
+    MEM_lockfree_freeN(edge_is_boundary);
+    MEM_lockfree_freeN(edge_mode);
     return NULL;
   }
 
   /* Allocate the data object. */
-  ShrinkwrapBoundaryData *data = (ShrinkwrapBoundaryData*)MEM_callocN(sizeof(ShrinkwrapBoundaryData),
-                                             "ShrinkwrapBoundaryData");
+  ShrinkwrapBoundaryData *data = (ShrinkwrapBoundaryData*)MEM_lockfree_callocN(sizeof(ShrinkwrapBoundaryData), "ShrinkwrapBoundaryData");
 
   data->edge_is_boundary = edge_is_boundary;
 
@@ -248,7 +242,7 @@ static ShrinkwrapBoundaryData *shrinkwrap_build_boundary_data(struct Mesh *mesh)
   //data->looptri_has_boundary = looptri_has_boundary;
 
   /* Find boundary vertices and build a mapping table for compact storage of data. */
-  int *vert_boundary_id = (int*)MEM_calloc_arrayN( (size_t)mesh->totvert, sizeof(int), "ShrinkwrapBoundaryData::vert_boundary_id");
+  int *vert_boundary_id = (int*)MEM_lockfree_calloc_arrayN( (size_t)mesh->totvert, sizeof(int), "ShrinkwrapBoundaryData::vert_boundary_id");
 
   for (int i = 0; i < mesh->totedge; i++) {
     if (edge_mode[i]) {
@@ -269,9 +263,9 @@ static ShrinkwrapBoundaryData *shrinkwrap_build_boundary_data(struct Mesh *mesh)
   data->num_boundary_verts = num_boundary_verts;
 
   /* Compute average directions. */
-  ShrinkwrapBoundaryVertData *boundary_verts = (ShrinkwrapBoundaryVertData*)MEM_calloc_arrayN( num_boundary_verts, sizeof(*boundary_verts), "ShrinkwrapBoundaryData::boundary_verts");
+  ShrinkwrapBoundaryVertData *boundary_verts = (ShrinkwrapBoundaryVertData*)MEM_lockfree_calloc_arrayN( num_boundary_verts, sizeof(*boundary_verts), "ShrinkwrapBoundaryData::boundary_verts");
 
-  signed char *vert_status = (signed char*)MEM_calloc_arrayN(num_boundary_verts, sizeof(char), __func__);
+  signed char *vert_status = (signed char*)MEM_lockfree_calloc_arrayN(num_boundary_verts, sizeof(char), __func__);
 
   for (int i = 0; i < mesh->totedge; i++) {
     if (edge_mode[i]) {
@@ -286,7 +280,7 @@ static ShrinkwrapBoundaryData *shrinkwrap_build_boundary_data(struct Mesh *mesh)
     }
   }
 
-  MEM_freeN(vert_status);
+  MEM_lockfree_freeN(vert_status);
 
   /* Finalize average direction and compute normal. */
   for (int i = 0; i < mesh->totvert; i++) {
@@ -307,7 +301,7 @@ static ShrinkwrapBoundaryData *shrinkwrap_build_boundary_data(struct Mesh *mesh)
 
   data->boundary_verts = boundary_verts;
 
-  MEM_freeN(edge_mode);
+  MEM_lockfree_freeN(edge_mode);
   return data;
 }
 
@@ -1504,7 +1498,7 @@ void BKE_shrinkwrap_mesh_nearest_surface_deform(struct bContext *C,
 
   //BKE_mesh_vert_coords_apply(src_me, vertexCos);
 
-  //MEM_freeN(vertexCos);
+  //MEM_lockfree_freeN(vertexCos);
 }
 
 void BKE_shrinkwrap_remesh_target_project(Mesh *src_me, Mesh *target_me, Object *ob_target)
@@ -1545,5 +1539,5 @@ void BKE_shrinkwrap_remesh_target_project(Mesh *src_me, Mesh *target_me, Object 
 
   //BKE_mesh_vert_coords_apply(src_me, vertexCos);
 
-  //MEM_freeN(vertexCos);
+  //MEM_lockfree_freeN(vertexCos);
 }

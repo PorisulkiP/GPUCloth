@@ -1,12 +1,12 @@
 #pragma once
 
-#include "BLI_map.hh"
+#include "BLI_map.cuh"
 #include "BLI_vector.hh"
 
 #include "anim_types.h"
 #include "modifier_types.cuh"
 #include "customdata_types.cuh"
-#include "ghash.h"
+#include "ghash.cuh"
 
 #include <string>
 #include <functional>

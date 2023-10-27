@@ -12,34 +12,40 @@
 #include "utildefines.h"
 #include "mesh_runtime.h"
 
-#include "DEG_depsgraph.h"
-#include "DEG_depsgraph_query.h"
+#include "DEG_depsgraph.cuh"
+#include "DEG_depsgraph_query.cuh"
 
 #include "bvhutils.h"
 #include "cloth.h"
 #include "effect.h"
-#include "pointcache.h"
-#include "task.hh"
+#include "pointcache.cuh"
+#include "implicit.cuh"
+#include "task.cuh"
 #include "modifier.h"
 #include "memarena.h"
 #include "customdata.h"
 
-#include "SIM_mass_spring.h"
+#include "SIM_mass_spring.cuh"
 #include "BKE_lib_id.h"
 
 #include "MOD_util.h"
-#include "PIL_time_utildefines.h"
+#include "PIL_time_utildefines.cuh"
+#include "mesh_normals.cpp"
 
 /** Compared against total loops. */
-#define MESH_FACE_TESSELLATE_THREADED_LIMIT 4096
+enum
+{
+	MESH_FACE_TESSELLATE_THREADED_LIMIT = 4096
+};
 
 #define USE_CLIP_SWEEP
 
-typedef struct BendSpringRef {
-  int index;
-  int polys;
-  ClothSpring *spring;
-} BendSpringRef;
+using BendSpringRef = struct BendSpringRef
+{
+	int index;
+	int polys;
+	ClothSpring* spring;
+};
 
 /******************************************************************************
  *
@@ -47,230 +53,248 @@ typedef struct BendSpringRef {
  *
  ******************************************************************************/
 
-static BVHTree *bvhtree_build_from_cloth(ClothModifierData *clmd, float epsilon)
+__host__ static BVHTree* bvhtree_build_from_cloth(const ClothModifierData* clmd, const float epsilon)
 {
-  if (!clmd) 
-  {
-	return NULL;
-  }
-
-  Cloth *cloth = clmd->clothObject;
-
-  if (!cloth) {
-	return NULL;
-  }
-
-  ClothVertex *verts = cloth->verts;
-  const MVertTri *vt = cloth->tri;
-
-  /* in the moment, return zero if no faces there */
-  if (!cloth->primitive_num) {
-	return NULL;
-  }
-
-  /* create quadtree with k=26 */
-  BVHTree *bvhtree = BLI_bvhtree_new(cloth->primitive_num, epsilon, 4, 26);
-
-  /* fill tree */
-  if (clmd->hairdata == NULL) {
-	for (int i = 0; i < cloth->primitive_num; i++, vt++) {
-	  float co[3][3];
-
-	  copy_v3_v3(co[0], verts[vt->tri[0]].xold);
-	  copy_v3_v3(co[1], verts[vt->tri[1]].xold);
-	  copy_v3_v3(co[2], verts[vt->tri[2]].xold);
-
-	  BLI_bvhtree_insert(bvhtree, i, co[0], 3);
+	if (!clmd)
+	{
+		return nullptr;
 	}
-  }
-  else {
-	MEdge *edges = cloth->edges;
 
-	for (int i = 0; i < cloth->primitive_num; i++) {
-	  float co[2][3];
+	const Cloth* cloth = clmd->clothObject;
 
-	  copy_v3_v3(co[0], verts[edges[i].v1].xold);
-	  copy_v3_v3(co[1], verts[edges[i].v2].xold);
-
-	  BLI_bvhtree_insert(bvhtree, i, co[0], 2);
+	if (!cloth)
+	{
+		return nullptr;
 	}
-  }
 
-  /* balance tree */
-  BLI_bvhtree_balance(bvhtree);
+	const ClothVertex* verts = cloth->verts;
+	const MVertTri* vt = cloth->tri;
 
-  return bvhtree;
-}
-
-void bvhtree_update_from_cloth(ClothModifierData *clmd, bool moving, bool self)
-{
-  uint i = 0;
-  Cloth *cloth = clmd->clothObject;
-  BVHTree *bvhtree;
-  ClothVertex *verts = cloth->verts;
-  const MVertTri *vt;
-
-  BLI_assert(!(clmd->hairdata != NULL && self));
-
-  if (self) {
-	bvhtree = cloth->bvhselftree;
-  }
-  else {
-	bvhtree = cloth->bvhtree;
-  }
-
-  if (!bvhtree) {
-	return;
-  }
-
-  vt = cloth->tri;
-
-  /* update vertex position in bvh tree */
-  if (clmd->hairdata == NULL) {
-	if (verts && vt) {
-	  for (i = 0; i < cloth->primitive_num; i++, vt++) {
-		float co[3][3], co_moving[3][3];
-		bool ret;
-
-		/* copy new locations into array */
-		if (moving) {
-		  copy_v3_v3(co[0], verts[vt->tri[0]].txold);
-		  copy_v3_v3(co[1], verts[vt->tri[1]].txold);
-		  copy_v3_v3(co[2], verts[vt->tri[2]].txold);
-
-		  /* update moving positions */
-		  copy_v3_v3(co_moving[0], verts[vt->tri[0]].tx);
-		  copy_v3_v3(co_moving[1], verts[vt->tri[1]].tx);
-		  copy_v3_v3(co_moving[2], verts[vt->tri[2]].tx);
-
-		  ret = BLI_bvhtree_update_node(bvhtree, i, co[0], co_moving[0], 3);
-		}
-		else {
-		  copy_v3_v3(co[0], verts[vt->tri[0]].tx);
-		  copy_v3_v3(co[1], verts[vt->tri[1]].tx);
-		  copy_v3_v3(co[2], verts[vt->tri[2]].tx);
-
-		  ret = BLI_bvhtree_update_node(bvhtree, i, co[0], NULL, 3);
-		}
-
-		/* check if tree is already full */
-		if (ret == false) {
-		  break;
-		}
-	  }
-
-	  BLI_bvhtree_update_tree(bvhtree);
+	/* in the moment, return zero if no faces there */
+	if (!cloth->primitive_num)
+	{
+		return nullptr;
 	}
-  }
-  else {
-	if (verts) {
-	  MEdge *edges = cloth->edges;
 
-	  for (i = 0; i < cloth->primitive_num; i++) {
+	/* create quadtree with k=26 */
+	BVHTree* bvhtree = BLI_bvhtree_new(cloth->primitive_num, epsilon, 4, 26);
+
+	// /* fill tree */
+	// if (clmd->hairdata == nullptr) {
+	//for (int i = 0; i < cloth->primitive_num; i++, vt++) {
+	//  float co[3][3];
+
+	//  copy_v3_v3(co[0], verts[vt->tri[0]].xold);
+	//  copy_v3_v3(co[1], verts[vt->tri[1]].xold);
+	//  copy_v3_v3(co[2], verts[vt->tri[2]].xold);
+
+	//  BLI_bvhtree_insert(bvhtree, i, co[0], 3);
+	//}
+	// }
+	// else {
+	//
+	// }
+	const MEdge* edges = cloth->edges;
+
+	for (uint i = 0; i < cloth->primitive_num; i++)
+	{
 		float co[2][3];
 
-		copy_v3_v3(co[0], verts[edges[i].v1].tx);
-		copy_v3_v3(co[1], verts[edges[i].v2].tx);
+		copy_v3_v3(co[0], verts[edges[i].v1].xold);
+		copy_v3_v3(co[1], verts[edges[i].v2].xold);
 
-		if (!BLI_bvhtree_update_node(bvhtree, i, co[0], NULL, 2)) {
-		  break;
-		}
-	  }
-
-	  BLI_bvhtree_update_tree(bvhtree);
+		BLI_bvhtree_insert(bvhtree, i, co[0], 2);
 	}
-  }
+
+	/* balance tree */
+	BLI_bvhtree_balance(bvhtree);
+
+	return bvhtree;
+}
+
+__device__ void bvhtree_update_from_cloth(const ClothModifierData* clmd, bool moving, const bool self)
+{
+	const Cloth* cloth = clmd->clothObject;
+	BVHTree* bvhtree;
+	const ClothVertex* verts = cloth->verts;
+
+	BLI_assert(!(clmd->hairdata != NULL && self));
+
+	if (self)
+	{
+		bvhtree = cloth->bvhselftree;
+	}
+	else
+	{
+		bvhtree = cloth->bvhtree;
+	}
+
+	if (!bvhtree)
+	{
+		return;
+	}
+
+	const MVertTri* vt = cloth->tri;
+	const uint primitive_num = cloth->primitive_num;
+	const auto tmp = bvhtree->totleaf;
+
+	if (verts && vt)
+	{
+#ifdef __CUDA_ARCH__
+		const uint i = blockIdx.x * blockDim.x + threadIdx.x;
+		if (i < primitive_num)
+		{
+			float co[3][3], co_moving[3][3];
+			bool ret;
+
+			/* copy new locations into array */
+			if (moving) {
+				copy_v3_v3(co[0], verts[vt[i].tri[0]].txold);
+				copy_v3_v3(co[1], verts[vt[i].tri[1]].txold);
+				copy_v3_v3(co[2], verts[vt[i].tri[2]].txold);
+
+				/* update moving positions */
+				copy_v3_v3(co_moving[0], verts[vt[i].tri[0]].tx);
+				copy_v3_v3(co_moving[1], verts[vt[i].tri[1]].tx);
+				copy_v3_v3(co_moving[2], verts[vt[i].tri[2]].tx);
+
+				ret = BLI_bvhtree_update_node(bvhtree, i, co[0], co_moving[0], 3);
+			}
+			else
+			{
+				copy_v3_v3(co[0], verts[vt[i].tri[0]].tx);
+				copy_v3_v3(co[1], verts[vt[i].tri[1]].tx);
+				copy_v3_v3(co[2], verts[vt[i].tri[2]].tx);
+
+				ret = BLI_bvhtree_update_node(bvhtree, i, co[0], nullptr, 3);
+			}
+		}
+
+#else
+		for (uint i = 0; i < primitive_num; i++, vt++)
+		{
+			float co[3][3], co_moving[3][3];
+			bool ret;
+
+			/* copy new locations into array */
+			if (moving) {
+				copy_v3_v3(co[0], verts[vt->tri[0]].txold);
+				copy_v3_v3(co[1], verts[vt->tri[1]].txold);
+				copy_v3_v3(co[2], verts[vt->tri[2]].txold);
+
+				/* update moving positions */
+				copy_v3_v3(co_moving[0], verts[vt->tri[0]].tx);
+				copy_v3_v3(co_moving[1], verts[vt->tri[1]].tx);
+				copy_v3_v3(co_moving[2], verts[vt->tri[2]].tx);
+
+				ret = BLI_bvhtree_update_node(bvhtree, i, co[0], co_moving[0], 3);
+			}
+			else
+			{
+				copy_v3_v3(co[0], verts[vt->tri[0]].tx);
+				copy_v3_v3(co[1], verts[vt->tri[1]].tx);
+				copy_v3_v3(co[2], verts[vt->tri[2]].tx);
+
+				ret = BLI_bvhtree_update_node(bvhtree, i, co[0], nullptr, 3);
+			}
+
+			/* check if tree is already full */
+			if (ret == false)
+			{
+				break;
+			}
+		}
+#endif
+
+		BLI_bvhtree_update_tree(bvhtree);
+	}
 }
 
 // Симуляция одного кадра
-int do_step_cloth(Depsgraph *depsgraph, Object *ob, ClothModifierData *clmd, Mesh *result, int framenr)
+__global__ void g_do_step_cloth(Depsgraph* depsgraph, Object* ob, ClothModifierData* clmd, const Mesh* result, MVert* output)
 {
-	Cloth *cloth = clmd->clothObject;
-	ClothVertex* verts = cloth->verts;
-	MVert *mvert = result->mvert;
+	const Cloth* cloth = clmd->clothObject;
+	ClothVertex* cloth_verts = cloth->verts;
+	Implicit_Data* id = cloth->implicit;
 
 	/* Принудительно верните все закрепленные вершины в их ограниченное местоположение. */
-	for (uint i = 0; i < clmd->clothObject->mvert_num; ++i, ++verts)
+	for (uint i = 0; i < cloth->mvert_num; ++i, ++cloth_verts)
 	{
 		// save the previous position.
 		// сохранение предыдущую позицию.
-		copy_v3_v3(verts->xold, verts->xconst);
-		copy_v3_v3(verts->txold, verts->x);
+		copy_v3_v3(cloth_verts->xold, cloth_verts->xconst);
+		copy_v3_v3(cloth_verts->txold, cloth_verts->x);
 
 		// Get the current position.
 		// Получение текущей позиции.
-		copy_v3_v3(verts->xconst, mvert[i].co);
-		mul_m4_v3(ob->obmat, verts->xconst);
+		copy_v3_v3(cloth_verts->xconst, output[i].co);
+		mul_m4_v3(ob->obmat, cloth_verts->xconst);
 	}
-	// Получение эффектов, которые могут влиять на ткань
-	// пока nullptr
-	ListBase* effectors = effectors_create(depsgraph, ob, NULL, clmd->sim_parms->effector_weights, false);
 
-	if (clmd->sim_parms->flags & CLOTH_SIMSETTINGS_FLAG_DYNAMIC_BASEMESH) 
+	// Получение эффектов, которые могут влиять на ткань
+	ListBase* effectors = effectors_create(depsgraph, ob, nullptr, clmd->sim_parms->effector_weights, false);
+
+	if (clmd->sim_parms->flags & CLOTH_SIMSETTINGS_FLAG_DYNAMIC_BASEMESH)
 	{
 		// Копирование данных вершин из ClothModifierData* clmd в Mesh *result
 		cloth_update_verts(ob, clmd, result);
 	}
 
-	if ((clmd->sim_parms->flags & CLOTH_SIMSETTINGS_FLAG_DYNAMIC_BASEMESH) ||
-		(clmd->sim_parms->vgroup_shrink > 0) || (clmd->sim_parms->shrink_min != 0.0f)) 
+	if ((clmd->sim_parms->flags & CLOTH_SIMSETTINGS_FLAG_DYNAMIC_BASEMESH) || (clmd->sim_parms->vgroup_shrink > 0) || (clmd->sim_parms->shrink_min != 0.0f))
 	{
 		cloth_update_spring_lengths(clmd, result);
 	}
 
 	cloth_update_springs(clmd);
 
-	// Засечение времени симуляции
-	TIMEIT_START(cloth_step);
-
 	/* call the solver. */
-	if (SIM_cloth_solve(depsgraph, ob, framenr, clmd, effectors))
-	{
-		return true;
-	}
-	else
-	{
-		return false;
-	}
+	SIM_cloth_solve(depsgraph, ob, clmd, effectors);
 
-	TIMEIT_END(cloth_step);
+#ifdef __CUDA_ARCH__
+	// Копирование результатов обратно в данные ткани
+	const uint i = blockIdx.x * blockDim.x + threadIdx.x;
+	if(i < clmd->clothObject->mvert_num)
+	{
+		SIM_mass_spring_get_motion_state(id, i, cloth_verts[i].x, cloth_verts[i].v);
+		copy_v3_v3(output[i].co, cloth_verts[i].x);
+	}
+#endif
 
 	if (effectors)
 	{
 		LISTBASE_FOREACH(EffectorCache*, eff, effectors)
 		{
-			if (eff->guide_data) 
+			if (eff->guide_data)
 			{
-				MEM_freeN(eff->guide_data);
+				MEM_lockfree_freeN(eff->guide_data);
 			}
 		}
 
 		BLI_freelistN(effectors);
-		MEM_freeN(effectors);
+		MEM_lockfree_freeN(effectors);
 	}
 }
 
 /************************************************
  * clothModifier_do - main simulation function
  ************************************************/
-bool clothModifier_do(ClothModifierData *clmd, Depsgraph *depsgraph, Object *ob, Mesh *mesh)
+__host__ __device__ bool clothModifier_do(ClothModifierData* clmd, Depsgraph* depsgraph, Object* ob, const Mesh* mesh)
 {
-	PointCache *cache;
 	PTCacheID pid;
 	float timescale = 1;
 	int framenr = 0, startframe = 0, endframe = 0, cache_result = 0;
 
-	framenr = depsgraph->ctime;
-	cache = clmd->point_cache;
+	framenr = static_cast<int>(depsgraph->ctime);
+	PointCache* cache = clmd->point_cache;
 	// Если финальный кадр больше, чем конечный в сцене, то симуляция идёт до конца сцены
-	if (framenr > endframe)  framenr = endframe;
+	if (framenr > endframe) framenr = endframe;
 
 	BKE_ptcache_id_from_cloth(&pid, ob, clmd);
-	BKE_ptcache_id_time(&pid, depsgraph->scene, framenr, &startframe, &endframe, &timescale);
+	BKE_ptcache_id_time(&pid, depsgraph->scene, static_cast<float>(framenr), &startframe, &endframe, &timescale);
 	clmd->sim_parms->timescale = timescale * clmd->sim_parms->time_scale;
 
 	// Если в интерфейсе нажато "сбросить" или кол-во точек в объекте симуляции и ткани не равны, то всё очищается
-	if (clmd->sim_parms->reset || (clmd->clothObject && mesh->totvert != clmd->clothObject->mvert_num)) 
+	if (clmd->sim_parms->reset || (clmd->clothObject && mesh->totvert != (int)clmd->clothObject->mvert_num))
 	{
 		clmd->sim_parms->reset = 0;
 		cache->flag |= PTCACHE_OUTDATED;
@@ -281,14 +305,14 @@ bool clothModifier_do(ClothModifierData *clmd, Depsgraph *depsgraph, Object *ob,
 	}
 
 	// Симуляция происходит только в течение определенного периода
-	if (framenr < startframe) 
+	if (framenr < startframe)
 	{
 		BKE_ptcache_invalidate(cache);
 		return false;
 	}
 
 	// Если кадр начала и текущй равны
-	if (framenr == startframe) 
+	if (framenr == startframe)
 	{
 		BKE_ptcache_id_reset(depsgraph->scene, &pid, PTCACHE_RESET_OUTDATED);
 		BKE_ptcache_validate(cache, framenr);
@@ -297,137 +321,145 @@ bool clothModifier_do(ClothModifierData *clmd, Depsgraph *depsgraph, Object *ob,
 		return false;
 	}
 
-  // try to read from cache
-  // Попытка прочитать из кеша, пока не будет этой функции
-	bool can_simulate = false;// (framenr == clmd->clothObject->last_frame + 1) && !(cache->flag & PTCACHE_BAKED);
+	// try to read from cache
+	// Попытка прочитать из кеша, пока не будет этой функции
+	bool can_simulate = false; // (framenr == clmd->clothObject->last_frame + 1) && !(cache->flag & PTCACHE_BAKED);
 
-  //cache_result = BKE_ptcache_read(&pid, (float)framenr + depsgraph->scene->r.subframe, can_simulate);
+	//cache_result = BKE_ptcache_read(&pid, (float)framenr + depsgraph->scene->r.subframe, can_simulate);
 
-  //if (cache_result == PTCACHE_READ_EXACT || cache_result == PTCACHE_READ_INTERPOLATED ||
-  //    (!can_simulate && cache_result == PTCACHE_READ_OLD)) {
-  //  SIM_cloth_solver_set_positions(clmd);
-  //  BKE_ptcache_validate(cache, framenr);
+	//if (cache_result == PTCACHE_READ_EXACT || cache_result == PTCACHE_READ_INTERPOLATED ||
+	//    (!can_simulate && cache_result == PTCACHE_READ_OLD)) {
+	//  SIM_cloth_solver_set_positions(clmd);
+	//  BKE_ptcache_validate(cache, framenr);
 
-  //  if (cache_result == PTCACHE_READ_INTERPOLATED && cache->flag & PTCACHE_REDO_NEEDED) 
-  //  {
-  //    BKE_ptcache_write(&pid, framenr);
-  //  }
+	//  if (cache_result == PTCACHE_READ_INTERPOLATED && cache->flag & PTCACHE_REDO_NEEDED) 
+	//  {
+	//    BKE_ptcache_write(&pid, framenr);
+	//  }
 
-  //  clmd->clothObject->last_frame = framenr;
+	//  clmd->clothObject->last_frame = framenr;
 
-  //  return;
-  //}
-  //if (cache_result == PTCACHE_READ_OLD) {
-  //  SIM_cloth_solver_set_positions(clmd);
-  //}
-  //else if (
-  //    /* 2.4x disabled lib, but this can be used in some cases, testing further - campbell */
-  //    /*ob->id.lib ||*/ (cache->flag & PTCACHE_BAKED)) {
-  //  /* if baked and nothing in cache, do nothing */
-  //  BKE_ptcache_invalidate(cache);
-  //  return;
-  //}
+	//  return;
+	//}
+	//if (cache_result == PTCACHE_READ_OLD) {
+	//  SIM_cloth_solver_set_positions(clmd);
+	//}
+	//else if (
+	//    /* 2.4x disabled lib, but this can be used in some cases, testing further - campbell */
+	//    /*ob->id.lib ||*/ (cache->flag & PTCACHE_BAKED)) {
+	//  /* if baked and nothing in cache, do nothing */
+	//  BKE_ptcache_invalidate(cache);
+	//  return;
+	//}
 
-  /* if on second frame, write cache for first frame */
-  //if (cache->simframe == startframe && (cache->flag & PTCACHE_OUTDATED || cache->last_exact == 0)) 
-  //{
-  //  BKE_ptcache_write(&pid, startframe);
-  //}
+	/* if on second frame, write cache for first frame */
+	//if (cache->simframe == startframe && (cache->flag & PTCACHE_OUTDATED || cache->last_exact == 0)) 
+	//{
+	//  BKE_ptcache_write(&pid, startframe);
+	//}
 
-	clmd->sim_parms->timescale = 1;//*= framenr - cache->simframe;
+	//clmd->sim_parms->timescale = 1; //*= framenr - cache->simframe;
 
-	//BKE_ptcache_validate(cache, framenr);
+	////BKE_ptcache_validate(cache, framenr);
 
-	/* do simulation */
-	if (do_step_cloth(depsgraph, ob, clmd, mesh, framenr)) 
-	{
-		// Если симуляция прошла успешно, то проверяем кеш
-		//BKE_ptcache_write(&pid, framenr);
-	}
-	else 
-	{
-		// В противном случае всё обнуляем
-		BKE_ptcache_invalidate(cache);
-	}
-	clmd->clothObject->last_frame = framenr;
+	///* do simulation */
+	//if (do_step_cloth<<<>>>(depsgraph, ob, clmd, mesh, framenr))
+	//{
+	//	// Если симуляция прошла успешно, то проверяем кеш
+	//	//BKE_ptcache_write(&pid, framenr);
+	//}
+	//else
+	//{
+	//	// В противном случае всё обнуляем
+	//	BKE_ptcache_invalidate(cache);
+	//}
+	//clmd->clothObject->last_frame = framenr;
 	return clmd->clothObject;
 }
 
 /* frees all */
-void cloth_free_modifier(ClothModifierData *clmd)
+__host__ __device__ void cloth_free_modifier(ClothModifierData* clmd)
 {
-  Cloth *cloth = NULL;
+	if (!clmd) { return; }
 
-  if (!clmd) { return; }
+	Cloth* cloth = clmd->clothObject;
 
-  cloth = clmd->clothObject;
+	if (cloth)
+	{
+		SIM_cloth_solver_free(clmd);
 
-  if (cloth) {
-	SIM_cloth_solver_free(clmd);
+		/* Free the verts. */
+		if (cloth->verts != nullptr)
+		{
+			MEM_lockfree_freeN(cloth->verts);
+		}
 
-	/* Free the verts. */
-	if (cloth->verts != NULL) {
-	  MEM_freeN(cloth->verts);
+		cloth->verts = nullptr;
+		cloth->mvert_num = 0;
+
+		/* Free the springs. */
+		if (cloth->springs != nullptr)
+		{
+			const LinkNode* search = cloth->springs;
+			while (search)
+			{
+				auto* spring = static_cast<ClothSpring*>(search->link);
+
+				MEM_SAFE_FREE(spring->pa);
+				MEM_SAFE_FREE(spring->pb);
+
+				MEM_lockfree_freeN(spring);
+				search = search->next;
+			}
+			BLI_linklist_free(cloth->springs, nullptr);
+
+			cloth->springs = nullptr;
+		}
+
+		cloth->springs = nullptr;
+		cloth->numsprings = 0;
+
+		/* free BVH collision tree */
+		if (cloth->bvhtree)
+		{
+			BLI_bvhtree_free(cloth->bvhtree);
+		}
+
+		if (cloth->bvhselftree)
+		{
+			BLI_bvhtree_free(cloth->bvhselftree);
+		}
+
+		/* we save our faces for collision objects */
+		if (cloth->tri)
+		{
+			MEM_lockfree_freeN(cloth->tri);
+		}
+
+		if (cloth->edgeset)
+		{
+			BLI_edgeset_free(cloth->edgeset);
+		}
+
+		if (cloth->sew_edge_graph)
+		{
+			BLI_edgeset_free(cloth->sew_edge_graph);
+			cloth->sew_edge_graph = nullptr;
+		}
+		MEM_lockfree_freeN(cloth);
+		clmd->clothObject = nullptr;
 	}
-
-	cloth->verts = NULL;
-	cloth->mvert_num = 0;
-
-	/* Free the springs. */
-	if (cloth->springs != NULL) {
-	  LinkNode *search = cloth->springs;
-	  while (search) {
-		ClothSpring *spring = (ClothSpring*)search->link;
-
-		MEM_SAFE_FREE(spring->pa);
-		MEM_SAFE_FREE(spring->pb);
-
-		MEM_freeN(spring);
-		search = search->next;
-	  }
-	  BLI_linklist_free(cloth->springs, NULL);
-
-	  cloth->springs = NULL;
-	}
-
-	cloth->springs = NULL;
-	cloth->numsprings = 0;
-
-	/* free BVH collision tree */
-	if (cloth->bvhtree) {
-	  BLI_bvhtree_free(cloth->bvhtree);
-	}
-
-	if (cloth->bvhselftree) {
-	  BLI_bvhtree_free(cloth->bvhselftree);
-	}
-
-	/* we save our faces for collision objects */
-	if (cloth->tri) {
-	  MEM_freeN(cloth->tri);
-	}
-
-	if (cloth->edgeset) {
-	  BLI_edgeset_free(cloth->edgeset);
-	}
-
-	if (cloth->sew_edge_graph) {
-	  BLI_edgeset_free(cloth->sew_edge_graph);
-	  cloth->sew_edge_graph = NULL;
-	}
-	MEM_freeN(cloth);
-	clmd->clothObject = NULL;
-  }
 }
 
-void cloth_free_modifier_extern(ClothModifierData* clmd)
+__host__ __device__ void cloth_free_modifier_extern(ClothModifierData* clmd)
 {
-	Cloth* cloth = NULL;
+	Cloth* cloth = nullptr;
 	if (!clmd) { return; }
 
 	cloth = clmd->clothObject;
 
-	if (cloth) {
+	if (cloth)
+	{
 		SIM_cloth_solver_free(clmd);
 
 		/* Free the verts. */
@@ -435,360 +467,374 @@ void cloth_free_modifier_extern(ClothModifierData* clmd)
 		cloth->mvert_num = 0;
 
 		/* Free the springs. */
-		if (cloth->springs != NULL) {
-			LinkNode* search = cloth->springs;
-			while (search) {
-				ClothSpring* spring = (ClothSpring*)search->link;
+		if (cloth->springs != nullptr)
+		{
+			const LinkNode* search = cloth->springs;
+			while (search)
+			{
+				const auto spring = (ClothSpring*)search->link;
 
 				MEM_SAFE_FREE(spring->pa);
 				MEM_SAFE_FREE(spring->pb);
 
-				MEM_freeN(spring);
+				MEM_lockfree_freeN(spring);
 				search = search->next;
 			}
-			BLI_linklist_free(cloth->springs, NULL);
+			BLI_linklist_free(cloth->springs, nullptr);
 
-			cloth->springs = NULL;
+			cloth->springs = nullptr;
 		}
 
-		cloth->springs = NULL;
+		cloth->springs = nullptr;
 		cloth->numsprings = 0;
 
 		/* free BVH collision tree */
-		if (cloth->bvhtree) {
+		if (cloth->bvhtree)
+		{
 			BLI_bvhtree_free(cloth->bvhtree);
 		}
 
-		if (cloth->bvhselftree) {
+		if (cloth->bvhselftree)
+		{
 			BLI_bvhtree_free(cloth->bvhselftree);
 		}
 
 		/* we save our faces for collision objects */
-		if (cloth->tri) {
-			MEM_freeN(cloth->tri);
+		if (cloth->tri)
+		{
+			MEM_lockfree_freeN(cloth->tri);
 		}
 
-		if (cloth->edgeset) {
+		if (cloth->edgeset)
+		{
 			BLI_edgeset_free(cloth->edgeset);
 		}
 
-		if (cloth->sew_edge_graph) {
+		if (cloth->sew_edge_graph)
+		{
 			BLI_edgeset_free(cloth->sew_edge_graph);
-			cloth->sew_edge_graph = NULL;
+			cloth->sew_edge_graph = nullptr;
 		}
-		MEM_freeN(cloth);
-		clmd->clothObject = NULL;
+		MEM_lockfree_freeN(cloth);
+		clmd->clothObject = nullptr;
 	}
 }
 
-int cloth_uses_vgroup(ClothModifierData *clmd)
+__host__ __device__ int cloth_uses_vgroup(const ClothModifierData* clmd)
 {
-  return (((clmd->coll_parms->flags & CLOTH_COLLSETTINGS_FLAG_SELF) &&
-		   (clmd->coll_parms->vgroup_selfcol > 0)) ||
-		  ((clmd->coll_parms->flags & CLOTH_COLLSETTINGS_FLAG_ENABLED) &&
-		   (clmd->coll_parms->vgroup_objcol > 0)) ||
-		  (clmd->sim_parms->vgroup_pressure > 0) || (clmd->sim_parms->vgroup_struct > 0) ||
-		  (clmd->sim_parms->vgroup_bend > 0) || (clmd->sim_parms->vgroup_shrink > 0) ||
-		  (clmd->sim_parms->vgroup_intern > 0) || (clmd->sim_parms->vgroup_mass > 0));
+	return (((clmd->coll_parms->flags & CLOTH_COLLSETTINGS_FLAG_SELF) &&
+			(clmd->coll_parms->vgroup_selfcol > 0)) ||
+		((clmd->coll_parms->flags & CLOTH_COLLSETTINGS_FLAG_ENABLED) &&
+			(clmd->coll_parms->vgroup_objcol > 0)) ||
+		(clmd->sim_parms->vgroup_pressure > 0) || (clmd->sim_parms->vgroup_struct > 0) ||
+		(clmd->sim_parms->vgroup_bend > 0) || (clmd->sim_parms->vgroup_shrink > 0) ||
+		(clmd->sim_parms->vgroup_intern > 0) || (clmd->sim_parms->vgroup_mass > 0));
 }
 
-static float cloth_shrink_factor(ClothModifierData *clmd, ClothVertex *verts, int i1, int i2)
+__host__ __device__ static float cloth_shrink_factor(const ClothModifierData* clmd, const ClothVertex* verts, const int i1,
+                                                     const int i2)
 {
-  /* Linear interpolation between min and max shrink factor based on weight. */
-  float base = 1.0f - clmd->sim_parms->shrink_min;
-  float shrink_factor_delta = clmd->sim_parms->shrink_min - clmd->sim_parms->shrink_max;
+	/* Linear interpolation between min and max shrink factor based on weight. */
+	const float base = 1.0f - clmd->sim_parms->shrink_min;
+	const float shrink_factor_delta = clmd->sim_parms->shrink_min - clmd->sim_parms->shrink_max;
 
-  float k1 = base + shrink_factor_delta * verts[i1].shrink_factor;
-  float k2 = base + shrink_factor_delta * verts[i2].shrink_factor;
+	const float k1 = base + shrink_factor_delta * verts[i1].shrink_factor;
+	const float k2 = base + shrink_factor_delta * verts[i2].shrink_factor;
 
-  /* Use geometrical mean to average two factors since it behaves better
-   * for diagonals when a rectangle transforms into a trapezoid. */
-  return sqrtf(k1 * k2);
+	/* Use geometrical mean to average two factors since it behaves better
+	 * for diagonals when a rectangle transforms into a trapezoid. */
+	return sqrtf(k1 * k2);
 }
+
 /* -------------------------------------------------------------------- */
 /** \name Spring Network Building Implementation
  * \{ */
 
- void spring_verts_ordered_set(ClothSpring *spring, int v0, int v1)
+__host__ __device__ void spring_verts_ordered_set(ClothSpring* spring, const uint v0, const uint v1)
 {
-  if (v0 < v1) 
-  {
-	spring->ij = v0;
-	spring->kl = v1;
-  }
-  else 
-  {
-	spring->ij = v1;
-	spring->kl = v0;
-  }
-}
-
-static void cloth_free_edgelist(LinkNodePair *edgelist, uint mvert_num)
-{
-  if (edgelist) 
-  {
-	for (uint i = 0; i < mvert_num; i++) 
+	if (v0 < v1)
 	{
-	  BLI_linklist_free(edgelist[i].list, NULL);
+		spring->ij = v0;
+		spring->kl = v1;
 	}
-
-	MEM_freeN(edgelist);
-  }
-}
-
-static void cloth_free_errorsprings(Cloth *cloth,LinkNodePair *edgelist,BendSpringRef *spring_ref)
-{
-  if (cloth->springs != NULL) 
-  {
-	LinkNode *search = cloth->springs;
-	while (search)
+	else
 	{
-	  ClothSpring *spring = (ClothSpring*)search->link;
-
-	  MEM_SAFE_FREE(spring->pa);
-	  MEM_SAFE_FREE(spring->pb);
-
-	  MEM_freeN(spring);
-	  search = search->next;
+		spring->ij = v1;
+		spring->kl = v0;
 	}
-	BLI_linklist_free(cloth->springs, NULL);
-
-	cloth->springs = NULL;
-  }
-
-  cloth_free_edgelist(edgelist, cloth->mvert_num);
-
-  MEM_SAFE_FREE(spring_ref);
-
-  if (cloth->edgeset) 
-  {
-	BLI_edgeset_free(cloth->edgeset);
-	cloth->edgeset = NULL;
-  }
 }
 
- void cloth_bend_poly_dir(ClothVertex *verts, int i, int j, const int *inds, int len, float r_dir[3])
+__host__ __device__ static void cloth_free_edgelist(LinkNodePair* edgelist, const uint mvert_num)
 {
-  float cent[3] = {0};
-  float fact = 1.0f / len;
-
-  for (int x = 0; x < len; x++) 
-  {
-	madd_v3_v3fl(cent, verts[inds[x]].xrest, fact);
-  }
-
-  normal_tri_v3(r_dir, verts[i].xrest, verts[j].xrest, cent);
-}
-
-static float cloth_spring_angle(ClothVertex *verts, int i, int j, int *i_a, int *i_b, int len_a, int len_b)
-{
-  float dir_a[3], dir_b[3];
-  float tmp[3], vec_e[3];
-  float sin, cos;
-
-  /* Poly vectors. */
-  cloth_bend_poly_dir(verts, j, i, i_a, len_a, dir_a);
-  cloth_bend_poly_dir(verts, i, j, i_b, len_b, dir_b);
-
-  /* Edge vector. */
-  sub_v3_v3v3(vec_e, verts[i].xrest, verts[j].xrest);
-  normalize_v3(vec_e);
-
-  /* Compute angle. */
-  cos = dot_v3v3(dir_a, dir_b);
-
-  cross_v3_v3v3(tmp, dir_a, dir_b);
-  sin = dot_v3v3(tmp, vec_e);
-
-  return atan2f(sin, cos);
-}
-
-static void cloth_hair_update_bending_targets(ClothModifierData *clmd)
-{
-  Cloth *cloth = clmd->clothObject;
-  LinkNode *search = NULL;
-  float hair_frame[3][3], dir_old[3], dir_new[3];
-  int prev_mn; /* to find hair chains */
-
-  if (!clmd->hairdata) 
-  {
-	return;
-  }
-
-  /* XXX Note: we need to propagate frames from the root up,
-   * but structural hair springs are stored in reverse order.
-   * The bending springs however are then inserted in the same
-   * order as vertices again ...
-   * This messy situation can be resolved when solver data is
-   * generated directly from a dedicated hair system.
-   */
-
-  prev_mn = -1;
-  for (search = cloth->springs; search; search = search->next) 
-  {
-	ClothSpring *spring = (ClothSpring*)search->link;
-	ClothHairData *hair_ij, *hair_kl;
-	bool is_root = spring->kl != prev_mn;
-
-	if (spring->type != CLOTH_SPRING_TYPE_BENDING_HAIR) 
+	if (edgelist)
 	{
-	  continue;
+		for (uint i = 0; i < mvert_num; i++)
+		{
+			BLI_linklist_free(edgelist[i].list, nullptr);
+		}
+
+		MEM_lockfree_freeN(edgelist);
 	}
-
-	hair_ij = &clmd->hairdata[spring->ij];
-	hair_kl = &clmd->hairdata[spring->kl];
-	if (is_root) 
-	{
-	  /* initial hair frame from root orientation */
-	  copy_m3_m3(hair_frame, hair_ij->rot);
-	  /* surface normal is the initial direction,
-	   * parallel transport then keeps it aligned to the hair direction
-	   */
-	  copy_v3_v3(dir_new, hair_frame[2]);
-	}
-
-	copy_v3_v3(dir_old, dir_new);
-	sub_v3_v3v3(dir_new, cloth->verts[spring->mn].x, cloth->verts[spring->kl].x);
-	normalize_v3(dir_new);
-
-	/* get local targets for kl/mn vertices by putting rest targets into the current frame,
-	 * then multiply with the rest length to get the actual goals
-	 */
-
-	mul_v3_m3v3(spring->target, hair_frame, hair_kl->rest_target);
-	mul_v3_fl(spring->target, spring->restlen);
-
-	/* move frame to next hair segment */
-	cloth_parallel_transport_hair_frame(hair_frame, dir_old, dir_new);
-
-	prev_mn = spring->mn;
-  }
 }
 
-static void cloth_hair_update_bending_rest_targets(ClothModifierData *clmd)
+__host__ __device__ static void cloth_free_errorsprings(Cloth* cloth, LinkNodePair* edgelist, BendSpringRef* spring_ref)
 {
-  Cloth *cloth = clmd->clothObject;
-  LinkNode *search = NULL;
-  float hair_frame[3][3], dir_old[3], dir_new[3];
-  int prev_mn; /* to find hair roots */
+	if (cloth->springs != nullptr)
+	{
+		const LinkNode* search = cloth->springs;
+		while (search)
+		{
+			const auto spring = (ClothSpring*)search->link;
 
-  if (!clmd->hairdata) {
-	return;
-  }
+			MEM_SAFE_FREE(spring->pa);
+			MEM_SAFE_FREE(spring->pb);
 
-  /* XXX Note: we need to propagate frames from the root up,
-   * but structural hair springs are stored in reverse order.
-   * The bending springs however are then inserted in the same
-   * order as vertices again ...
-   * This messy situation can be resolved when solver data is
-   * generated directly from a dedicated hair system.
-   */
+			MEM_lockfree_freeN(spring);
+			search = search->next;
+		}
+		BLI_linklist_free(cloth->springs, nullptr);
 
-  prev_mn = -1;
-  for (search = cloth->springs; search; search = search->next) {
-	ClothSpring *spring = (ClothSpring*)search->link;
-	ClothHairData *hair_ij, *hair_kl;
-	bool is_root = spring->kl != prev_mn;
-
-	if (spring->type != CLOTH_SPRING_TYPE_BENDING_HAIR) {
-	  continue;
+		cloth->springs = nullptr;
 	}
 
-	hair_ij = &clmd->hairdata[spring->ij];
-	hair_kl = &clmd->hairdata[spring->kl];
-	if (is_root) {
-	  /* initial hair frame from root orientation */
-	  copy_m3_m3(hair_frame, hair_ij->rot);
-	  /* surface normal is the initial direction,
-	   * parallel transport then keeps it aligned to the hair direction
-	   */
-	  copy_v3_v3(dir_new, hair_frame[2]);
+	cloth_free_edgelist(edgelist, cloth->mvert_num);
+
+	MEM_SAFE_FREE(spring_ref);
+
+	if (cloth->edgeset)
+	{
+		BLI_edgeset_free(cloth->edgeset);
+		cloth->edgeset = nullptr;
 	}
-
-	copy_v3_v3(dir_old, dir_new);
-	sub_v3_v3v3(dir_new, cloth->verts[spring->mn].xrest, cloth->verts[spring->kl].xrest);
-	normalize_v3(dir_new);
-
-	/* dir expressed in the hair frame defines the rest target direction */
-	copy_v3_v3(hair_kl->rest_target, dir_new);
-	mul_transposed_m3_v3(hair_frame, hair_kl->rest_target);
-
-	/* move frame to next hair segment */
-	cloth_parallel_transport_hair_frame(hair_frame, dir_old, dir_new);
-
-	prev_mn = spring->mn;
-  }
 }
+
+__host__ __device__ void cloth_bend_poly_dir(const ClothVertex* verts, const int i, const int j, const int* inds, const int len,
+                                             float r_dir[3])
+{
+	float cent[3] = {0};
+	const float fact = 1.0f / len;
+
+	for (int x = 0; x < len; x++)
+	{
+		madd_v3_v3fl(cent, verts[inds[x]].xrest, fact);
+	}
+
+	normal_tri_v3(r_dir, verts[i].xrest, verts[j].xrest, cent);
+}
+
+__host__ __device__ static float cloth_spring_angle(const ClothVertex* verts, const int i, const int j, const int* i_a,
+                                                    const int* i_b, const int len_a, const int len_b)
+{
+	float dir_a[3], dir_b[3];
+	float tmp[3], vec_e[3];
+	float sin, cos;
+
+	/* Poly vectors. */
+	cloth_bend_poly_dir(verts, j, i, i_a, len_a, dir_a);
+	cloth_bend_poly_dir(verts, i, j, i_b, len_b, dir_b);
+
+	/* Edge vector. */
+	sub_v3_v3v3(vec_e, verts[i].xrest, verts[j].xrest);
+	normalize_v3(vec_e);
+
+	/* Compute angle. */
+	cos = dot_v3v3(dir_a, dir_b);
+
+	cross_v3_v3v3(tmp, dir_a, dir_b);
+	sin = dot_v3v3(tmp, vec_e);
+
+	return atan2f(sin, cos);
+}
+
+//static void cloth_hair_update_bending_targets(ClothModifierData *clmd)
+//{
+//  Cloth *cloth = clmd->clothObject;
+//  LinkNode *search = nullptr;
+//  float hair_frame[3][3], dir_old[3], dir_new[3];
+//  int prev_mn; /* to find hair chains */
+//
+//  if (!clmd->hairdata) 
+//  {
+//	return;
+//  }
+//
+//  /* XXX Note: we need to propagate frames from the root up,
+//   * but structural hair springs are stored in reverse order.
+//   * The bending springs however are then inserted in the same
+//   * order as vertices again ...
+//   * This messy situation can be resolved when solver data is
+//   * generated directly from a dedicated hair system.
+//   */
+//
+//  prev_mn = -1;
+//  for (search = cloth->springs; search; search = search->next) 
+//  {
+//	ClothSpring *spring = (ClothSpring*)search->link;
+//	ClothHairData *hair_ij, *hair_kl;
+//	bool is_root = spring->kl != prev_mn;
+//
+//	if (spring->type != CLOTH_SPRING_TYPE_BENDING_HAIR) 
+//	{
+//	  continue;
+//	}
+//
+//	hair_ij = &clmd->hairdata[spring->ij];
+//	hair_kl = &clmd->hairdata[spring->kl];
+//	if (is_root) 
+//	{
+//	  /* initial hair frame from root orientation */
+//	  copy_m3_m3(hair_frame, hair_ij->rot);
+//	  /* surface normal is the initial direction,
+//	   * parallel transport then keeps it aligned to the hair direction
+//	   */
+//	  copy_v3_v3(dir_new, hair_frame[2]);
+//	}
+//
+//	copy_v3_v3(dir_old, dir_new);
+//	sub_v3_v3v3(dir_new, cloth->verts[spring->mn].x, cloth->verts[spring->kl].x);
+//	normalize_v3(dir_new);
+//
+//	/* get local targets for kl/mn vertices by putting rest targets into the current frame,
+//	 * then multiply with the rest length to get the actual goals
+//	 */
+//
+//	mul_v3_m3v3(spring->target, hair_frame, hair_kl->rest_target);
+//	mul_v3_fl(spring->target, spring->restlen);
+//
+//	/* move frame to next hair segment */
+//	cloth_parallel_transport_hair_frame(hair_frame, dir_old, dir_new);
+//
+//	prev_mn = spring->mn;
+//  }
+//}
+//
+//static void cloth_hair_update_bending_rest_targets(ClothModifierData *clmd)
+//{
+//  Cloth *cloth = clmd->clothObject;
+//  LinkNode *search = nullptr;
+//  float hair_frame[3][3], dir_old[3], dir_new[3];
+//  int prev_mn; /* to find hair roots */
+//
+//  if (!clmd->hairdata) {
+//	return;
+//  }
+//
+//  /* XXX Note: we need to propagate frames from the root up,
+//   * but structural hair springs are stored in reverse order.
+//   * The bending springs however are then inserted in the same
+//   * order as vertices again ...
+//   * This messy situation can be resolved when solver data is
+//   * generated directly from a dedicated hair system.
+//   */
+//
+//  prev_mn = -1;
+//  for (search = cloth->springs; search; search = search->next) {
+//	ClothSpring *spring = (ClothSpring*)search->link;
+//	ClothHairData *hair_ij, *hair_kl;
+//	bool is_root = spring->kl != prev_mn;
+//
+//	if (spring->type != CLOTH_SPRING_TYPE_BENDING_HAIR) {
+//	  continue;
+//	}
+//
+//	hair_ij = &clmd->hairdata[spring->ij];
+//	hair_kl = &clmd->hairdata[spring->kl];
+//	if (is_root) {
+//	  /* initial hair frame from root orientation */
+//	  copy_m3_m3(hair_frame, hair_ij->rot);
+//	  /* surface normal is the initial direction,
+//	   * parallel transport then keeps it aligned to the hair direction
+//	   */
+//	  copy_v3_v3(dir_new, hair_frame[2]);
+//	}
+//
+//	copy_v3_v3(dir_old, dir_new);
+//	sub_v3_v3v3(dir_new, cloth->verts[spring->mn].xrest, cloth->verts[spring->kl].xrest);
+//	normalize_v3(dir_new);
+//
+//	/* dir expressed in the hair frame defines the rest target direction */
+//	copy_v3_v3(hair_kl->rest_target, dir_new);
+//	mul_transposed_m3_v3(hair_frame, hair_kl->rest_target);
+//
+//	/* move frame to next hair segment */
+//	cloth_parallel_transport_hair_frame(hair_frame, dir_old, dir_new);
+//
+//	prev_mn = spring->mn;
+//  }
+//}
 
 /* update stiffness if vertex group values are changing from frame to frame */
-static void cloth_update_springs(ClothModifierData* clmd)
+__host__ __device__ static void cloth_update_springs(const ClothModifierData* clmd)
 {
-	Cloth* cloth = clmd->clothObject;
-	LinkNode* search = nullptr;
+	const Cloth* cloth = clmd->clothObject;
 
-	search = cloth->springs;
-	while (search) {
-		ClothSpring* spring = static_cast<ClothSpring*>(search->link);
+	LinkNode* search = cloth->springs;
+	uint springCount = 0;
+	while (search)
+	{
+		springCount++;
+		const auto spring = static_cast<ClothSpring*>(search->link);
 
 		spring->lin_stiffness = 0.0f;
 
-		if (clmd->sim_parms->bending_model == CLOTH_BENDING_ANGULAR) 
+		if (clmd->sim_parms->bending_model == CLOTH_BENDING_ANGULAR)
 		{
-			if (spring->type & CLOTH_SPRING_TYPE_BENDING) 
+			if (spring->type & CLOTH_SPRING_TYPE_BENDING)
 			{
 				spring->ang_stiffness = (cloth->verts[spring->kl].bend_stiff +
-										 cloth->verts[spring->ij].bend_stiff) /
-										 2.0f;
+						cloth->verts[spring->ij].bend_stiff) /
+					2.0f;
 			}
 		}
 
-		if (spring->type & CLOTH_SPRING_TYPE_STRUCTURAL) 
+		if (spring->type & CLOTH_SPRING_TYPE_STRUCTURAL)
 		{
 			spring->lin_stiffness = (cloth->verts[spring->kl].struct_stiff +
-									 cloth->verts[spring->ij].struct_stiff) /
-									 2.0f;
+					cloth->verts[spring->ij].struct_stiff) /
+				2.0f;
 		}
-		else if (spring->type & CLOTH_SPRING_TYPE_SHEAR) 
+		else if (spring->type & CLOTH_SPRING_TYPE_SHEAR)
 		{
 			spring->lin_stiffness = (cloth->verts[spring->kl].shear_stiff +
-									 cloth->verts[spring->ij].shear_stiff) /
-									 2.0f;
+					cloth->verts[spring->ij].shear_stiff) /
+				2.0f;
 		}
-		else if (spring->type == CLOTH_SPRING_TYPE_BENDING) 
+		else if (spring->type == CLOTH_SPRING_TYPE_BENDING)
 		{
 			spring->lin_stiffness = (cloth->verts[spring->kl].bend_stiff +
-									 cloth->verts[spring->ij].bend_stiff) /
-									 2.0f;
+					cloth->verts[spring->ij].bend_stiff) /
+				2.0f;
 		}
-		else if (spring->type & CLOTH_SPRING_TYPE_INTERNAL) 
+		else if (spring->type & CLOTH_SPRING_TYPE_INTERNAL)
 		{
 			spring->lin_stiffness = (cloth->verts[spring->kl].internal_stiff +
-									 cloth->verts[spring->ij].internal_stiff) /
-									 2.0f;
+					cloth->verts[spring->ij].internal_stiff) /
+				2.0f;
 		}
-		else if (spring->type == CLOTH_SPRING_TYPE_BENDING_HAIR) 
-		{
-			ClothVertex* v1 = &cloth->verts[spring->ij];
-			ClothVertex* v2 = &cloth->verts[spring->kl];
-			if (clmd->hairdata) {
-				/* copy extra hair data to generic cloth vertices */
-				v1->bend_stiff = clmd->hairdata[spring->ij].bending_stiffness;
-				v2->bend_stiff = clmd->hairdata[spring->kl].bending_stiffness;
-			}
-			spring->lin_stiffness = (v1->bend_stiff + v2->bend_stiff) / 2.0f;
-		}
-		else if (spring->type == CLOTH_SPRING_TYPE_GOAL) 
+		//else if (spring->type == CLOTH_SPRING_TYPE_BENDING_HAIR) 
+		//{
+		//	ClothVertex* v1 = &cloth->verts[spring->ij];
+		//	ClothVertex* v2 = &cloth->verts[spring->kl];
+		//	if (clmd->hairdata) {
+		//		/* copy extra hair data to generic cloth vertices */
+		//		v1->bend_stiff = clmd->hairdata[spring->ij].bending_stiffness;
+		//		v2->bend_stiff = clmd->hairdata[spring->kl].bending_stiffness;
+		//	}
+		//	spring->lin_stiffness = (v1->bend_stiff + v2->bend_stiff) / 2.0f;
+		//}
+		else if (spring->type == CLOTH_SPRING_TYPE_GOAL)
 		{
 			/* WARNING: Appending NEW goal springs does not work
 			 * because implicit solver would need reset! */
 
-			 /* Activate / Deactivate existing springs */
+			/* Activate / Deactivate existing springs */
 			if (!(cloth->verts[spring->ij].flags & CLOTH_VERT_FLAG_PINNED) &&
-				 (cloth->verts[spring->ij].goal > ALMOST_ZERO)) 
+				(cloth->verts[spring->ij].goal > ALMOST_ZERO))
 			{
 				spring->flags &= ~CLOTH_SPRING_FLAG_DEACTIVATE;
 			}
-			else {
+			else
+			{
 				spring->flags |= CLOTH_SPRING_FLAG_DEACTIVATE;
 			}
 		}
@@ -796,23 +842,23 @@ static void cloth_update_springs(ClothModifierData* clmd)
 		search = search->next;
 	}
 
-	cloth_hair_update_bending_targets(clmd);
+	//cloth_hair_update_bending_targets(clmd);
 }
 
 // Update rest verts, for dynamically deformable cloth
 // Обновите остальные вершины для динамически деформируемой ткани
-static void cloth_update_verts(Object *ob, ClothModifierData *clmd, Mesh *mesh)
+__host__ __device__ static void cloth_update_verts(const Object* ob, const ClothModifierData* clmd, const Mesh* mesh)
 {
-  MVert *mvert = mesh->mvert;
-  ClothVertex *verts = clmd->clothObject->verts;
+	const MVert* mvert = mesh->mvert;
+	ClothVertex* verts = clmd->clothObject->verts;
 
-  // vertex count is already ensured to match
-  // количество вершин уже обеспечено для соответствия
-  for (uint i = 0; i < mesh->totvert; ++i, ++verts)
-  {
-	copy_v3_v3(verts->xrest, mvert[i].co);
-	mul_m4_v3(ob->obmat, verts->xrest);
-  }
+	// vertex count is already ensured to match
+	// количество вершин уже обеспечено для соответствия
+	for (int i = 0; i < mesh->totvert; ++i, ++verts)
+	{
+		copy_v3_v3(verts->xrest, mvert[i].co);
+		mul_m4_v3(ob->obmat, verts->xrest);
+	}
 }
 
 /* Write rest vert locations to a copy of the mesh. */
@@ -831,285 +877,283 @@ static void cloth_update_verts(Object *ob, ClothModifierData *clmd, Mesh *mesh)
 //}
 
 /* Update spring rest length, for dynamically deformable cloth */
-static void cloth_update_spring_lengths(ClothModifierData *clmd, Mesh *mesh)
+__host__ __device__ static void cloth_update_spring_lengths(const ClothModifierData* clmd, const Mesh* mesh)
 {
-  Cloth *cloth = clmd->clothObject;
-  LinkNode *search = cloth->springs;
-  uint struct_springs = 0;
-  uint i = 0;
-  uint mvert_num = (uint)mesh->totvert;
-  float shrink_factor;
+	const Cloth* cloth = clmd->clothObject;
+	const LinkNode* search = cloth->springs;
+	uint struct_springs = 0;
+	uint i = 0;
+	const uint mvert_num = static_cast<uint>(mesh->totvert);
+	float shrink_factor;
 
-  clmd->sim_parms->avg_spring_len = 0.0f;
+	clmd->sim_parms->avg_spring_len = 0.0f;
 
-  for (i = 0; i < mvert_num; i++) {
-	cloth->verts[i].avg_spring_len = 0.0f;
-  }
-
-  while (search) {
-	ClothSpring *spring = (ClothSpring*)search->link;
-
-	if (spring->type != CLOTH_SPRING_TYPE_SEWING) {
-	  if (spring->type & (CLOTH_SPRING_TYPE_STRUCTURAL | CLOTH_SPRING_TYPE_SHEAR |
-						  CLOTH_SPRING_TYPE_BENDING | CLOTH_SPRING_TYPE_INTERNAL)) {
-		shrink_factor = cloth_shrink_factor(clmd, cloth->verts, spring->ij, spring->kl);
-	  }
-	  else {
-		shrink_factor = 1.0f;
-	  }
-
-	  spring->restlen = len_v3v3(cloth->verts[spring->kl].xrest, cloth->verts[spring->ij].xrest) *
-						shrink_factor;
-
-	  if (spring->type & CLOTH_SPRING_TYPE_BENDING) {
-		spring->restang = cloth_spring_angle(
-			cloth->verts, spring->ij, spring->kl, spring->pa, spring->pb, spring->la, spring->lb);
-	  }
+	for (i = 0; i < mvert_num; i++)
+	{
+		cloth->verts[i].avg_spring_len = 0.0f;
 	}
 
-	if (spring->type & CLOTH_SPRING_TYPE_STRUCTURAL) {
-	  clmd->sim_parms->avg_spring_len += spring->restlen;
-	  cloth->verts[spring->ij].avg_spring_len += spring->restlen;
-	  cloth->verts[spring->kl].avg_spring_len += spring->restlen;
-	  struct_springs++;
+	while (search)
+	{
+		const auto spring = static_cast<ClothSpring*>(search->link);
+
+		if (spring->type != CLOTH_SPRING_TYPE_SEWING)
+		{
+			if (spring->type & (CLOTH_SPRING_TYPE_STRUCTURAL | CLOTH_SPRING_TYPE_SHEAR |
+				CLOTH_SPRING_TYPE_BENDING | CLOTH_SPRING_TYPE_INTERNAL))
+			{
+				shrink_factor = cloth_shrink_factor(clmd, cloth->verts, spring->ij, spring->kl);
+			}
+			else
+			{
+				shrink_factor = 1.0f;
+			}
+
+			spring->restlen = len_v3v3(cloth->verts[spring->kl].xrest, cloth->verts[spring->ij].xrest) * shrink_factor;
+
+			if (spring->type & CLOTH_SPRING_TYPE_BENDING)
+			{
+				spring->restang = cloth_spring_angle(cloth->verts, spring->ij, spring->kl, spring->pa, spring->pb, spring->la, spring->lb);
+			}
+		}
+
+		if (spring->type & CLOTH_SPRING_TYPE_STRUCTURAL)
+		{
+			clmd->sim_parms->avg_spring_len += spring->restlen;
+			cloth->verts[spring->ij].avg_spring_len += spring->restlen;
+			cloth->verts[spring->kl].avg_spring_len += spring->restlen;
+			struct_springs++;
+		}
+
+		search = search->next;
 	}
 
-	search = search->next;
-  }
-
-  if (struct_springs > 0) {
-	clmd->sim_parms->avg_spring_len /= struct_springs;
-  }
-
-  for (i = 0; i < mvert_num; i++) {
-	if (cloth->verts[i].spring_count > 0) {
-	  cloth->verts[i].avg_spring_len = cloth->verts[i].avg_spring_len * 0.49f /
-									   ((float)cloth->verts[i].spring_count);
+	if (struct_springs > 0)
+	{
+		clmd->sim_parms->avg_spring_len /= static_cast<float>(struct_springs);
 	}
-  }
+
+	for (i = 0; i < mvert_num; i++)
+	{
+		if (cloth->verts[i].spring_count > 0)
+		{
+			cloth->verts[i].avg_spring_len = cloth->verts[i].avg_spring_len * 0.49f / static_cast<float>(cloth->verts[i].spring_count);
+		}
+	}
 }
 
- void cross_identity_v3(float r[3][3], const float v[3])
+__host__ __device__ void cross_identity_v3(float r[3][3], const float v[3])
 {
-  zero_m3(r);
-  r[0][1] = v[2];
-  r[0][2] = -v[1];
-  r[1][0] = -v[2];
-  r[1][2] = v[0];
-  r[2][0] = v[1];
-  r[2][1] = -v[0];
+	zero_m3(r);
+	r[0][1] = v[2];
+	r[0][2] = -v[1];
+	r[1][0] = -v[2];
+	r[1][2] = v[0];
+	r[2][0] = v[1];
+	r[2][1] = -v[0];
 }
 
- void madd_m3_m3fl(float r[3][3], const float m[3][3], float f)
+__host__ __device__ void cloth_parallel_transport_hair_frame(float mat[3][3],
+                                                             const float dir_old[3],
+                                                             const float dir_new[3])
 {
-  r[0][0] += m[0][0] * f;
-  r[0][1] += m[0][1] * f;
-  r[0][2] += m[0][2] * f;
-  r[1][0] += m[1][0] * f;
-  r[1][1] += m[1][1] * f;
-  r[1][2] += m[1][2] * f;
-  r[2][0] += m[2][0] * f;
-  r[2][1] += m[2][1] * f;
-  r[2][2] += m[2][2] * f;
-}
+	float rot[3][3];
 
-void cloth_parallel_transport_hair_frame(float mat[3][3],
-										 const float dir_old[3],
-										 const float dir_new[3])
-{
-  float rot[3][3];
+	/* rotation between segments */
+	rotation_between_vecs_to_mat3(rot, dir_old, dir_new);
 
-  /* rotation between segments */
-  rotation_between_vecs_to_mat3(rot, dir_old, dir_new);
-
-  /* rotate the frame */
-  mul_m3_m3m3(mat, rot, mat);
+	/* rotate the frame */
+	mul_m3_m3m3(mat, rot, mat);
 }
 
 /* Add a shear and a bend spring between two verts within a poly. */
-static bool cloth_add_shear_bend_spring(ClothModifierData *clmd,
-										LinkNodePair *edgelist,
-										const MLoop *mloop,
-										const MPoly *mpoly,
-										int i,
-										int j,
-										int k)
+__host__ bool cloth_add_shear_bend_spring(const ClothModifierData* clmd,
+                                                            LinkNodePair* edgelist,
+                                                            const MLoop* mloop,
+                                                            const MPoly* mpoly,
+                                                            const int i,
+                                                            const int j,
+                                                            const int k)
 {
-  Cloth *cloth = clmd->clothObject;
-  ClothSpring *spring;
-  const MLoop *tmp_loop;
-  float shrink_factor;
-  int x, y;
+	Cloth* cloth = clmd->clothObject;
+	int x;
 
-  /* Combined shear/bend properties. */
-  spring = (ClothSpring *)MEM_callocN(sizeof(ClothSpring), "cloth spring");
+	/* Combined shear/bend properties. */
+	auto* spring = static_cast<ClothSpring*>(MEM_lockfree_callocN(sizeof(ClothSpring), "cloth spring"));
 
-  if (!spring) {
-	return false;
-  }
-
-  spring_verts_ordered_set(
-	  spring, mloop[mpoly[i].loopstart + j].v, mloop[mpoly[i].loopstart + k].v);
-
-  shrink_factor = cloth_shrink_factor(clmd, cloth->verts, spring->ij, spring->kl);
-  spring->restlen = len_v3v3(cloth->verts[spring->kl].xrest, cloth->verts[spring->ij].xrest) *
-					shrink_factor;
-  spring->type |= CLOTH_SPRING_TYPE_SHEAR;
-  spring->lin_stiffness = (cloth->verts[spring->kl].shear_stiff +
-						   cloth->verts[spring->ij].shear_stiff) /
-						  2.0f;
-
-  if (edgelist) {
-	BLI_linklist_append(&edgelist[spring->ij], spring);
-	BLI_linklist_append(&edgelist[spring->kl], spring);
-  }
-
-  /* Bending specific properties. */
-  if (clmd->sim_parms->bending_model == CLOTH_BENDING_ANGULAR) {
-	spring->type |= CLOTH_SPRING_TYPE_BENDING;
-
-	spring->la = k - j + 1;
-	spring->lb = mpoly[i].totloop - k + j + 1;
-
-	spring->pa = (int*)MEM_mallocN(sizeof(*spring->pa) * spring->la, "spring poly");
-	if (!spring->pa) {
-	  return false;
-	}
-
-	spring->pb = (int*)MEM_mallocN(sizeof(*spring->pb) * spring->lb, "spring poly");
-	if (!spring->pb) {
-	  return false;
-	}
-
-	tmp_loop = mloop + mpoly[i].loopstart;
-
-	for (x = 0; x < spring->la; x++) {
-	  spring->pa[x] = tmp_loop[j + x].v;
-	}
-
-	for (x = 0; x <= j; x++) {
-	  spring->pb[x] = tmp_loop[x].v;
-	}
-
-	for (y = k; y < mpoly[i].totloop; x++, y++) {
-	  spring->pb[x] = tmp_loop[y].v;
-	}
-
-	spring->mn = -1;
-
-	spring->restang = cloth_spring_angle(
-		cloth->verts, spring->ij, spring->kl, spring->pa, spring->pb, spring->la, spring->lb);
-
-	spring->ang_stiffness = (cloth->verts[spring->ij].bend_stiff +
-							 cloth->verts[spring->kl].bend_stiff) /
-							2.0f;
-  }
-
-  BLI_linklist_prepend(&cloth->springs, spring);
-
-  return true;
-}
-
- bool cloth_bend_set_poly_vert_array(int **poly, int len, const MLoop *mloop)
-{
-  int *p = (int*)MEM_mallocN(sizeof(int) * len, "spring poly");
-
-  if (!p) {
-	return false;
-  }
-
-  for (int i = 0; i < len; i++, mloop++) {
-	p[i] = mloop->v;
-  }
-
-  *poly = p;
-
-  return true;
-}
-
-static bool find_internal_spring_target_vertex(BVHTreeFromMesh *treedata,
-											   uint v_idx,
-											   RNG *rng,
-											   float max_length,
-											   float max_diversion,
-											   bool check_normal,
-											   uint *r_tar_v_idx)
-{
-  float co[3], no[3], new_co[3];
-  float radius;
-
-  copy_v3_v3(co, treedata->vert[v_idx].co);
-  normal_short_to_float_v3(no, treedata->vert[v_idx].no);
-  negate_v3(no);
-
-  float vec_len = sin(max_diversion);
-  float offset[3];
-
-  offset[0] = 0.5f - BLI_rng_get_float(rng);
-  offset[1] = 0.5f - BLI_rng_get_float(rng);
-  offset[2] = 0.5f - BLI_rng_get_float(rng);
-
-  normalize_v3(offset);
-  mul_v3_fl(offset, vec_len);
-  add_v3_v3(no, offset);
-  normalize_v3(no);
-
-  /* Nudge the start point so we do not hit it with the ray. */
-  copy_v3_v3(new_co, no);
-  mul_v3_fl(new_co, FLT_EPSILON);
-  add_v3_v3(new_co, co);
-
-  radius = 0.0f;
-  if (max_length == 0.0f) {
-	max_length = FLT_MAX;
-  }
-
-  BVHTreeRayHit rayhit = {0};
-  rayhit.index = -1;
-  rayhit.dist = max_length;
-
-  BLI_bvhtree_ray_cast(
-	  treedata->tree, new_co, no, radius, &rayhit, treedata->raycast_callback, treedata);
-
-  uint vert_idx = -1;
-  const MLoop *mloop = treedata->loop;
-  const MLoopTri *lt = NULL;
-
-  if (rayhit.index != -1 && rayhit.dist <= max_length) {
-	if (check_normal && dot_v3v3(rayhit.no, no) < 0.0f) {
-	  /* We hit a point that points in the same direction as our starting point. */
-	  return false;
-	}
-
-	float min_len = FLT_MAX;
-	lt = &treedata->looptri[rayhit.index];
-
-	for (int i = 0; i < 3; i++) {
-	  uint tmp_vert_idx = mloop[lt->tri[i]].v;
-	  if (tmp_vert_idx == v_idx) {
-		/* We managed to hit ourselves. */
+	if (!spring)
+	{
 		return false;
-	  }
-
-	  float len = len_v3v3(co, rayhit.co);
-	  if (len < min_len) {
-		min_len = len;
-		vert_idx = tmp_vert_idx;
-	  }
 	}
 
-	*r_tar_v_idx = vert_idx;
-	return true;
-  }
+	spring_verts_ordered_set(spring, mloop[mpoly[i].loopstart + j].v, mloop[mpoly[i].loopstart + k].v);
 
-  return false;
+	const float shrink_factor = cloth_shrink_factor(clmd, cloth->verts, spring->ij, spring->kl);
+	spring->restlen = len_v3v3(cloth->verts[spring->kl].xrest, cloth->verts[spring->ij].xrest) * shrink_factor;
+	spring->type |= CLOTH_SPRING_TYPE_SHEAR;
+	spring->lin_stiffness = (cloth->verts[spring->kl].shear_stiff + cloth->verts[spring->ij].shear_stiff) / 2.0f;
+
+	if (edgelist)
+	{
+		BLI_linklist_append(&edgelist[spring->ij], spring);
+		BLI_linklist_append(&edgelist[spring->kl], spring);
+	}
+
+	/* Bending specific properties. */
+	if (clmd->sim_parms->bending_model == CLOTH_BENDING_ANGULAR)
+	{
+		spring->type |= CLOTH_SPRING_TYPE_BENDING;
+
+		spring->la = k - j + 1;
+		spring->lb = mpoly[i].totloop - k + j + 1;
+
+		spring->pa = static_cast<int*>(MEM_lockfree_mallocN(sizeof(*spring->pa) * spring->la, "spring poly"));
+		if (!spring->pa)
+		{
+			return false;
+		}
+
+		spring->pb = static_cast<int*>(MEM_lockfree_mallocN(sizeof(*spring->pb) * spring->lb, "spring poly"));
+		if (!spring->pb)
+		{
+			return false;
+		}
+
+		const MLoop* tmp_loop = mloop + mpoly[i].loopstart;
+
+		for (x = 0; x < spring->la; x++)
+		{
+			spring->pa[x] = tmp_loop[j + x].v;
+		}
+
+		for (x = 0; x <= j; x++)
+		{
+			spring->pb[x] = tmp_loop[x].v;
+		}
+
+		for (int y = k; y < mpoly[i].totloop; x++, y++)
+		{
+			spring->pb[x] = tmp_loop[y].v;
+		}
+		spring->mn = -1;
+
+		spring->restang = cloth_spring_angle(cloth->verts, spring->ij, spring->kl, spring->pa, spring->pb, spring->la, spring->lb);
+		spring->ang_stiffness = (cloth->verts[spring->ij].bend_stiff + cloth->verts[spring->kl].bend_stiff) / 2.0f;
+	}
+
+	BLI_linklist_prepend(&cloth->springs, spring);
+
+	return true;
 }
 
-static ModifierData* modifier_allocate_and_init(int type)
+bool cloth_bend_set_poly_vert_array(int** poly, const int len, const MLoop* mloop)
+{
+	const auto p = (int*)MEM_lockfree_mallocN(sizeof(int) * len, "spring poly");
+
+	if (!p)
+	{
+		return false;
+	}
+
+	for (int i = 0; i < len; i++, mloop++)
+	{
+		p[i] = mloop->v;
+	}
+
+	*poly = p;
+
+	return true;
+}
+
+static bool find_internal_spring_target_vertex(BVHTreeFromMesh* treedata,
+                                               const uint v_idx,
+                                               RNG* rng,
+                                               float max_length,
+                                               const float max_diversion,
+                                               const bool check_normal,
+                                               uint* r_tar_v_idx)
+{
+	float co[3], no[3], new_co[3];
+	float radius;
+
+	copy_v3_v3(co, treedata->vert[v_idx].co);
+	normal_short_to_float_v3(no, treedata->vert[v_idx].no);
+	negate_v3(no);
+
+	const float vec_len = sin(max_diversion);
+	float offset[3];
+
+	offset[0] = 0.5f - BLI_rng_get_float(rng);
+	offset[1] = 0.5f - BLI_rng_get_float(rng);
+	offset[2] = 0.5f - BLI_rng_get_float(rng);
+
+	normalize_v3(offset);
+	mul_v3_fl(offset, vec_len);
+	add_v3_v3(no, offset);
+	normalize_v3(no);
+
+	/* Nudge the start point so we do not hit it with the ray. */
+	copy_v3_v3(new_co, no);
+	mul_v3_fl(new_co, FLT_EPSILON);
+	add_v3_v3(new_co, co);
+
+	radius = 0.0f;
+	if (max_length == 0.0f)
+	{
+		max_length = FLT_MAX;
+	}
+
+	BVHTreeRayHit rayhit = {0};
+	rayhit.index = -1;
+	rayhit.dist = max_length;
+
+	BLI_bvhtree_ray_cast(
+		treedata->tree, new_co, no, radius, &rayhit, treedata->raycast_callback, treedata);
+
+	int vert_idx = -1;
+	const MLoop* mloop = treedata->loop;
+	const MLoopTri* lt = nullptr;
+
+	if (rayhit.index != -1 && rayhit.dist <= max_length)
+	{
+		if (check_normal && dot_v3v3(rayhit.no, no) < 0.0f)
+		{
+			/* We hit a point that points in the same direction as our starting point. */
+			return false;
+		}
+
+		float min_len = FLT_MAX;
+		lt = &treedata->looptri[rayhit.index];
+
+		for (const unsigned int i : lt->tri)
+		{
+			const uint tmp_vert_idx = mloop[i].v;
+			if (tmp_vert_idx == v_idx)
+			{
+				/* We managed to hit ourselves. */
+				return false;
+			}
+
+			const float len = len_v3v3(co, rayhit.co);
+			if (len < min_len)
+			{
+				min_len = len;
+				vert_idx = tmp_vert_idx;
+			}
+		}
+
+		*r_tar_v_idx = vert_idx;
+		return true;
+	}
+
+	return false;
+}
+
+__host__ __device__ static ModifierData* modifier_allocate_and_init(int type)
 {
 	BKE_modifier_init();
 	const ModifierTypeInfo* mti = BKE_modifier_get_info((ModifierType)type);
-	auto md = static_cast<ModifierData*>(MEM_callocN(mti->structSize, mti->structName));
+	const auto md = static_cast<ModifierData*>(MEM_lockfree_callocN(mti->structSize, mti->structName));
 
 	/* NOTE: this name must be made unique later. */
 	strncpy(md->name, mti->name, sizeof(md->name));
@@ -1119,12 +1163,12 @@ static ModifierData* modifier_allocate_and_init(int type)
 	md->flag = eModifierFlag_OverrideLibrary_Local;
 	md->ui_expand_flag = 1; /* Only open the main panel at the beginning, not the sub-panels. */
 
-	if (mti->flags & eModifierTypeFlag_EnableInEditmode) 
+	if (mti->flags & eModifierTypeFlag_EnableInEditmode)
 	{
 		md->mode |= eModifierMode_Editmode;
 	}
 
-	if (mti->initData) 
+	if (mti->initData)
 	{
 		mti->initData(md);
 	}
@@ -1132,30 +1176,26 @@ static ModifierData* modifier_allocate_and_init(int type)
 	return md;
 }
 
-bool cloth_build_springs(ClothModifierData *clmd, Mesh *mesh)
+__host__ bool cloth_build_springs(ClothModifierData* clmd, Mesh* mesh)
 {
-	Cloth *cloth = clmd->clothObject;
+	Cloth* cloth = clmd->clothObject;
 	ClothSpring *spring = nullptr, *tspring = nullptr, *tspring2 = nullptr;
 	uint struct_springs = 0, shear_springs = 0, bend_springs = 0, struct_springs_real = 0;
-	uint mvert_num = (uint)mesh->totvert;
-	uint numedges = (uint)mesh->totedge;
-	uint numpolys = (uint)mesh->totpoly;
+	const uint mvert_num = static_cast<uint>(mesh->totvert);
+	const uint numedges = static_cast<uint>(mesh->totedge);
+	const uint numpolys = static_cast<uint>(mesh->totpoly);
 	float shrink_factor;
-	const MEdge *medge = mesh->medge;
-	const MPoly *mpoly = mesh->mpoly;
-	const MLoop *mloop = mesh->mloop;
+	const MEdge* medge = mesh->medge;
+	const MPoly* mpoly = mesh->mpoly;
+	const MLoop* mloop = mesh->mloop;
 	int index2 = 0; /* our second vertex index */
-	LinkNodePair *edgelist = nullptr;
-	EdgeSet *edgeset = nullptr;
-	LinkNode *search = nullptr, *search2 = nullptr;
-	BendSpringRef *spring_ref = nullptr;
-
-	printf("\ntotvert = %d", mesh->totvert);
-	printf("\ntotedge = %d", mesh->totedge);
-	printf("\ntotpoly = %d\n", mesh->totpoly);
+	LinkNodePair* edgelist = nullptr;
+	EdgeSet* edgeset = nullptr;
+	const LinkNode *search = nullptr, *search2 = nullptr;
+	BendSpringRef* spring_ref = nullptr;
 
 	/* error handling */
-	if (numedges == 0) 
+	if (numedges == 0)
 	{
 		printf("Error handling\n");
 		return false;
@@ -1166,59 +1206,51 @@ bool cloth_build_springs(ClothModifierData *clmd, Mesh *mesh)
 	BLI_assert(cloth->springs == nullptr);
 	BLI_assert(cloth->edgeset == nullptr);
 
-	printf("Assert is ok\n");
+	//printf("Assert is ok\n");
 
 	cloth->springs = nullptr;
 	cloth->edgeset = nullptr;
 
-	if (clmd->sim_parms->bending_model == CLOTH_BENDING_ANGULAR) 
+	if (clmd->sim_parms->bending_model == CLOTH_BENDING_ANGULAR)
 	{
-		spring_ref = (BendSpringRef*)MEM_callocN(sizeof(*spring_ref) * numedges, "temp bend spring reference");
+		spring_ref = static_cast<BendSpringRef*>(MEM_lockfree_callocN(sizeof(BendSpringRef) * numedges, "temp bend spring reference"));
 
-		if (!spring_ref) 
+		if (!spring_ref)
 		{
 			return false;
 		}
 	}
-	else 
+	else
 	{
-		edgelist = (LinkNodePair*)MEM_callocN(sizeof(*edgelist) * mvert_num, "cloth_edgelist_alloc");
+		edgelist = static_cast<LinkNodePair*>(MEM_lockfree_callocN(sizeof(LinkNodePair) * mvert_num, "cloth_edgelist_alloc"));
 
-		if (!edgelist) 
+		if (!edgelist)
 		{
 			return false;
 		}
 	}
 
-	printf("\MEM_callocN is DONE");
+	const bool use_internal_springs = (clmd->sim_parms->flags & CLOTH_SIMSETTINGS_FLAG_INTERNAL_SPRINGS);
 
-	bool use_internal_springs = (clmd->sim_parms->flags & CLOTH_SIMSETTINGS_FLAG_INTERNAL_SPRINGS);
-
-	if (use_internal_springs && numpolys > 0) 
+	if (use_internal_springs && numpolys > 0)
 	{
-		BVHTreeFromMesh treedata = {NULL};
+		BVHTreeFromMesh treedata = {nullptr};
 		uint tar_v_idx = 0;
-		Mesh *tmp_mesh = nullptr;
-		RNG *rng = nullptr;
+		RNG* rng = nullptr;
 
-		/* If using the rest shape key, it's necessary to make a copy of the mesh. */
-		//if (clmd->sim_parms->shapekey_rest && !(clmd->sim_parms->flags & CLOTH_SIMSETTINGS_FLAG_DYNAMIC_BASEMESH)) 
-		//{
-		//	tmp_mesh = cloth_make_rest_mesh(clmd, mesh);
-		//	//BKE_mesh_calc_normals(tmp_mesh);
-		//}
-
-		auto existing_vert_pairs = BLI_edgeset_new("cloth_sewing_edges_graph");
-		BKE_bvhtree_from_mesh_get(&treedata, tmp_mesh ? tmp_mesh : mesh, BVHTREE_FROM_LOOPTRI, 2);
+		const auto existing_vert_pairs = BLI_edgeset_new("cloth_sewing_edges_graph");
+		BKE_bvhtree_from_mesh_get(&treedata, mesh, BVHTREE_FROM_LOOPTRI, 2);
 		rng = BLI_rng_new_srandom(0);
+		BKE_mesh_calc_normals(mesh);
 
-		for (int i = 0; i < mvert_num; i++) 
+		for (uint i = 0; i < mvert_num; i++)
 		{
 			if (find_internal_spring_target_vertex(&treedata, i, rng,
-					clmd->sim_parms->internal_spring_max_length, clmd->sim_parms->internal_spring_max_diversion,
-					(clmd->sim_parms->flags & CLOTH_SIMSETTINGS_FLAG_INTERNAL_SPRINGS_NORMAL), &tar_v_idx)) 
+			                                       clmd->sim_parms->internal_spring_max_length,
+			                                       clmd->sim_parms->internal_spring_max_diversion,
+			                                       (clmd->sim_parms->flags & CLOTH_SIMSETTINGS_FLAG_INTERNAL_SPRINGS_NORMAL), &tar_v_idx))
 			{
-				if (BLI_edgeset_haskey(existing_vert_pairs, i, tar_v_idx)) 
+				if (BLI_edgeset_haskey(existing_vert_pairs, i, tar_v_idx))
 				{
 					/* We have already created a spring between these verts! */
 					continue;
@@ -1226,9 +1258,9 @@ bool cloth_build_springs(ClothModifierData *clmd, Mesh *mesh)
 
 				BLI_edgeset_insert(existing_vert_pairs, i, tar_v_idx);
 
-				spring = (ClothSpring *)MEM_callocN(sizeof(ClothSpring), "cloth spring");
+				spring = static_cast<ClothSpring*>(MEM_lockfree_callocN(sizeof(ClothSpring), "cloth spring"));
 
-				if (spring) 
+				if (spring)
 				{
 					spring_verts_ordered_set(spring, i, tar_v_idx);
 
@@ -1240,40 +1272,34 @@ bool cloth_build_springs(ClothModifierData *clmd, Mesh *mesh)
 
 					BLI_linklist_prepend(&cloth->springs, spring);
 
-					if (spring_ref) 
+					if (spring_ref)
 					{
 						spring_ref[i].spring = spring;
 					}
 				}
-				else 
+				else
 				{
 					cloth_free_errorsprings(cloth, edgelist, spring_ref);
 					BLI_edgeset_free(existing_vert_pairs);
 					free_bvhtree_from_mesh(&treedata);
-					if (tmp_mesh) 
-					{
-						BKE_id_free(NULL, &tmp_mesh->id);
-					}
+
 					return false;
 				}
 			}
 		}
 		BLI_edgeset_free(existing_vert_pairs);
 		free_bvhtree_from_mesh(&treedata);
-		if (tmp_mesh) 
-		{
-			BKE_id_free(NULL, &tmp_mesh->id);
-		}
+
 		BLI_rng_free(rng);
 	}
 
 	clmd->sim_parms->avg_spring_len = 0.0f;
-	for (int i = 0; i < mvert_num; i++) 
+	for (uint i = 0; i < mvert_num; i++)
 	{
 		cloth->verts[i].avg_spring_len = 0.0f;
 	}
 
-	if (clmd->sim_parms->flags & CLOTH_SIMSETTINGS_FLAG_SEW) 
+	if (clmd->sim_parms->flags & CLOTH_SIMSETTINGS_FLAG_SEW)
 	{
 		/* cloth->sew_edge_graph should not exist before this */
 		BLI_assert(cloth->sew_edge_graph == NULL);
@@ -1281,14 +1307,14 @@ bool cloth_build_springs(ClothModifierData *clmd, Mesh *mesh)
 	}
 
 	/* Structural springs. */
-	for (int i = 0; i < numedges; i++) 
+	for (uint i = 0; i < numedges; i++)
 	{
-		spring = (ClothSpring *)MEM_callocN(sizeof(ClothSpring), "cloth spring");
+		spring = static_cast<ClothSpring*>(MEM_lockfree_callocN(sizeof(ClothSpring), "cloth spring"));
 
-		if (spring) 
+		if (spring)
 		{
 			spring_verts_ordered_set(spring, medge[i].v1, medge[i].v2);
-			if (clmd->sim_parms->flags & CLOTH_SIMSETTINGS_FLAG_SEW && medge[i].flag & ME_LOOSEEDGE) 
+			if (clmd->sim_parms->flags & CLOTH_SIMSETTINGS_FLAG_SEW && medge[i].flag & ME_LOOSEEDGE)
 			{
 				/* handle sewing (loose edges will be pulled together) */
 				spring->restlen = 0.0f;
@@ -1297,15 +1323,11 @@ bool cloth_build_springs(ClothModifierData *clmd, Mesh *mesh)
 
 				BLI_edgeset_insert(cloth->sew_edge_graph, medge[i].v1, medge[i].v2);
 			}
-			else 
+			else
 			{
 				shrink_factor = cloth_shrink_factor(clmd, cloth->verts, spring->ij, spring->kl);
-				spring->restlen = len_v3v3(cloth->verts[spring->kl].xrest,
-											cloth->verts[spring->ij].xrest) *
-									shrink_factor;
-				spring->lin_stiffness = (cloth->verts[spring->kl].struct_stiff +
-											cloth->verts[spring->ij].struct_stiff) /
-										2.0f;
+				spring->restlen = len_v3v3(cloth->verts[spring->kl].xrest, cloth->verts[spring->ij].xrest) * shrink_factor;
+				spring->lin_stiffness = (cloth->verts[spring->kl].struct_stiff + cloth->verts[spring->ij].struct_stiff) / 2.0f;
 				spring->type = CLOTH_SPRING_TYPE_STRUCTURAL;
 
 				clmd->sim_parms->avg_spring_len += spring->restlen;
@@ -1321,193 +1343,192 @@ bool cloth_build_springs(ClothModifierData *clmd, Mesh *mesh)
 
 			BLI_linklist_prepend(&cloth->springs, spring);
 
-			if (spring_ref) 
+			if (spring_ref)
 			{
 				spring_ref[i].spring = spring;
 			}
 		}
-		else 
+		else
 		{
 			cloth_free_errorsprings(cloth, edgelist, spring_ref);
 			return false;
 		}
 	}
 
-	if (struct_springs_real > 0) 
+	if (struct_springs_real > 0)
 	{
-		clmd->sim_parms->avg_spring_len /= struct_springs_real;
+		clmd->sim_parms->avg_spring_len /= static_cast<float>(struct_springs_real);
 	}
 
-	for (int i = 0; i < mvert_num; i++) 
+	for (uint i = 0; i < mvert_num; i++)
 	{
-		if (cloth->verts[i].spring_count > 0) 
+		if (cloth->verts[i].spring_count > 0)
 		{
-			cloth->verts[i].avg_spring_len = cloth->verts[i].avg_spring_len * 0.49f / ((float)cloth->verts[i].spring_count);
+			cloth->verts[i].avg_spring_len = cloth->verts[i].avg_spring_len * 0.49f / static_cast<float>(cloth->verts[i].spring_count);
 		}
 	}
 
 	edgeset = BLI_edgeset_new_ex(__func__, numedges);
 	cloth->edgeset = edgeset;
 
-	if (numpolys) 
+	if (numpolys)
 	{
-		for (int i = 0; i < numpolys; i++) 
+		for (uint i = 0; i < numpolys; i++)
 		{
 			/* Shear springs. */
 			/* Triangle faces already have shear springs due to structural geometry. */
-			if (mpoly[i].totloop > 3) 
+			if (mpoly[i].totloop > 3)
 			{
-				for (int j = 1; j < mpoly[i].totloop - 1; j++) 
+				for (int j = 1; j < mpoly[i].totloop - 1; j++)
 				{
-					if (j > 1) 
+					if (j > 1)
 					{
-						if (cloth_add_shear_bend_spring(clmd, edgelist, mloop, mpoly, i, 0, j)) 
+						if (cloth_add_shear_bend_spring(clmd, edgelist, mloop, mpoly, i, 0, j))
 						{
 							shear_springs++;
 
-							if (clmd->sim_parms->bending_model == CLOTH_BENDING_ANGULAR) 
+							if (clmd->sim_parms->bending_model == CLOTH_BENDING_ANGULAR)
 							{
-							bend_springs++;
+								bend_springs++;
 							}
 						}
-						else 
+						else
 						{
 							cloth_free_errorsprings(cloth, edgelist, spring_ref);
 							return false;
 						}
 					}
 
-				for (int k = j + 2; k < mpoly[i].totloop; k++) 
+					for (int k = j + 2; k < mpoly[i].totloop; k++)
 					{
-					if (cloth_add_shear_bend_spring(clmd, edgelist, mloop, mpoly, i, j, k)) 
-					{
-						shear_springs++;
-
-						if (clmd->sim_parms->bending_model == CLOTH_BENDING_ANGULAR) 
+						if (cloth_add_shear_bend_spring(clmd, edgelist, mloop, mpoly, i, j, k))
 						{
-							bend_springs++;
+							shear_springs++;
+
+							if (clmd->sim_parms->bending_model == CLOTH_BENDING_ANGULAR)
+							{
+								bend_springs++;
+							}
+						}
+						else
+						{
+							cloth_free_errorsprings(cloth, edgelist, spring_ref);
+							return false;
 						}
 					}
-					else 
+				}
+			}
+
+			/* Angular bending springs along struct springs. */
+			if (clmd->sim_parms->bending_model == CLOTH_BENDING_ANGULAR)
+			{
+				const MLoop* ml = mloop + mpoly[i].loopstart;
+
+				for (int j = 0; j < mpoly[i].totloop; j++, ml++)
+				{
+					BendSpringRef* curr_ref = &spring_ref[ml->e];
+					curr_ref->polys++;
+
+					/* First poly found for this edge, store poly index. */
+					if (curr_ref->polys == 1)
 					{
-						cloth_free_errorsprings(cloth, edgelist, spring_ref);
-						return false;
+						curr_ref->index = i;
+					}
+					/* Second poly found for this edge, add bending data. */
+					else if (curr_ref->polys == 2)
+					{
+						spring = curr_ref->spring;
+
+						spring->type |= CLOTH_SPRING_TYPE_BENDING;
+
+						spring->la = mpoly[curr_ref->index].totloop;
+						spring->lb = mpoly[i].totloop;
+
+						if (!cloth_bend_set_poly_vert_array(&spring->pa, spring->la, &mloop[mpoly[curr_ref->index].loopstart]) ||
+							!cloth_bend_set_poly_vert_array(&spring->pb, spring->lb, &mloop[mpoly[i].loopstart]))
+						{
+							cloth_free_errorsprings(cloth, edgelist, spring_ref);
+							return false;
+						}
+
+						spring->mn = ml->e;
+
+						spring->restang = cloth_spring_angle(cloth->verts,
+						                                     spring->ij,
+						                                     spring->kl,
+						                                     spring->pa,
+						                                     spring->pb,
+						                                     spring->la,
+						                                     spring->lb);
+
+						spring->ang_stiffness = (cloth->verts[spring->ij].bend_stiff + cloth->verts[spring->kl].bend_stiff) / 2.0f;
+
+						bend_springs++;
+					}
+					/* Third poly found for this edge, remove bending data. */
+					else if (curr_ref->polys == 3)
+					{
+						spring = curr_ref->spring;
+
+						spring->type &= ~CLOTH_SPRING_TYPE_BENDING;
+						MEM_lockfree_freeN(spring->pa);
+						MEM_lockfree_freeN(spring->pb);
+						spring->pa = nullptr;
+						spring->pb = nullptr;
+
+						bend_springs--;
 					}
 				}
 			}
 		}
 
-		/* Angular bending springs along struct springs. */
-		if (clmd->sim_parms->bending_model == CLOTH_BENDING_ANGULAR) 
+		/* Linear bending springs. */
+		if (clmd->sim_parms->bending_model == CLOTH_BENDING_LINEAR)
 		{
-			const MLoop *ml = mloop + mpoly[i].loopstart;
+			search2 = cloth->springs;
 
-			for (int j = 0; j < mpoly[i].totloop; j++, ml++) 
+			for (uint i = struct_springs; i < struct_springs + shear_springs; i++)
 			{
-				BendSpringRef *curr_ref = &spring_ref[ml->e];
-				curr_ref->polys++;
-
-				/* First poly found for this edge, store poly index. */
-				if (curr_ref->polys == 1) 
+				if (!search2)
 				{
-					curr_ref->index = i;
+					break;
 				}
-				/* Second poly found for this edge, add bending data. */
-				else if (curr_ref->polys == 2) 
+
+				tspring2 = static_cast<ClothSpring*>(search2->link);
+				search = edgelist[tspring2->kl].list;
+
+				while (search)
 				{
-					spring = curr_ref->spring;
+					tspring = static_cast<ClothSpring*>(search->link);
+					index2 = ((tspring->ij == tspring2->kl) ? (tspring->kl) : (tspring->ij));
 
-					spring->type |= CLOTH_SPRING_TYPE_BENDING;
-
-					spring->la = mpoly[curr_ref->index].totloop;
-					spring->lb = mpoly[i].totloop;
-
-					if (!cloth_bend_set_poly_vert_array(&spring->pa, spring->la, &mloop[mpoly[curr_ref->index].loopstart]) ||
-						!cloth_bend_set_poly_vert_array(&spring->pb, spring->lb, &mloop[mpoly[i].loopstart])) 
+					/* Check for existing spring. */
+					/* Check also if startpoint is equal to endpoint. */
+					if ((index2 != tspring2->ij) && !BLI_edgeset_haskey(edgeset, tspring2->ij, index2))
 					{
-						cloth_free_errorsprings(cloth, edgelist, spring_ref);
-						return false;
+						spring = static_cast<ClothSpring*>(MEM_lockfree_callocN(sizeof(ClothSpring), "cloth spring"));
+
+						if (!spring)
+						{
+							cloth_free_errorsprings(cloth, edgelist, spring_ref);
+							return false;
+						}
+
+						spring_verts_ordered_set(spring, tspring2->ij, index2);
+						shrink_factor = cloth_shrink_factor(clmd, cloth->verts, spring->ij, spring->kl);
+						spring->restlen = len_v3v3(cloth->verts[spring->kl].xrest,  cloth->verts[spring->ij].xrest) * shrink_factor;
+						spring->type = CLOTH_SPRING_TYPE_BENDING;
+						spring->lin_stiffness = (cloth->verts[spring->kl].bend_stiff + cloth->verts[spring->ij].bend_stiff) / 2.0f;
+						BLI_edgeset_insert(edgeset, spring->ij, spring->kl);
+						bend_springs++;
+
+						BLI_linklist_prepend(&cloth->springs, spring);
 					}
 
-					spring->mn = ml->e;
-
-					spring->restang = cloth_spring_angle(cloth->verts,
-															spring->ij, spring->kl,
-															spring->pa, spring->pb,
-															spring->la, spring->lb);
-
-					spring->ang_stiffness = (cloth->verts[spring->ij].bend_stiff + cloth->verts[spring->kl].bend_stiff) / 2.0f;
-
-					bend_springs++;
-				}
-				/* Third poly found for this edge, remove bending data. */
-				else if (curr_ref->polys == 3) 
-				{
-					spring = curr_ref->spring;
-
-					spring->type &= ~CLOTH_SPRING_TYPE_BENDING;
-					MEM_freeN(spring->pa);
-					MEM_freeN(spring->pb);
-					spring->pa = NULL;
-					spring->pb = NULL;
-
-					bend_springs--;
-				}
-			}
-		}
-	}
-
-	/* Linear bending springs. */
-	if (clmd->sim_parms->bending_model == CLOTH_BENDING_LINEAR) 
-	{
-		search2 = cloth->springs;
-
-		for (int i = struct_springs; i < struct_springs + shear_springs; i++) 
-		{
-			if (!search2) 
-			{
-				break;
-			}
-
-			tspring2 = (ClothSpring*)search2->link;
-			search = edgelist[tspring2->kl].list;
-
-			while (search) 
-			{
-				tspring = (ClothSpring*)search->link;
-				index2 = ((tspring->ij == tspring2->kl) ? (tspring->kl) : (tspring->ij));
-
-				/* Check for existing spring. */
-				/* Check also if startpoint is equal to endpoint. */
-				if ((index2 != tspring2->ij) && !BLI_edgeset_haskey(edgeset, tspring2->ij, index2)) 
-				{
-					spring = (ClothSpring *)MEM_callocN(sizeof(ClothSpring), "cloth spring");
-
-					if (!spring) 
-					{
-						cloth_free_errorsprings(cloth, edgelist, spring_ref);
-						return false;
-					}
-
-					spring_verts_ordered_set(spring, tspring2->ij, index2);
-					shrink_factor = cloth_shrink_factor(clmd, cloth->verts, spring->ij, spring->kl);
-					spring->restlen = len_v3v3(cloth->verts[spring->kl].xrest,
-												cloth->verts[spring->ij].xrest) *
-										shrink_factor;
-					spring->type = CLOTH_SPRING_TYPE_BENDING;
-					spring->lin_stiffness = (cloth->verts[spring->kl].bend_stiff +
-												cloth->verts[spring->ij].bend_stiff) /
-											2.0f;
-					BLI_edgeset_insert(edgeset, spring->ij, spring->kl);
-					bend_springs++;
-
-					BLI_linklist_prepend(&cloth->springs, spring);
+					search = search->next;
 				}
 
-				search = search->next;
-			}
-
-			search2 = search2->next;
+				search2 = search2->next;
 			}
 		}
 	}
@@ -1524,12 +1545,12 @@ bool cloth_build_springs(ClothModifierData *clmd, Mesh *mesh)
 		search2 = search->next;
 		while (search && search2) 
 		{
-			tspring = (ClothSpring*)search->link;
-			tspring2 = (ClothSpring*)search2->link;
+			tspring = static_cast<ClothSpring*>(search->link);
+			tspring2 = static_cast<ClothSpring*>(search2->link);
 
 			if (tspring->ij == tspring2->kl) 
 			{
-				spring = (ClothSpring*)MEM_callocN(sizeof(ClothSpring), "cloth spring");
+				spring = static_cast<ClothSpring*>(MEM_lockfree_callocN(sizeof(ClothSpring), "cloth spring"));
 
 				if (!spring) 
 				{
@@ -1539,8 +1560,7 @@ bool cloth_build_springs(ClothModifierData *clmd, Mesh *mesh)
 
 				spring->ij = tspring2->ij;
 				spring->kl = tspring->kl;
-				spring->restlen = len_v3v3(cloth->verts[spring->kl].xrest,
-					cloth->verts[spring->ij].xrest);
+				spring->restlen = len_v3v3(cloth->verts[spring->kl].xrest, cloth->verts[spring->ij].xrest);
 				spring->type = CLOTH_SPRING_TYPE_BENDING;
 				spring->lin_stiffness = (cloth->verts[spring->kl].bend_stiff + cloth->verts[spring->ij].bend_stiff) / 2.0f;
 				bend_springs++;
@@ -1552,20 +1572,22 @@ bool cloth_build_springs(ClothModifierData *clmd, Mesh *mesh)
 			search2 = search2->next;
 		}
 
-		cloth_hair_update_bending_rest_targets(clmd);
+		//cloth_hair_update_bending_rest_targets(clmd);
 	}
 
 	/* note: the edges may already exist so run reinsert */
 
 	/* insert other near springs in edgeset AFTER bending springs are calculated (for selfcolls) */
-	for (int i = 0; i < numedges; i++) 
-	{ /* struct springs */
+	for (uint i = 0; i < numedges; i++)
+	{
+		/* struct springs */
 		BLI_edgeset_add(edgeset, medge[i].v1, medge[i].v2);
 	}
 
-	for (int i = 0; i < numpolys; i++) 
-	{ /* edge springs */
-		if (mpoly[i].totloop == 4) 
+	for (uint i = 0; i < numpolys; i++)
+	{
+		/* edge springs */
+		if (mpoly[i].totloop == 4)
 		{
 			BLI_edgeset_add(edgeset, mloop[mpoly[i].loopstart + 0].v, mloop[mpoly[i].loopstart + 2].v);
 			BLI_edgeset_add(edgeset, mloop[mpoly[i].loopstart + 1].v, mloop[mpoly[i].loopstart + 3].v);
@@ -1580,29 +1602,30 @@ bool cloth_build_springs(ClothModifierData *clmd, Mesh *mesh)
 	return true;
 }
 
-bool cloth_from_object(ClothModifierData* clmd, Mesh* mesh)
+__host__ bool cloth_from_object(ClothModifierData* clmd, Mesh* mesh)
 {
 	int i = 0;
-	MVert* mvert = NULL;
-	ClothVertex* verts = NULL;
-	const float(*shapekey_rest)[3] = NULL;
-	const float tnull[3] = { 0, 0, 0 };
+	float(*shapekey_rest)[3] = nullptr;
+	constexpr float tnull[3] = {0, 0, 0};
 	clmd->clothObject = nullptr;
+	clmd->coll_parms = nullptr;
+
+	//auto tmp = clmd->coll_parms->epsilon;
 
 	/* If we have a clothObject, free it. */
-	//if (clmd->clothObject != NULL) 
-	//{
-	//	cloth_free_modifier(clmd);
-	//}
-
-	/* Allocate a new cloth object. */
-	clmd->clothObject = (Cloth*)MEM_callocN(sizeof(Cloth), "cloth");
 	if (clmd->clothObject) 
 	{
-		//clmd->clothObject->old_solver_type = 255;
-		clmd->clothObject->edgeset = NULL;
+		cloth_free_modifier(clmd);
 	}
-	else 
+
+	/* Allocate a new cloth object. */
+	clmd->clothObject = static_cast<Cloth*>(MEM_lockfree_callocN(sizeof(Cloth), "cloth"));
+	if (clmd->clothObject)
+	{
+		//clmd->clothObject->old_solver_type = 255;
+		clmd->clothObject->edgeset = nullptr;
+	}
+	else
 	{
 		printf("Out of memory on allocating clmd->clothObject");
 		//BKE_modifier_set_error(ob, &(clmd->modifier), "Out of memory on allocating clmd->clothObject");
@@ -1610,7 +1633,7 @@ bool cloth_from_object(ClothModifierData* clmd, Mesh* mesh)
 	}
 
 	/* mesh input objects need Mesh */
-	if (!mesh) 
+	if (!mesh)
 	{
 		return false;
 	}
@@ -1619,58 +1642,45 @@ bool cloth_from_object(ClothModifierData* clmd, Mesh* mesh)
 
 	if (!clmd->sim_parms)
 	{
-		clmd->sim_parms = (ClothSimSettings*)_DNA_struct_default_alloc_impl((const uint8_t*)DNA_default_table[_SDNA_TYPE_ClothSimSettings], sizeof(ClothSimSettings), "");
+		clmd->sim_parms = reinterpret_cast<ClothSimSettings*>(_DNA_struct_default_alloc_impl(static_cast<const uint8_t*>(DNA_default_table[_SDNA_TYPE_ClothSimSettings]), sizeof(ClothSimSettings), ""));
 	}
 
 	if (!clmd->coll_parms)
 	{
-		clmd->coll_parms = (ClothCollSettings*)_DNA_struct_default_alloc_impl((const uint8_t*)DNA_default_table[_SDNA_TYPE_ClothCollSettings], sizeof(ClothCollSettings), "");
+		clmd->coll_parms = reinterpret_cast<ClothCollSettings*>(_DNA_struct_default_alloc_impl(static_cast<const uint8_t*>(DNA_default_table[_SDNA_TYPE_ClothCollSettings]), sizeof(ClothCollSettings), ""));
 	}
 
+
 	/* create springs */
-	clmd->clothObject->springs = NULL;
-	clmd->clothObject->numsprings = -1;
+	clmd->clothObject->springs = nullptr;
+	clmd->clothObject->numsprings = 0;
 
-	clmd->clothObject->sew_edge_graph = NULL;
+	clmd->clothObject->sew_edge_graph = nullptr;
 
-	//if (clmd->sim_parms->shapekey_rest && !(clmd->sim_parms->flags & CLOTH_SIMSETTINGS_FLAG_DYNAMIC_BASEMESH)) 
-	//{
-	//	shapekey_rest = CustomData_get_layer(&mesh->vdata, CD_CLOTH_ORCO);
-	//}
+	if (clmd->sim_parms->shapekey_rest && !(clmd->sim_parms->flags & CLOTH_SIMSETTINGS_FLAG_DYNAMIC_BASEMESH)) 
+	{
+		shapekey_rest = static_cast<float(*)[3]>(CustomData_get_layer(&mesh->vdata, CD_CLOTH_ORCO));
+	}
 
-	mvert = mesh->mvert;
+	const MVert* mvert = mesh->mvert;
 
-	verts = clmd->clothObject->verts;
+	ClothVertex* verts = clmd->clothObject->verts;
 
 	/* set initial values */
-	for (i = 0; i < mesh->totvert; i++, verts++) 
+	for (i = 0; i < mesh->totvert; i++, verts++)
 	{
-		/*if (first) 
-		{
-			copy_v3_v3(verts->x, mvert[i].co);
-
-			mul_m4_v3(ob->obmat, verts->x);
-
-			if (shapekey_rest) 
-			{
-				copy_v3_v3(verts->xrest, shapekey_rest[i]);
-				mul_m4_v3(ob->obmat, verts->xrest);
-			}
-			else 
-			{
-				copy_v3_v3(verts->xrest, verts->x);
-			}
-		}*/
+		copy_v3_v3(verts->x, mvert[i].co);
+		copy_v3_v3(verts->xrest, verts->x);
 
 		/* no GUI interface yet */
 		verts->mass = clmd->sim_parms->mass;
 		verts->impulse_count = 0;
 
-		if (clmd->sim_parms->vgroup_mass > 0) 
+		if (clmd->sim_parms->vgroup_mass > 0)
 		{
 			verts->goal = clmd->sim_parms->defgoal;
 		}
-		else 
+		else
 		{
 			verts->goal = 0.0f;
 		}
@@ -1692,7 +1702,7 @@ bool cloth_from_object(ClothModifierData* clmd, Mesh* mesh)
 	/* has to be happen before springs are build! */
 	//cloth_apply_vgroup(clmd, mesh);
 
-	if (!cloth_build_springs(clmd, mesh)) 
+	if (!cloth_build_springs(clmd, mesh))
 	{
 		cloth_free_modifier(clmd);
 		printf("Cannot build springs");
@@ -1716,7 +1726,7 @@ bool cloth_from_object(ClothModifierData* clmd, Mesh* mesh)
  * \note This function must always be thread-protected by caller.
  * It should only be used by internal code.
  */
-static void mesh_ensure_looptri_data(Mesh* mesh)
+static void mesh_ensure_looptri_data(const Mesh* mesh)
 {
 	/* This is a ported copy of `DM_ensure_looptri_data(dm)`. */
 	const uint totpoly = mesh->totpoly;
@@ -1727,18 +1737,19 @@ static void mesh_ensure_looptri_data(Mesh* mesh)
 	swap(mesh->runtime->looptris.array, mesh->runtime->looptris.array_wip);
 
 	if ((looptris_len > mesh->runtime->looptris.len_alloc) ||
-		(looptris_len < mesh->runtime->looptris.len_alloc * 2) || (totpoly == 0)) 
+		(looptris_len < mesh->runtime->looptris.len_alloc * 2) || (totpoly == 0))
 	{
 		MEM_SAFE_FREE(mesh->runtime->looptris.array_wip);
 		mesh->runtime->looptris.len_alloc = 0;
 		mesh->runtime->looptris.len = 0;
 	}
 
-	if (totpoly) 
+	if (totpoly)
 	{
-		if (mesh->runtime->looptris.array_wip == nullptr) 
+		if (mesh->runtime->looptris.array_wip == nullptr)
 		{
-			mesh->runtime->looptris.array_wip = static_cast<MLoopTri*>(MEM_malloc_arrayN(looptris_len, sizeof(*mesh->runtime->looptris.array_wip), __func__));
+			mesh->runtime->looptris.array_wip = static_cast<MLoopTri*>(MEM_lockfree_malloc_arrayN(
+				looptris_len, sizeof(*mesh->runtime->looptris.array_wip), __func__));
 			mesh->runtime->looptris.len_alloc = looptris_len;
 		}
 
@@ -1747,8 +1758,8 @@ static void mesh_ensure_looptri_data(Mesh* mesh)
 }
 
 bool is_quad_flip_v3_first_third_fast_with_normal(const float v1[3],
-	const float v2[3], const float v3[3], const float v4[3],
-	const float normal[3])
+                                                  const float v2[3], const float v3[3], const float v4[3],
+                                                  const float normal[3])
 {
 	float dir_v3v1[3], tangent[3];
 	sub_v3_v3v3(dir_v3v1, v3, v1);
@@ -1757,7 +1768,8 @@ bool is_quad_flip_v3_first_third_fast_with_normal(const float v1[3],
 	return (dot_v3v3(v4, tangent) >= dot) || (dot_v3v3(v2, tangent) <= dot);
 }
 
-enum {
+enum
+{
 	KDNODE_FLAG_REMOVED = (1 << 0),
 };
 
@@ -1765,23 +1777,27 @@ enum {
 #  define KDNODE_UNSET ((uint32_t)-1)
 
 static bool kdtree2d_isect_tri_recursive(const struct KDTree2D* tree,
-	const uint32_t tri_index[3],
-	const float* tri_coords[3],
-	const float tri_center[2],
-	const struct KDRange2D bounds[2],
-	const KDTreeNode2D* node)
+                                         const uint32_t tri_index[3],
+                                         const float* tri_coords[3],
+                                         const float tri_center[2],
+                                         const struct KDRange2D bounds[2],
+                                         const KDTreeNode2D* node)
 {
 	const float* co = tree->coords[node->index];
 
 	/* bounds then triangle intersect */
-	if ((node->flag & KDNODE_FLAG_REMOVED) == 0) {
+	if ((node->flag & KDNODE_FLAG_REMOVED) == 0)
+	{
 		/* bounding box test first */
 		if ((co[0] >= bounds[0].min) && (co[0] <= bounds[0].max) && (co[1] >= bounds[1].min) &&
-			(co[1] <= bounds[1].max)) {
+			(co[1] <= bounds[1].max))
+		{
 			if ((span_tri_v2_sign(tri_coords[0], tri_coords[1], co) != CONCAVE) &&
 				(span_tri_v2_sign(tri_coords[1], tri_coords[2], co) != CONCAVE) &&
-				(span_tri_v2_sign(tri_coords[2], tri_coords[0], co) != CONCAVE)) {
-				if (!ELEM(node->index, tri_index[0], tri_index[1], tri_index[2])) {
+				(span_tri_v2_sign(tri_coords[2], tri_coords[0], co) != CONCAVE))
+			{
+				if (!ELEM(node->index, tri_index[0], tri_index[1], tri_index[2]))
+				{
 					return true;
 				}
 			}
@@ -1795,19 +1811,25 @@ static bool kdtree2d_isect_tri_recursive(const struct KDTree2D* tree,
     (((node->pos != KDNODE_UNSET) && (co[node->axis] <= bounds[node->axis].max)) && \
      kdtree2d_isect_tri_recursive(tree, tri_index, tri_coords, tri_center, bounds, &tree->nodes[node->pos]))
 
-	if (tri_center[node->axis] > co[node->axis]) {
-		if (KDTREE2D_ISECT_TRI_RECURSE_POS) {
+	if (tri_center[node->axis] > co[node->axis])
+	{
+		if (KDTREE2D_ISECT_TRI_RECURSE_POS)
+		{
 			return true;
 		}
-		if (KDTREE2D_ISECT_TRI_RECURSE_NEG) {
+		if (KDTREE2D_ISECT_TRI_RECURSE_NEG)
+		{
 			return true;
 		}
 	}
-	else {
-		if (KDTREE2D_ISECT_TRI_RECURSE_NEG) {
+	else
+	{
+		if (KDTREE2D_ISECT_TRI_RECURSE_NEG)
+		{
 			return true;
 		}
-		if (KDTREE2D_ISECT_TRI_RECURSE_POS) {
+		if (KDTREE2D_ISECT_TRI_RECURSE_POS)
+		{
 			return true;
 		}
 	}
@@ -1821,12 +1843,12 @@ static bool kdtree2d_isect_tri_recursive(const struct KDTree2D* tree,
 }
 
 
-static void kdtree2d_node_remove(struct KDTree2D* tree, uint32_t index)
+static void kdtree2d_node_remove(struct KDTree2D* tree, const uint32_t index)
 {
 	uint32_t node_index = tree->nodes_map[index];
 	KDTreeNode2D* node;
 
-	if (node_index == KDNODE_UNSET) 
+	if (node_index == KDNODE_UNSET)
 	{
 		return;
 	}
@@ -1840,27 +1862,27 @@ static void kdtree2d_node_remove(struct KDTree2D* tree, uint32_t index)
 	node->flag |= KDNODE_FLAG_REMOVED;
 
 	while ((node->neg == KDNODE_UNSET) && (node->pos == KDNODE_UNSET) &&
-		(node->parent != KDNODE_UNSET)) 
+		(node->parent != KDNODE_UNSET))
 	{
 		KDTreeNode2D* node_parent = &tree->nodes[node->parent];
 
 		BLI_assert((uint32_t)(node - tree->nodes) == node_index);
-		if (node_parent->neg == node_index) 
+		if (node_parent->neg == node_index)
 		{
 			node_parent->neg = KDNODE_UNSET;
 		}
-		else 
+		else
 		{
 			BLI_assert(node_parent->pos == node_index);
 			node_parent->pos = KDNODE_UNSET;
 		}
 
-		if (node_parent->flag & KDNODE_FLAG_REMOVED) 
+		if (node_parent->flag & KDNODE_FLAG_REMOVED)
 		{
 			node_index = node->parent;
 			node = node_parent;
 		}
-		else 
+		else
 		{
 			break;
 		}
@@ -1871,14 +1893,15 @@ static bool kdtree2d_isect_tri(struct KDTree2D* tree, const uint32_t ind[3])
 {
 	const float* vs[3];
 	uint32_t i;
-	KDRange2D bounds[2] = 
+	KDRange2D bounds[2] =
 	{
 		{FLT_MAX, -FLT_MAX},
 		{FLT_MAX, -FLT_MAX},
 	};
-	float tri_center[2] = { 0.0f, 0.0f };
+	float tri_center[2] = {0.0f, 0.0f};
 
-	for (i = 0; i < 3; i++) {
+	for (i = 0; i < 3; i++)
+	{
 		vs[i] = tree->coords[ind[i]];
 
 		add_v2_v2(tri_center, vs[i]);
@@ -1927,20 +1950,23 @@ static bool pf_ear_tip_check(PolyFill* pf, PolyIndex* pi_ear_tip, const eSign si
 #  endif
 
 	/* fast-path for circles */
-	if (pf->coords_num_concave == 0) {
+	if (pf->coords_num_concave == 0)
+	{
 		return true;
 	}
 #endif
 
-	if (UNLIKELY(pi_ear_tip->sign != sign_accept)) {
+	if (UNLIKELY(pi_ear_tip->sign != sign_accept))
+	{
 		return false;
 	}
 
 #ifdef USE_KDTREE
 	{
-		const uint32_t ind[3] = { pi_ear_tip->index, pi_ear_tip->next->index, pi_ear_tip->prev->index };
+		const uint32_t ind[3] = {pi_ear_tip->index, pi_ear_tip->next->index, pi_ear_tip->prev->index};
 
-		if (kdtree2d_isect_tri(&pf->kdtree, ind)) {
+		if (kdtree2d_isect_tri(&pf->kdtree, ind))
+		{
 			return false;
 		}
 	}
@@ -1989,22 +2015,22 @@ static bool pf_ear_tip_check(PolyFill* pf, PolyIndex* pi_ear_tip, const eSign si
 /**
  * \return CONCAVE, TANGENTIAL or CONVEX
  */
-static void pf_coord_sign_calc(PolyFill* pf, PolyIndex* pi)
+static void pf_coord_sign_calc(const PolyFill* pf, PolyIndex* pi)
 {
 	/* localize */
-	const float(*coords)[2] = pf->coords;
+	const float (*coords)[2] = pf->coords;
 
 	pi->sign = span_tri_v2_sign(coords[pi->prev->index], coords[pi->index], coords[pi->next->index]);
 }
 
 static PolyIndex* pf_ear_tip_find(PolyFill* pf
 #ifdef USE_CLIP_EVEN
-	,
-	PolyIndex* pi_ear_init
+                                  ,
+                                  PolyIndex* pi_ear_init
 #endif
 #ifdef USE_CLIP_SWEEP
-	,
-	bool reverse
+                                  ,
+                                  const bool reverse
 #endif
 )
 {
@@ -2035,15 +2061,18 @@ static PolyIndex* pf_ear_tip_find(PolyFill* pf
 	 * this API prioritizes performance (for real-time updates).
 	 * Higher quality tessellation can always be achieved using #BLI_polyfill_beautify.
 	 */
-	for (eSign sign_accept = CONVEX; sign_accept >= TANGENTIAL; sign_accept--) {
+	for (eSign sign_accept = CONVEX; sign_accept >= TANGENTIAL; sign_accept--)
+	{
 #ifdef USE_CLIP_EVEN
 		pi_ear = pi_ear_init;
 #else
 		pi_ear = pf->indices;
 #endif
 		i = coords_num;
-		while (i--) {
-			if (pf_ear_tip_check(pf, pi_ear, sign_accept)) {
+		while (i--)
+		{
+			if (pf_ear_tip_check(pf, pi_ear, sign_accept))
+			{
 				return pi_ear;
 			}
 #ifdef USE_CLIP_SWEEP
@@ -2073,8 +2102,10 @@ static PolyIndex* pf_ear_tip_find(PolyFill* pf
 #endif
 
 	i = coords_num;
-	while (i--) {
-		if (pi_ear->sign != CONCAVE) {
+	while (i--)
+	{
+		if (pi_ear->sign != CONCAVE)
+		{
 			return pi_ear;
 		}
 		pi_ear = pi_ear->next;
@@ -2088,11 +2119,11 @@ static PolyIndex* pf_ear_tip_find(PolyFill* pf
  * Initializes the #PolyFill structure before tessellating with #polyfill_calc.
  */
 static void polyfill_prepare(PolyFill* pf,
-	const float(*coords)[2],
-	const uint coords_num,
-	int coords_sign,
-	uint(*r_tris)[3],
-	PolyIndex* r_indices)
+                             const float (*coords)[2],
+                             const uint coords_num,
+                             int coords_sign,
+                             uint (*r_tris)[3],
+                             PolyIndex* r_indices)
 {
 	/* localize */
 	PolyIndex* indices = r_indices;
@@ -2109,10 +2140,12 @@ static void polyfill_prepare(PolyFill* pf,
 	pf->tris = r_tris;
 	pf->tris_num = 0;
 
-	if (coords_sign == 0) {
+	if (coords_sign == 0)
+	{
 		coords_sign = (cross_poly_v2(coords, coords_num) >= 0.0f) ? 1 : -1;
 	}
-	else {
+	else
+	{
 		/* check we're passing in correct args */
 #ifdef USE_STRICT_ASSERT
 #  ifndef NDEBUG
@@ -2126,17 +2159,21 @@ static void polyfill_prepare(PolyFill* pf,
 #endif
 	}
 
-	if (coords_sign == 1) {
-		for (i = 0; i < coords_num; i++) {
+	if (coords_sign == 1)
+	{
+		for (i = 0; i < coords_num; i++)
+		{
 			indices[i].next = &indices[i + 1];
 			indices[i].prev = &indices[i - 1];
 			indices[i].index = i;
 		}
 	}
-	else {
+	else
+	{
 		/* reversed */
-		uint n = coords_num - 1;
-		for (i = 0; i < coords_num; i++) {
+		const uint n = coords_num - 1;
+		for (i = 0; i < coords_num; i++)
+		{
 			indices[i].next = &indices[i + 1];
 			indices[i].prev = &indices[i - 1];
 			indices[i].index = (n - i);
@@ -2145,23 +2182,27 @@ static void polyfill_prepare(PolyFill* pf,
 	indices[0].prev = &indices[coords_num - 1];
 	indices[coords_num - 1].next = &indices[0];
 
-	for (i = 0; i < coords_num; i++) {
+	for (i = 0; i < coords_num; i++)
+	{
 		PolyIndex* pi = &indices[i];
 		pf_coord_sign_calc(pf, pi);
 #ifdef USE_CONVEX_SKIP
-		if (pi->sign != CONVEX) {
+		if (pi->sign != CONVEX)
+		{
 			pf->coords_num_concave += 1;
 		}
 #endif
 	}
 }
 
-eSign signum_enum(float a)
+eSign signum_enum(const float a)
 {
-	if (a > 0.0f) {
+	if (a > 0.0f)
+	{
 		return CONVEX;
 	}
-	if (UNLIKELY(a == 0.0f)) {
+	if (UNLIKELY(a == 0.0f))
+	{
 		return TANGENTIAL;
 	}
 	return CONCAVE;
@@ -2189,7 +2230,7 @@ static void pf_coord_remove(PolyFill* pf, PolyIndex* pi)
 {
 #ifdef USE_KDTREE
 	/* avoid double lookups, since convex coords are ignored when testing intersections */
-	if (pf->kdtree.node_num) 
+	if (pf->kdtree.node_num)
 	{
 		kdtree2d_node_remove(&pf->kdtree, pi->index);
 	}
@@ -2198,7 +2239,7 @@ static void pf_coord_remove(PolyFill* pf, PolyIndex* pi)
 	pi->next->prev = pi->prev;
 	pi->prev->next = pi->next;
 
-	if (pf->indices == pi) 
+	if (pf->indices == pi)
 	{
 		pf->indices = pi->next;
 	}
@@ -2233,21 +2274,23 @@ static void pf_triangulate(PolyFill* pf)
 	bool reverse = false;
 #endif
 
-	while (pf->coords_num > 3) {
-		PolyIndex* pi_prev, * pi_next;
+	while (pf->coords_num > 3)
+	{
+		PolyIndex *pi_prev, *pi_next;
 		eSign sign_orig_prev, sign_orig_next;
 
 		pi_ear = pf_ear_tip_find(pf
 #ifdef USE_CLIP_EVEN
-			, pi_ear_init
+		                         , pi_ear_init
 #endif
 #ifdef USE_CLIP_SWEEP
-			, reverse
+		                         , reverse
 #endif
 		);
 
 #ifdef USE_CONVEX_SKIP
-		if (pi_ear->sign != CONVEX) {
+		if (pi_ear->sign != CONVEX)
+		{
 			pf->coords_num_concave -= 1;
 		}
 #endif
@@ -2263,10 +2306,12 @@ static void pf_triangulate(PolyFill* pf)
 
 		/* check if any verts became convex the (else if)
 		 * case is highly unlikely but may happen with degenerate polygons */
-		if (sign_orig_prev != CONVEX) {
+		if (sign_orig_prev != CONVEX)
+		{
 			pf_coord_sign_calc(pf, pi_prev);
 #ifdef USE_CONVEX_SKIP
-			if (pi_prev->sign == CONVEX) {
+			if (pi_prev->sign == CONVEX)
+			{
 				pf->coords_num_concave -= 1;
 #  ifdef USE_KDTREE
 				kdtree2d_node_remove(&pf->kdtree, pi_prev->index);
@@ -2274,10 +2319,12 @@ static void pf_triangulate(PolyFill* pf)
 			}
 #endif
 		}
-		if (sign_orig_next != CONVEX) {
+		if (sign_orig_next != CONVEX)
+		{
 			pf_coord_sign_calc(pf, pi_next);
 #ifdef USE_CONVEX_SKIP
-			if (pi_next->sign == CONVEX) {
+			if (pi_next->sign == CONVEX)
+			{
 				pf->coords_num_concave -= 1;
 #  ifdef USE_KDTREE
 				kdtree2d_node_remove(&pf->kdtree, pi_next->index);
@@ -2296,7 +2343,8 @@ static void pf_triangulate(PolyFill* pf)
 
 #ifdef USE_CLIP_EVEN
 #  ifdef USE_CLIP_SWEEP
-		if (pi_ear_init->sign != CONVEX) {
+		if (pi_ear_init->sign != CONVEX)
+		{
 			/* take the extra step since this ear isn't a good candidate */
 			pi_ear_init = reverse ? pi_ear_init->prev : pi_ear_init->next;
 			reverse = !reverse;
@@ -2309,7 +2357,8 @@ static void pf_triangulate(PolyFill* pf)
 #endif
 	}
 
-	if (pf->coords_num == 3) {
+	if (pf->coords_num == 3)
+	{
 		uint* tri = pf_tri_add(pf);
 		pi_ear = pf->indices;
 		tri[0] = pi_ear->index;
@@ -2320,7 +2369,7 @@ static void pf_triangulate(PolyFill* pf)
 	}
 }
 
-static void kdtree2d_new(struct KDTree2D* tree, uint32_t tot, const float(*coords)[2])
+static void kdtree2d_new(struct KDTree2D* tree, const uint32_t tot, const float (*coords)[2])
 {
 	/* set by caller */
 	// tree->nodes = nodes;
@@ -2332,16 +2381,16 @@ static void kdtree2d_new(struct KDTree2D* tree, uint32_t tot, const float(*coord
 /**
  * no need for kdtree2d_insert, since we know the coords array.
  */
-static void kdtree2d_init(struct KDTree2D* tree,
-	const uint32_t coords_num,
-	const PolyIndex* indices)
+static void kdtree2d_init(const struct KDTree2D* tree,
+                          const uint32_t coords_num,
+                          const PolyIndex* indices)
 {
 	KDTreeNode2D* node;
 	uint32_t i;
 
-	for (i = 0, node = tree->nodes; i < coords_num; i++) 
+	for (i = 0, node = tree->nodes; i < coords_num; i++)
 	{
-		if (indices[i].sign != CONVEX) 
+		if (indices[i].sign != CONVEX)
 		{
 			node->neg = node->pos = KDNODE_UNSET;
 			node->index = indices[i].index;
@@ -2356,18 +2405,20 @@ static void kdtree2d_init(struct KDTree2D* tree,
 
 
 static uint32_t kdtree2d_balance_recursive(KDTreeNode2D* nodes,
-	uint32_t node_num,
-	axis_t axis,
-	const float(*coords)[2],
-	const uint32_t ofs)
+                                           const uint32_t node_num,
+                                           axis_t axis,
+                                           const float (*coords)[2],
+                                           const uint32_t ofs)
 {
 	KDTreeNode2D* node;
 	uint32_t neg, pos, median, i, j;
 
-	if (node_num <= 0) {
+	if (node_num <= 0)
+	{
 		return KDNODE_UNSET;
 	}
-	if (node_num == 1) {
+	if (node_num == 1)
+	{
 		return 0 + ofs;
 	}
 
@@ -2376,16 +2427,18 @@ static uint32_t kdtree2d_balance_recursive(KDTreeNode2D* nodes,
 	pos = node_num - 1;
 	median = node_num / 2;
 
-	while (pos > neg) {
+	while (pos > neg)
+	{
 		const float co = coords[nodes[pos].index][axis];
 		i = neg - 1;
 		j = pos;
 
-		while (1) {
+		while (1)
+		{
 			while (coords[nodes[++i].index][axis] < co) { /* pass */ }
 			while (coords[nodes[--j].index][axis] > co && j > neg) { /* pass */ }
 
-			if (i >= j) 
+			if (i >= j)
 			{
 				break;
 			}
@@ -2393,10 +2446,12 @@ static uint32_t kdtree2d_balance_recursive(KDTreeNode2D* nodes,
 		}
 
 		swap(nodes[i], nodes[pos]);
-		if (i >= median) {
+		if (i >= median)
+		{
 			pos = i - 1;
 		}
-		if (i <= median) {
+		if (i <= median)
+		{
 			neg = i + 1;
 		}
 	}
@@ -2406,7 +2461,8 @@ static uint32_t kdtree2d_balance_recursive(KDTreeNode2D* nodes,
 	node->axis = axis;
 	axis = !axis;
 	node->neg = kdtree2d_balance_recursive(nodes, median, axis, coords, ofs);
-	node->pos = kdtree2d_balance_recursive(&nodes[median + 1], (node_num - (median + 1)), axis, coords, (median + 1) + ofs);
+	node->pos = kdtree2d_balance_recursive(&nodes[median + 1], (node_num - (median + 1)), axis, coords,
+	                                       (median + 1) + ofs);
 
 	return median + ofs;
 }
@@ -2417,18 +2473,18 @@ static void kdtree2d_balance(struct KDTree2D* tree)
 	tree->root = kdtree2d_balance_recursive(tree->nodes, tree->node_num, 0, tree->coords, 0);
 }
 
-static void kdtree2d_init_mapping(struct KDTree2D* tree)
+static void kdtree2d_init_mapping(const struct KDTree2D* tree)
 {
 	uint32_t i;
 	KDTreeNode2D* node;
 
-	for (i = 0, node = tree->nodes; i < tree->node_num; i++, node++) 
+	for (i = 0, node = tree->nodes; i < tree->node_num; i++, node++)
 	{
-		if (node->neg != KDNODE_UNSET) 
+		if (node->neg != KDNODE_UNSET)
 		{
 			tree->nodes[node->neg].parent = i;
 		}
-		if (node->pos != KDNODE_UNSET) 
+		if (node->pos != KDNODE_UNSET)
 		{
 			tree->nodes[node->pos].parent = i;
 		}
@@ -2459,12 +2515,12 @@ static void polyfill_calc(PolyFill* pf)
 	pf_triangulate(pf);
 }
 
-void BLI_polyfill_calc_arena(const float(*coords)[2],
-	const uint coords_num,
-	const int coords_sign,
-	uint(*r_tris)[3],
+void BLI_polyfill_calc_arena(const float (*coords)[2],
+                             const uint coords_num,
+                             const int coords_sign,
+                             uint (*r_tris)[3],
 
-	struct MemArena* arena)
+                             struct MemArena* arena)
 {
 	PolyFill pf;
 	PolyIndex* indices = (PolyIndex*)BLI_memarena_alloc(arena, sizeof(*indices) * coords_num);
@@ -2474,19 +2530,21 @@ void BLI_polyfill_calc_arena(const float(*coords)[2],
 #endif
 
 	polyfill_prepare(&pf,
-		coords,
-		coords_num,
-		coords_sign,
-		r_tris,
-		/* cache */
-		indices);
+	                 coords,
+	                 coords_num,
+	                 coords_sign,
+	                 r_tris,
+	                 /* cache */
+	                 indices);
 
 #ifdef USE_KDTREE
-	if (pf.coords_num_concave) {
+	if (pf.coords_num_concave)
+	{
 		pf.kdtree.nodes = (KDTreeNode2D*)BLI_memarena_alloc(arena, sizeof(*pf.kdtree.nodes) * pf.coords_num_concave);
-		pf.kdtree.nodes_map = (uint32_t*)memset(BLI_memarena_alloc(arena, sizeof(*pf.kdtree.nodes_map) * coords_num), 0xff, sizeof(*pf.kdtree.nodes_map) * coords_num);
+		pf.kdtree.nodes_map = (uint32_t*)memset(BLI_memarena_alloc(arena, sizeof(*pf.kdtree.nodes_map) * coords_num),
+		                                        0xff, sizeof(*pf.kdtree.nodes_map) * coords_num);
 	}
-	else 
+	else
 	{
 		pf.kdtree.node_num = 0;
 	}
@@ -2501,14 +2559,15 @@ void BLI_polyfill_calc_arena(const float(*coords)[2],
 	TIMEIT_END(polyfill2d);
 #endif
 }
+
 void mesh_calc_tessellation_for_face_impl(const MLoop* mloop,
-	const MPoly* mpoly,
-	const float(*positions)[3],
-	uint poly_index,
-	MLoopTri* mlt,
-	MemArena** pf_arena_p,
-	const bool face_normal,
-	const float normal_precalc[3])
+                                          const MPoly* mpoly,
+                                          const float (*positions)[3],
+                                          const uint poly_index,
+                                          MLoopTri* mlt,
+                                          MemArena** pf_arena_p,
+                                          const bool face_normal,
+                                          const float normal_precalc[3])
 {
 	const uint mp_loopstart = uint(mpoly[poly_index].loopstart);
 	const uint mp_totloop = uint(mpoly[poly_index].totloop);
@@ -2520,153 +2579,170 @@ void mesh_calc_tessellation_for_face_impl(const MLoop* mloop,
   } \
   ((void)0)
 
-	switch (mp_totloop) {
-	case 3: {
-		ML_TO_MLT(0, 1, 2);
-		break;
-	}
-	case 4: {
-		ML_TO_MLT(0, 1, 2);
-		MLoopTri* mlt_a = mlt++;
-		ML_TO_MLT(0, 2, 3);
-		MLoopTri* mlt_b = mlt;
-
-		if (UNLIKELY(face_normal ? is_quad_flip_v3_first_third_fast_with_normal(
-			/* Simpler calculation (using the normal). */
-			positions[mloop[mlt_a->tri[0]].v],
-			positions[mloop[mlt_a->tri[1]].v],
-			positions[mloop[mlt_a->tri[2]].v],
-			positions[mloop[mlt_b->tri[2]].v],
-			normal_precalc) :
-			is_quad_flip_v3_first_third_fast(
-				/* Expensive calculation (no normal). */
-				positions[mloop[mlt_a->tri[0]].v],
-				positions[mloop[mlt_a->tri[1]].v],
-				positions[mloop[mlt_a->tri[2]].v],
-				positions[mloop[mlt_b->tri[2]].v]))) {
-			/* Flip out of degenerate 0-2 state. */
-			mlt_a->tri[2] = mlt_b->tri[2];
-			mlt_b->tri[0] = mlt_a->tri[1];
+	switch (mp_totloop)
+	{
+	case 3:
+		{
+			ML_TO_MLT(0, 1, 2);
+			break;
 		}
-		break;
-	}
-	default: {
-		const MLoop* ml;
-		float axis_mat[3][3];
+	case 4:
+		{
+			ML_TO_MLT(0, 1, 2);
+			MLoopTri* mlt_a = mlt++;
+			ML_TO_MLT(0, 2, 3);
+			MLoopTri* mlt_b = mlt;
 
-		/* Calculate `axis_mat` to project verts to 2D. */
-		if (face_normal == false) {
-			float normal[3];
-			const float* co_curr, * co_prev;
+			if (UNLIKELY(face_normal ? is_quad_flip_v3_first_third_fast_with_normal(
+					/* Simpler calculation (using the normal). */
+					positions[mloop[mlt_a->tri[0]].v],
+					positions[mloop[mlt_a->tri[1]].v],
+					positions[mloop[mlt_a->tri[2]].v],
+					positions[mloop[mlt_b->tri[2]].v],
+					normal_precalc) :
+				is_quad_flip_v3_first_third_fast(
+					/* Expensive calculation (no normal). */
+					positions[mloop[mlt_a->tri[0]].v],
+					positions[mloop[mlt_a->tri[1]].v],
+					positions[mloop[mlt_a->tri[2]].v],
+					positions[mloop[mlt_b->tri[2]].v])))
+			{
+				/* Flip out of degenerate 0-2 state. */
+				mlt_a->tri[2] = mlt_b->tri[2];
+				mlt_b->tri[0] = mlt_a->tri[1];
+			}
+			break;
+		}
+	default:
+		{
+			const MLoop* ml;
+			float axis_mat[3][3];
 
-			zero_v3(normal);
+			/* Calculate `axis_mat` to project verts to 2D. */
+			if (face_normal == false)
+			{
+				float normal[3];
+				const float *co_curr, *co_prev;
 
-			/* Calc normal, flipped: to get a positive 2D cross product. */
+				zero_v3(normal);
+
+				/* Calc normal, flipped: to get a positive 2D cross product. */
+				ml = mloop + mp_loopstart;
+				co_prev = positions[ml[mp_totloop - 1].v];
+				for (uint j = 0; j < mp_totloop; j++, ml++)
+				{
+					co_curr = positions[ml->v];
+					add_newell_cross_v3_v3v3(normal, co_prev, co_curr);
+					co_prev = co_curr;
+				}
+				if (UNLIKELY(normalize_v3(normal) == 0.0f))
+				{
+					normal[2] = 1.0f;
+				}
+				axis_dominant_v3_to_m3_negate(axis_mat, normal);
+			}
+			else
+			{
+				axis_dominant_v3_to_m3_negate(axis_mat, normal_precalc);
+			}
+
+			const uint totfilltri = mp_totloop - 2;
+
+			MemArena* pf_arena = *pf_arena_p;
+			if (UNLIKELY(pf_arena == nullptr))
+			{
+				pf_arena = *pf_arena_p = BLI_memarena_new(BLI_MEMARENA_STD_BUFSIZE, __func__);
+			}
+
+			uint(*tris)[3]  = static_cast<uint(*)[3]>(
+				BLI_memarena_alloc(pf_arena, sizeof(*tris) * size_t(totfilltri)));
+			float(*projverts)[2]  = static_cast<float(*)[2]>(
+				BLI_memarena_alloc(pf_arena, sizeof(*projverts) * size_t(mp_totloop)));
+
 			ml = mloop + mp_loopstart;
-			co_prev = positions[ml[mp_totloop - 1].v];
-			for (uint j = 0; j < mp_totloop; j++, ml++) {
-				co_curr = positions[ml->v];
-				add_newell_cross_v3_v3v3(normal, co_prev, co_curr);
-				co_prev = co_curr;
+			for (uint j = 0; j < mp_totloop; j++, ml++)
+			{
+				mul_v2_m3v3(projverts[j], axis_mat, positions[ml->v]);
 			}
-			if (UNLIKELY(normalize_v3(normal) == 0.0f)) {
-				normal[2] = 1.0f;
+
+			BLI_polyfill_calc_arena(projverts, mp_totloop, 1, tris, pf_arena);
+
+			/* Apply fill. */
+			for (uint j = 0; j < totfilltri; j++, mlt++)
+			{
+				const uint* tri = tris[j];
+				ML_TO_MLT(tri[0], tri[1], tri[2]);
 			}
-			axis_dominant_v3_to_m3_negate(axis_mat, normal);
+
+			BLI_memarena_clear(pf_arena);
+
+			break;
 		}
-		else {
-			axis_dominant_v3_to_m3_negate(axis_mat, normal_precalc);
-		}
-
-		const uint totfilltri = mp_totloop - 2;
-
-		MemArena* pf_arena = *pf_arena_p;
-		if (UNLIKELY(pf_arena == nullptr)) {
-			pf_arena = *pf_arena_p = BLI_memarena_new(BLI_MEMARENA_STD_BUFSIZE, __func__);
-		}
-
-		uint(*tris)[3] = static_cast<uint(*)[3]>(
-			BLI_memarena_alloc(pf_arena, sizeof(*tris) * size_t(totfilltri)));
-		float(*projverts)[2] = static_cast<float(*)[2]>(
-			BLI_memarena_alloc(pf_arena, sizeof(*projverts) * size_t(mp_totloop)));
-
-		ml = mloop + mp_loopstart;
-		for (uint j = 0; j < mp_totloop; j++, ml++) {
-			mul_v2_m3v3(projverts[j], axis_mat, positions[ml->v]);
-		}
-
-		BLI_polyfill_calc_arena(projverts, mp_totloop, 1, tris, pf_arena);
-
-		/* Apply fill. */
-		for (uint j = 0; j < totfilltri; j++, mlt++) {
-			const uint* tri = tris[j];
-			ML_TO_MLT(tri[0], tri[1], tri[2]);
-		}
-
-		BLI_memarena_clear(pf_arena);
-
-		break;
-	}
 	}
 #undef ML_TO_MLT
 }
 
 static void mesh_calc_tessellation_for_face(const MLoop* mloop,
-	const MPoly* mpoly,
-	const float(*positions)[3],
-	uint poly_index,
-	MLoopTri* mlt,
-	MemArena** pf_arena_p)
+                                            const MPoly* mpoly,
+                                            const float (*positions)[3],
+                                            const uint poly_index,
+                                            MLoopTri* mlt,
+                                            MemArena** pf_arena_p)
 {
 	mesh_calc_tessellation_for_face_impl(
 		mloop, mpoly, positions, poly_index, mlt, pf_arena_p, false, nullptr);
 }
 
 static void mesh_calc_tessellation_for_face_with_normal(const MLoop* mloop,
-	const MPoly* mpoly,
-	const float(*positions)[3],
-	uint poly_index,
-	MLoopTri* mlt,
-	MemArena** pf_arena_p,
-	const float normal_precalc[3])
+                                                        const MPoly* mpoly,
+                                                        const float (*positions)[3],
+                                                        const uint poly_index,
+                                                        MLoopTri* mlt,
+                                                        MemArena** pf_arena_p,
+                                                        const float normal_precalc[3])
 {
 	mesh_calc_tessellation_for_face_impl(
 		mloop, mpoly, positions, poly_index, mlt, pf_arena_p, true, normal_precalc);
 }
 
 static void mesh_recalc_looptri__single_threaded(const MLoop* mloop,
-	const MPoly* mpoly,
-	const float(*positions)[3],
-	int totloop,
-	int totpoly,
-	MLoopTri* mlooptri,
-	const float(*poly_normals)[3])
+                                                 const MPoly* mpoly,
+                                                 const float (*positions)[3],
+                                                 int totloop,
+                                                 const int totpoly,
+                                                 MLoopTri* mlooptri,
+                                                 const float (*poly_normals)[3])
 {
 	MemArena* pf_arena = nullptr;
 	const MPoly* mp = mpoly;
 	uint tri_index = 0;
 
-	if (poly_normals != nullptr) {
-		for (uint poly_index = 0; poly_index < uint(totpoly); poly_index++, mp++) {
+	if (poly_normals != nullptr)
+	{
+		for (uint poly_index = 0; poly_index < uint(totpoly); poly_index++, mp++)
+		{
 			mesh_calc_tessellation_for_face_with_normal(mloop,
-				mpoly,
-				positions,
-				poly_index,
-				&mlooptri[tri_index],
-				&pf_arena,
-				poly_normals[poly_index]);
+			                                            mpoly,
+			                                            positions,
+			                                            poly_index,
+			                                            &mlooptri[tri_index],
+			                                            &pf_arena,
+			                                            poly_normals[poly_index]);
 			tri_index += uint(mp->totloop - 2);
 		}
 	}
-	else {
-		for (uint poly_index = 0; poly_index < uint(totpoly); poly_index++, mp++) {
+	else
+	{
+		for (uint poly_index = 0; poly_index < uint(totpoly); poly_index++, mp++)
+		{
 			mesh_calc_tessellation_for_face(
 				mloop, mpoly, positions, poly_index, &mlooptri[tri_index], &pf_arena);
 			tri_index += uint(mp->totloop - 2);
 		}
 	}
 
-	if (pf_arena) {
+	if (pf_arena)
+	{
 		BLI_memarena_free(pf_arena);
 		pf_arena = nullptr;
 	}
@@ -2675,58 +2751,59 @@ static void mesh_recalc_looptri__single_threaded(const MLoop* mloop,
 }
 
 static void mesh_calc_tessellation_for_face_free_fn(const void* __restrict /*userdata*/,
-	void* __restrict tls_v)
+                                                    void* __restrict tls_v)
 {
-	TessellationUserTLS* tls_data = static_cast<TessellationUserTLS*>(tls_v);
-	if (tls_data->pf_arena) {
+	const TessellationUserTLS* tls_data = static_cast<TessellationUserTLS*>(tls_v);
+	if (tls_data->pf_arena)
+	{
 		BLI_memarena_free(tls_data->pf_arena);
 	}
 }
 
-static void mesh_calc_tessellation_for_face_with_normal_fn(void* __restrict userdata,
-	const int index,
-	const TaskParallelTLS* __restrict tls)
+static void mesh_calc_tessellation_for_face_with_normal_fn(const void* __restrict userdata,
+                                                           const int index,
+                                                           const TaskParallelTLS* __restrict tls)
 {
-	auto data = static_cast<const TessellationUserData*>(userdata);
-	TessellationUserTLS* tls_data = static_cast<TessellationUserTLS*>(tls->userdata_chunk);
+	const auto data = static_cast<const TessellationUserData*>(userdata);
+	const auto tls_data = static_cast<TessellationUserTLS*>(tls->userdata_chunk);
 	const int tri_index = poly_to_tri_count(index, data->mpoly[index].loopstart);
 	mesh_calc_tessellation_for_face_impl(data->mloop,
-		data->mpoly,
-		data->positions,
-		uint(index),
-		&data->mlooptri[tri_index],
-		&tls_data->pf_arena,
-		true,
-		data->poly_normals[index]);
+	                                     data->mpoly,
+	                                     data->positions,
+	                                     uint(index),
+	                                     &data->mlooptri[tri_index],
+	                                     &tls_data->pf_arena,
+	                                     true,
+	                                     data->poly_normals[index]);
 }
 
-static void mesh_calc_tessellation_for_face_fn(void* __restrict userdata,
-	const int index,
-	const TaskParallelTLS* __restrict tls)
+static void mesh_calc_tessellation_for_face_fn(const void* __restrict userdata,
+                                               const int index,
+                                               const TaskParallelTLS* __restrict tls)
 {
-	const TessellationUserData* data = static_cast<const TessellationUserData*>(userdata);
-	TessellationUserTLS* tls_data = static_cast<TessellationUserTLS*>(tls->userdata_chunk);
+	const auto data = static_cast<const TessellationUserData*>(userdata);
+	const auto tls_data = static_cast<TessellationUserTLS*>(tls->userdata_chunk);
 	const int tri_index = poly_to_tri_count(index, data->mpoly[index].loopstart);
 	mesh_calc_tessellation_for_face_impl(data->mloop,
-		data->mpoly,
-		data->positions,
-		uint(index),
-		&data->mlooptri[tri_index],
-		&tls_data->pf_arena,
-		false,
-		nullptr);
+	                                     data->mpoly,
+	                                     data->positions,
+	                                     uint(index),
+	                                     &data->mlooptri[tri_index],
+	                                     &tls_data->pf_arena,
+	                                     false,
+	                                     nullptr);
 }
 
 static void mesh_recalc_looptri__multi_threaded(const MLoop* mloop,
-	const MPoly* mpoly,
-	const float(*positions)[3],
-	int totpoly,
-	MLoopTri* mlooptri,
-	const float(*poly_normals)[3])
+                                                const MPoly* mpoly,
+                                                const float (*positions)[3],
+                                                const int totpoly,
+                                                MLoopTri* mlooptri,
+                                                const float (*poly_normals)[3])
 {
-	struct TessellationUserTLS tls_data_dummy = { nullptr };
+	struct TessellationUserTLS tls_data_dummy = {nullptr};
 
-	struct TessellationUserData data {};
+	struct TessellationUserData data{};
 	data.mloop = mloop;
 	data.mpoly = mpoly;
 	data.positions = positions;
@@ -2742,48 +2819,53 @@ static void mesh_recalc_looptri__multi_threaded(const MLoop* mloop,
 	settings.func_free = mesh_calc_tessellation_for_face_free_fn;
 
 	BLI_task_parallel_range(0,
-		totpoly,
-		&data,
-		poly_normals ? mesh_calc_tessellation_for_face_with_normal_fn :
-		mesh_calc_tessellation_for_face_fn,
-		&settings);
+	                        totpoly,
+	                        &data,
+	                        reinterpret_cast<TaskParallelRangeFunc>(poly_normals
+		                                                                ? reinterpret_cast<TaskParallelRangeFunc*>(
+			                                                                mesh_calc_tessellation_for_face_with_normal_fn)
+		                                                                : reinterpret_cast<TaskParallelRangeFunc*>(
+			                                                                mesh_calc_tessellation_for_face_fn)),
+	                        &settings);
 }
 
 void BKE_mesh_recalc_looptri(const MLoop* mloop,
-	const MPoly* mpoly, const float(*vert_positions)[3],
-	int totloop, int totpoly, MLoopTri* mlooptri)
+                             const MPoly* mpoly, const float (*vert_positions)[3],
+                             const int totloop, const int totpoly, MLoopTri* mlooptri)
 {
-	if (totloop < MESH_FACE_TESSELLATE_THREADED_LIMIT) 
+	if (totloop < MESH_FACE_TESSELLATE_THREADED_LIMIT)
 	{
 		mesh_recalc_looptri__single_threaded(mloop, mpoly, vert_positions, totloop, totpoly, mlooptri, nullptr);
 	}
-	else 
+	else
 	{
 		mesh_recalc_looptri__multi_threaded(mloop, mpoly, vert_positions, totpoly, mlooptri, nullptr);
 	}
 }
 
-void BKE_mesh_runtime_looptri_recalc(Mesh* mesh)
+void BKE_mesh_runtime_looptri_recalc(const Mesh* mesh)
 {
 	mesh_ensure_looptri_data(mesh);
 	BLI_assert(mesh->totpoly == 0 || mesh->runtime->looptris.array_wip != nullptr);
 
-	BKE_mesh_recalc_looptri(mesh->mloop, mesh->mpoly, (float(*)[3])mesh->mvert, mesh->totloop, mesh->totpoly, mesh->runtime->looptris.array_wip);
+	BKE_mesh_recalc_looptri(mesh->mloop, mesh->mpoly, (float(*)[3])mesh->mvert, mesh->totloop, mesh->totpoly,
+	                        mesh->runtime->looptris.array_wip);
 
 	BLI_assert(mesh->runtime->looptris.array == nullptr);
-	atomic_cas_ptr((void**)&mesh->runtime->looptris.array, mesh->runtime->looptris.array, mesh->runtime->looptris.array_wip);
+	atomic_cas_ptr((void**)&mesh->runtime->looptris.array, mesh->runtime->looptris.array,
+	               mesh->runtime->looptris.array_wip);
 	mesh->runtime->looptris.array_wip = nullptr;
 }
 
 const MLoopTri* BKE_mesh_runtime_looptri_ensure(const Mesh* mesh)
 {
-	MLoopTri* looptri = mesh->runtime->looptris.array;
+	const MLoopTri* looptri = mesh->runtime->looptris.array;
 
-	if (looptri != nullptr) 
+	if (looptri != nullptr)
 	{
 		BLI_assert(BKE_mesh_runtime_looptri_len(mesh) == mesh->runtime->looptris.len);
 	}
-	else 
+	else
 	{
 		BKE_mesh_runtime_looptri_recalc(const_cast<Mesh*>(mesh));
 		looptri = mesh->runtime->looptris.array;
@@ -2792,30 +2874,30 @@ const MLoopTri* BKE_mesh_runtime_looptri_ensure(const Mesh* mesh)
 	return looptri;
 }
 
-static void mesh_ensure_cdlayers_primary(Mesh* mesh, bool do_tessface)
+static void mesh_ensure_cdlayers_primary(Mesh* mesh, const bool do_tessface)
 {
-	auto a = CustomData_get_layer_named(&mesh->vdata, CD_PROP_FLOAT3, "position");
+	const auto a = CustomData_get_layer_named(&mesh->vdata, CD_PROP_FLOAT3, "position");
 	if (!a)
 	{
 		CustomData_add_layer_named(&mesh->vdata, CD_PROP_FLOAT3, CD_CONSTRUCT, nullptr, mesh->totvert, "position");
 	}
 
-	if (!CustomData_get_layer(&mesh->edata, CD_MEDGE)) 
+	if (!CustomData_get_layer(&mesh->edata, CD_MEDGE))
 	{
 		CustomData_add_layer(&mesh->edata, CD_MEDGE, CD_SET_DEFAULT, nullptr, mesh->totedge);
 	}
 
-	if (!CustomData_get_layer(&mesh->ldata, CD_MLOOP)) 
+	if (!CustomData_get_layer(&mesh->ldata, CD_MLOOP))
 	{
 		CustomData_add_layer(&mesh->ldata, CD_MLOOP, CD_SET_DEFAULT, nullptr, mesh->totloop);
 	}
 
-	if (!CustomData_get_layer(&mesh->pdata, CD_MPOLY)) 
+	if (!CustomData_get_layer(&mesh->pdata, CD_MPOLY))
 	{
 		CustomData_add_layer(&mesh->pdata, CD_MPOLY, CD_SET_DEFAULT, nullptr, mesh->totpoly);
 	}
 
-	if (do_tessface && !CustomData_get_layer(&mesh->fdata, CD_MFACE)) 
+	if (do_tessface && !CustomData_get_layer(&mesh->fdata, CD_MFACE))
 	{
 		CustomData_add_layer(&mesh->fdata, CD_MFACE, CD_SET_DEFAULT, nullptr, mesh->totface);
 	}
@@ -2831,7 +2913,7 @@ void cloth_from_mesh(ClothModifierData* clmd, Mesh* mesh)
 	CustomData_reset(&mesh->fdata);
 
 	// получаем кол-во индексов вершин, представляющих треугольники
-	const uint looptri_num = poly_to_tri_count(mesh->totpoly, mesh->totloop);
+	const int looptri_num = poly_to_tri_count(mesh->totpoly, mesh->totloop);
 
 	// Создаём временные данные, если их нет
 	if (!mesh->runtime)
@@ -2839,9 +2921,11 @@ void cloth_from_mesh(ClothModifierData* clmd, Mesh* mesh)
 		mesh->runtime = new MeshRuntime();
 
 		// Делаем перерасчёт 
-		MLoopTri* looptris = (MLoopTri*)MEM_malloc_arrayN(looptri_num, sizeof(*looptris), "runtime looptris");
+		auto* looptris = static_cast<MLoopTri*>(MEM_lockfree_malloc_arrayN(
+			looptri_num, sizeof(MLoopTri), "runtime looptris"));
 
-		BKE_mesh_recalc_looptri(mesh->mloop, mesh->mpoly, (const float(*)[3])mesh->mvert, mesh->totloop, mesh->totpoly, looptris);
+		BKE_mesh_recalc_looptri(mesh->mloop, mesh->mpoly, reinterpret_cast<const float(*)[3]>(mesh->mvert),
+		                        mesh->totloop, mesh->totpoly, looptris);
 
 		mesh->runtime->looptris.array = looptris;
 		mesh->runtime->looptris.len = looptri_num;
@@ -2849,11 +2933,11 @@ void cloth_from_mesh(ClothModifierData* clmd, Mesh* mesh)
 
 	mesh_ensure_cdlayers_primary(mesh, true);
 
-	BKE_mesh_debug_info(mesh);
+	//BKE_mesh_debug_info(mesh);
 
 	// Вычисление и кэширование MLoopTri для меша
 	BKE_mesh_runtime_looptri_ensure(mesh);
-	
+
 	const MLoop* mloop = mesh->mloop;
 	// Получение указателя на MLoopTri
 	const MLoopTri* looptri = BKE_mesh_runtime_looptri_ensure(mesh);
@@ -2861,8 +2945,8 @@ void cloth_from_mesh(ClothModifierData* clmd, Mesh* mesh)
 
 	/* Allocate our vertices. */
 	clmd->clothObject->mvert_num = mesh->totvert;
-	clmd->clothObject->verts = (ClothVertex*)MEM_callocN(sizeof(ClothVertex) * clmd->clothObject->mvert_num, "clothVertex");
-	if (clmd->clothObject->verts == NULL) 
+	clmd->clothObject->verts = static_cast<ClothVertex*>(MEM_lockfree_callocN(sizeof(ClothVertex) * clmd->clothObject->mvert_num, "clothVertex"));
+	if (clmd->clothObject->verts == nullptr)
 	{
 		cloth_free_modifier(clmd);
 		//BKE_modifier_set_error(ob, &(clmd->modifier), "Out of memory on allocating clmd->clothObject->verts");
@@ -2872,17 +2956,19 @@ void cloth_from_mesh(ClothModifierData* clmd, Mesh* mesh)
 	}
 
 	/* save face information */
-	if (clmd->hairdata == NULL) 
-	{
-		clmd->clothObject->primitive_num = looptri_num;
-	}
-	else 
-	{
-		clmd->clothObject->primitive_num = mesh->totedge;
-	}
+	clmd->clothObject->primitive_num = mesh->totedge;
+	//if (clmd->hairdata == nullptr) 
+	//{
+	//	clmd->clothObject->primitive_num = looptri_num;
+	//}
+	//else 
+	//{
+	//	clmd->clothObject->primitive_num = mesh->totedge;
+	//}
 
-	clmd->clothObject->tri = (MVertTri*)MEM_mallocN(sizeof(MVertTri) * looptri_num, "clothLoopTris");
-	if (clmd->clothObject->tri == NULL) 
+	clmd->clothObject->tri = static_cast<MVertTri*>(MEM_lockfree_mallocN(
+		sizeof(MVertTri) * looptri_num, "clothLoopTris"));
+	if (clmd->clothObject->tri == nullptr)
 	{
 		cloth_free_modifier(clmd);
 		//BKE_modifier_set_error( ob, &(clmd->modifier), "Out of memory on allocating clmd->clothObject->looptri");
@@ -2895,8 +2981,8 @@ void cloth_from_mesh(ClothModifierData* clmd, Mesh* mesh)
 	clmd->clothObject->edges = mesh->medge;
 
 	/* Free the springs since they can't be correct if the vertices changed. */
-	if (clmd->clothObject->springs != NULL) 
+	if (clmd->clothObject->springs != nullptr)
 	{
-		MEM_freeN(clmd->clothObject->springs);
+		MEM_lockfree_freeN(clmd->clothObject->springs);
 	}
 }

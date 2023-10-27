@@ -2,7 +2,7 @@
 
 #include "BLI_iterator.h"
 
-#include "depsgraph.h"
+#include "depsgraph.cuh"
 
 /* Needed for the instance iterator. */
 #include "object_types.cuh"
@@ -53,7 +53,7 @@ struct ViewLayer;
  * Technically, this is a copied-on-written and fully evaluated version of the input scene.
  * This function will check that the data-block has been expanded (and copied) from the original
  * one. Assert will happen if it's not. */
-struct Scene* DEG_get_evaluated_scene(const Depsgraph* graph)
+__host__ __device__ inline struct Scene* DEG_get_evaluated_scene(const Depsgraph* graph)
 {
     const Depsgraph* deg_graph = reinterpret_cast<const Depsgraph*>(graph);
     Scene* scene_cow = deg_graph->scene_cow;
@@ -71,7 +71,7 @@ struct Scene* DEG_get_evaluated_scene(const Depsgraph* graph)
 //struct Object *DEG_get_evaluated_object(const struct Depsgraph *depsgraph, struct Object *object);
 //
 ///* Get evaluated version of given ID datablock. */
-struct ID *DEG_get_evaluated_id(const struct Depsgraph *depsgraph, struct ID *id)
+__host__ __device__ inline struct ID *DEG_get_evaluated_id(const struct Depsgraph *depsgraph, struct ID *id)
 {
     if (id == nullptr) { return nullptr; }
     const IDNode* id_node = depsgraph->find_id_node(id);

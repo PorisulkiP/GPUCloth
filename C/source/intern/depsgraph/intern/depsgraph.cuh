@@ -5,8 +5,9 @@
 #include "MEM_guardedalloc.cuh"
 #include "ID.h" /* for ID_Type and INDEX_ID_MAX */
 #include "collision.h"
-#include "DEG_depsgraph.h"
-#include "BLI_map.hh"
+#include "DEG_depsgraph.cuh"
+#include "BLI_map.cuh"
+#include "mallocn_intern.cuh"
 #include "scene.h"
 
 struct ID;
@@ -19,7 +20,7 @@ struct OperationNode;
 struct Relation;
 struct TimeSourceNode;
 
-int BKE_idtype_idcode_to_index(const short idcode)
+inline int BKEtype_get_factory_idtype_idcode_to_index(const short idcode)
 {
 #define CASE_IDINDEX(_id) \
   case ID_##_id: \
@@ -102,12 +103,12 @@ struct TimeSourceNode : public Node {
 };
 
 struct DepsNodeFactory {
-	virtual NodeType type() const = 0;
-	virtual const char* type_name() const = 0;
+	__host__ __device__ virtual NodeType type() const = 0;
+	__host__ __device__ virtual const char* type_name() const = 0;
 
-	virtual int id_recalc_tag() const = 0;
+	__host__ __device__ virtual int id_recalc_tag() const = 0;
 
-	virtual Node* create_node(const ID* id, const char* subdata, const char* name) const = 0;
+	__host__ __device__ virtual Node* create_node(const ID* id, const char* subdata, const char* name) const = 0;
 };
 
 //template<class ModeObjectType> struct DepsNodeFactoryImpl : public DepsNodeFactory {
@@ -121,6 +122,23 @@ struct DepsNodeFactory {
 
 static DepsNodeFactory* node_typeinfo_registry[static_cast<int>(NodeType::NUM_TYPES)] = { nullptr };
 
+// Объявление переменной в памяти устройства
+__device__ static DepsNodeFactory* d_node_typeinfo_registry[static_cast<int>(NodeType::NUM_TYPES)];
+
+// Функция для копирования данных в память устройства
+__host__ void copyRegistryToDevice() {
+	cudaMemcpyToSymbol(d_node_typeinfo_registry, node_typeinfo_registry, sizeof(DepsNodeFactory*) * static_cast<int>(NodeType::NUM_TYPES), 0, cudaMemcpyHostToDevice);
+}
+__host__ __device__ inline DepsNodeFactory* type_get_factory(NodeType type) {
+#ifdef __CUDA_ARCH__
+	// Версия для device-кода
+	return d_node_typeinfo_registry[(int)type];
+#else
+	// Версия для host-кода
+	return node_typeinfo_registry[(int)type];
+#endif
+}
+
 /* Register typeinfo */
 //void register_node_typeinfo(DepsNodeFactory* factory)
 //{
@@ -129,21 +147,12 @@ static DepsNodeFactory* node_typeinfo_registry[static_cast<int>(NodeType::NUM_TY
 //	node_typeinfo_registry[type_as_int] = factory;
 //}
 
-/* Get typeinfo for specified type */
-/* Получить typeinfo для указанного типа */
-DepsNodeFactory* type_get_factory(NodeType type)
-{
-	/* Look up type - at worst, it doesn't exist in table yet, and we fail. */
-	/* Найдите тип - в худшем случае он еще не существует в таблице, и мы потерпим неудачу. */
-	return node_typeinfo_registry[(int)type];
-}
-
-inline bool check_datablock_expanded(const ID* id_cow)
+__host__ __device__ inline bool check_datablock_expanded(const ID* id_cow)
 {
 	return (id_cow->name[0] != '\0');
 }
 
-inline bool deg_copy_on_write_is_expanded(const ID* id_cow)
+__host__ __device__ inline bool deg_copy_on_write_is_expanded(const ID* id_cow)
 {
 	return check_datablock_expanded(id_cow);
 }
@@ -154,24 +163,24 @@ struct Depsgraph {
 	typedef blender::Vector<OperationNode*> OperationNodes;
 	typedef blender::Vector<IDNode*> IDDepsNodes;
 
-	Depsgraph(Main* bmain, Scene* scene, ViewLayer* view_layer, eEvaluationMode mode)
-		//: time_source(nullptr),
-		//has_animated_visibility(false),
-		//need_update_relations(true),
-		//need_update_nodes_visibility(true),
-		//need_tag_id_on_graph_visibility_update(true),
-		//need_tag_id_on_graph_visibility_time_update(false),
-		//bmain(bmain),
-		//scene(scene),
-		//view_layer(view_layer),
-		//mode(mode),
-		//frame(scene->r.cfra + scene->r.subframe),
-		//ctime((scene->r.cfra + scene->r.subframe) * scene->r.framelen),
-		//scene_cow(nullptr)//,
-		//is_active(false),
-		//is_evaluating(false),
-		//is_render_pipeline_depsgraph(false),
-		//use_editors_update(false)
+	Depsgraph(Main* bmain, Scene* scene, ViewLayer* view_layer, eEvaluationMode mode): scene(scene), mode(), ctime(0), scene_cow(nullptr)
+	//: time_source(nullptr),
+	//has_animated_visibility(false),
+	//need_update_relations(true),
+	//need_update_nodes_visibility(true),
+	//need_tag_id_on_graph_visibility_update(true),
+	//need_tag_id_on_graph_visibility_time_update(false),
+	//bmain(bmain),
+	//scene(scene),
+	//view_layer(view_layer),
+	//mode(mode),
+	//frame(scene->r.cfra + scene->r.subframe),
+	//ctime((scene->r.cfra + scene->r.subframe) * scene->r.framelen),
+	//scene_cow(nullptr)//,
+	//is_active(false),
+	//is_evaluating(false),
+	//is_render_pipeline_depsgraph(false),
+	//use_editors_update(false)
 	{
 		BLI_spin_init(&lock);
 		//memset(id_type_updated, 0, sizeof(id_type_updated));
@@ -180,6 +189,7 @@ struct Depsgraph {
 
 		//add_time_source();
 	}
+
 	~Depsgraph()
 	{
 		clear_id_nodes();
@@ -204,20 +214,21 @@ struct Depsgraph {
 	//	time_source->tag_update(this, DEG_UPDATE_SOURCE_TIME);
 	//}
 
-	void BKE_effector_relations_free(ListBase* lb)
+	__host__ __device__ static void BKE_effector_relations_free(ListBase* lb)
 	{
 		if (lb) {
 			BLI_freelistN(lb);
-			MEM_freeN(lb);
+			MEM_lockfree_freeN(lb);
 		}
 	}
-	void clear_physics_relations(Depsgraph* graph);
+	__host__ __device__ void clear_physics_relations(Depsgraph* graph);
 
-	IDNode* find_id_node(const ID* id) const
+	__host__ __device__ IDNode* find_id_node(const ID* id) const
 	{
 		return id_hash.lookup_default(id, nullptr);
 	}
-	IDNode* add_id_node(ID* id, ID* id_cow_hint = nullptr)
+
+	__host__ __device__ IDNode* add_id_node(ID* id, ID* id_cow_hint = nullptr)
 	{
 		BLI_assert((id->tag & LIB_TAG_COPIED_ON_WRITE) == 0);
 		IDNode* id_node = find_id_node(id);
@@ -236,7 +247,7 @@ struct Depsgraph {
 		}
 		return id_node;
 	}
-	void clear_id_nodes();
+	__host__ __device__ void clear_id_nodes();
 
 	///** Add new relationship between two nodes. */
 	//Relation* add_new_relation(Node* from, Node* to, const char* description, int flags = 0);
@@ -326,12 +337,12 @@ struct Depsgraph {
 	//bool use_editors_update;
 
 	//blender::Map<const ID*, ListBase*>* physics_relations[DEG_PHYSICS_RELATIONS_NUM];
-	blender::Map<const ID*, IDNode*> id_hash;
+	blender::Map<const ID*, IDNode*> id_hash{};
 	//IDDepsNodes id_nodes;
 	SpinLock lock;
 };
 
-void print_Depsgraph(Depsgraph *deps)
+inline void print_Depsgraph(const Depsgraph *deps)
 {
 	printf("Depsgraph:");
 	print_Scene(deps->scene);

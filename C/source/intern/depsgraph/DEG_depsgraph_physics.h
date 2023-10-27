@@ -1,6 +1,6 @@
 #pragma once
 
-#include "depsgraph.h"
+#include "depsgraph.cuh"
 
 struct DepsNodeHandle;
 struct Depsgraph;

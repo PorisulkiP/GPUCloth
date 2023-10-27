@@ -1,7 +1,12 @@
 #pragma once
 
-#include "MOD_modifiertypes.h"
+#ifndef __MOD_UTIL__
+#define __MOD_UTIL__
+
 #include "DNA_modifier_defaults.h"
+
+#include "cloth_types.cuh"
+#include "MEM_guardedalloc.cuh"
 
 //#include "DEG_depsgraph_build.h"
 
@@ -15,12 +20,18 @@ struct ModifierData;
 struct ModifierEvalContext;
 struct Object;
 
+#ifdef __CUDA_ARCH__
+	#define MY_CONSTANT __device__ const
+#else
+	#define MY_CONSTANT static constexpr
+#endif
+
 
 #define SDNA_TYPE_CHECKED(v) (&(v))
 
-static const ClothSimSettings DNA_DEFAULT_ClothSimSettings = _DNA_DEFAULT_ClothSimSettings;
-static const ClothCollSettings DNA_DEFAULT_ClothCollSettings = _DNA_DEFAULT_ClothCollSettings;
-static const ClothModifierData DNA_DEFAULT_ClothModifierData = _DNA_DEFAULT_ClothModifierData;
+MY_CONSTANT ClothSimSettings DNA_DEFAULT_ClothSimSettings = _DNA_DEFAULT_ClothSimSettings;
+MY_CONSTANT ClothCollSettings DNA_DEFAULT_ClothCollSettings = _DNA_DEFAULT_ClothCollSettings;
+MY_CONSTANT ClothModifierData DNA_DEFAULT_ClothModifierData = _DNA_DEFAULT_ClothModifierData;
 
 enum {
     _SDNA_TYPE_ClothSimSettings = 0,
@@ -29,7 +40,14 @@ enum {
     SDNA_TYPE_MAX = 3,
 };
 
-const void* DNA_default_table[SDNA_TYPE_MAX] =
+__device__ inline const void* d_DNA_default_table[SDNA_TYPE_MAX] =
+{
+    &DNA_DEFAULT_ClothSimSettings,
+    &DNA_DEFAULT_ClothCollSettings,
+    &DNA_DEFAULT_ClothModifierData,
+};
+
+inline const void* DNA_default_table[SDNA_TYPE_MAX] =
 {
     &DNA_DEFAULT_ClothSimSettings,
     &DNA_DEFAULT_ClothCollSettings,
@@ -39,14 +57,11 @@ const void* DNA_default_table[SDNA_TYPE_MAX] =
 /**
  * Wrap with macro that casts correctly.
  */
-#define DNA_struct_default_get(struct_name) \
-  (const struct_name *)DNA_default_table[SDNA_TYPE_FROM_STRUCT(struct_name)]
+#define SDNA_TYPE_FROM_STRUCT(id) _SDNA_TYPE_##id
 
-#define DNA_struct_default_alloc(struct_name) \
-  (struct_name *)_DNA_struct_default_alloc_impl( \
-      (const uint8_t *)DNA_default_table[SDNA_TYPE_FROM_STRUCT(struct_name)], \
-      sizeof(struct_name), \
-      __func__)
+#define DNA_struct_default_get(struct_name) (const struct_name *)DNA_default_table[SDNA_TYPE_FROM_STRUCT(struct_name)]
+
+#define DNA_struct_default_alloc(struct_name) (struct_name *)_DNA_struct_default_alloc_impl((const uint8_t *)DNA_default_table[SDNA_TYPE_FROM_STRUCT(struct_name)], sizeof(struct_name), __func__)
 
 #define MEMCPY_STRUCT_AFTER(struct_dst, struct_src, member) \
   { \
@@ -57,9 +72,9 @@ const void* DNA_default_table[SDNA_TYPE_MAX] =
   }  ((void)0)
 
 
-inline uint8_t* _DNA_struct_default_alloc_impl(const uint8_t* data_src, size_t size, const char* alloc_str)
+__host__ __device__ inline uint8_t* _DNA_struct_default_alloc_impl(const uint8_t* data_src, size_t size, const char* alloc_str)
 {
-    uint8_t* data_dst = (uint8_t*)MEM_mallocN(size, alloc_str);
+    auto* data_dst = static_cast<uint8_t*>(MEM_lockfree_mallocN(size, alloc_str));
     memcpy(data_dst, data_src, size);
     return data_dst;
 }
@@ -101,4 +116,6 @@ inline uint8_t* _DNA_struct_default_alloc_impl(const uint8_t* data_src, size_t s
 
 #ifdef __cplusplus
 }
+#endif
+
 #endif

@@ -6,10 +6,10 @@
 
 #include "MEM_guardedalloc.cuh"
 
-#include "boid_types.h"
+#include "boid_types.cuh"
 #include "cloth_types.cuh"
 #include "curve_types.h"
-#include "listBase.h"
+#include "listbase.cuh"
 #include "mesh_types.h"
 #include "meshdata_types.cuh"
 #include "modifier_types.cuh"
@@ -21,11 +21,11 @@
 
 
 #include "edgehash.h"
-#include "kdopbvh.h"
+#include "kdopbvh.cuh"
 #include "linklist.cuh"
 #include "B_math.h"
 #include "rand.h"
-#include "task.h"
+#include "task.cuh"
 #include "threads.h"
 #include "utildefines.h"
 
@@ -39,12 +39,12 @@
 #include "B_collection.h"
 #include "modifier.h"
 #include "object.h"
-#include "pointcache.h"
+#include "pointcache.cuh"
 #include "scene.h"
 
-#include "DEG_depsgraph.h"
+#include "DEG_depsgraph.cuh"
 #include "DEG_depsgraph_physics.h"
-#include "DEG_depsgraph_query.h"
+#include "DEG_depsgraph_query.cuh"
 //
 ///************************************************/
 ///*          Reacting to system events           */
@@ -122,7 +122,7 @@
 //
 //  /* reset children */
 //  if (psys->child) {
-//    MEM_freeN(psys->child);
+//    MEM_lockfree_freeN(psys->child);
 //    psys->child = NULL;
 //  }
 //
@@ -135,7 +135,7 @@
 //  BKE_ptcache_invalidate(psys->pointcache);
 //
 //  if (psys->fluid_springs) {
-//    MEM_freeN(psys->fluid_springs);
+//    MEM_lockfree_freeN(psys->fluid_springs);
 //    psys->fluid_springs = NULL;
 //  }
 //
@@ -182,18 +182,18 @@
 //    }
 //
 //    if (totpart) {
-//      newpars = MEM_callocN(totpart * sizeof(ParticleData), "particles");
+//      newpars = MEM_lockfree_callocN(totpart * sizeof(ParticleData), "particles");
 //      if (newpars == NULL) {
 //        return;
 //      }
 //
 //      if (psys->part->phystype == PART_PHYS_BOIDS) {
-//        newboids = MEM_callocN(totpart * sizeof(BoidParticle), "boid particles");
+//        newboids = MEM_lockfree_callocN(totpart * sizeof(BoidParticle), "boid particles");
 //
 //        if (newboids == NULL) {
 //          /* allocation error! */
 //          if (newpars) {
-//            MEM_freeN(newpars);
+//            MEM_lockfree_freeN(newpars);
 //          }
 //          return;
 //        }
@@ -212,11 +212,11 @@
 //      }
 //
 //      if (psys->particles->keys) {
-//        MEM_freeN(psys->particles->keys);
+//        MEM_lockfree_freeN(psys->particles->keys);
 //      }
 //
 //      if (psys->particles->boid) {
-//        MEM_freeN(psys->particles->boid);
+//        MEM_lockfree_freeN(psys->particles->boid);
 //      }
 //
 //      for (p = 0, pa = newpars; p < totsaved; p++, pa++) {
@@ -228,11 +228,11 @@
 //
 //      for (p = totsaved, pa = psys->particles + totsaved; p < psys->totpart; p++, pa++) {
 //        if (pa->hair) {
-//          MEM_freeN(pa->hair);
+//          MEM_lockfree_freeN(pa->hair);
 //        }
 //      }
 //
-//      MEM_freeN(psys->particles);
+//      MEM_lockfree_freeN(psys->particles);
 //      psys_free_pdd(psys);
 //    }
 //
@@ -248,7 +248,7 @@
 //  }
 //
 //  if (psys->child) {
-//    MEM_freeN(psys->child);
+//    MEM_lockfree_freeN(psys->child);
 //    psys->child = NULL;
 //    psys->totchild = 0;
 //  }
@@ -331,8 +331,8 @@
 //      }
 //    }
 //
-//    nodedmelem = MEM_callocN(sizeof(LinkNode) * totdmelem, "psys node elems");
-//    nodearray = MEM_callocN(sizeof(LinkNode *) * totelem, "psys node array");
+//    nodedmelem = MEM_lockfree_callocN(sizeof(LinkNode) * totdmelem, "psys node elems");
+//    nodearray = MEM_lockfree_callocN(sizeof(LinkNode *) * totelem, "psys node array");
 //
 //    for (i = 0, node = nodedmelem; i < totdmelem; i++, node++) {
 //      int origindex_final;
@@ -395,8 +395,8 @@
 //      }
 //    }
 //
-//    MEM_freeN(nodearray);
-//    MEM_freeN(nodedmelem);
+//    MEM_lockfree_freeN(nodearray);
+//    MEM_lockfree_freeN(nodedmelem);
 //  }
 //  else {
 //    /* TODO PARTICLE, make the following line unnecessary, each function
@@ -430,7 +430,7 @@
 //  int particles_per_task = numtasks > 0 ? (endpart - startpart) / numtasks : 0;
 //  int remainder = numtasks > 0 ? (endpart - startpart) - particles_per_task * numtasks : 0;
 //
-//  tasks = MEM_callocN(sizeof(ParticleTask) * numtasks, "ParticleThread");
+//  tasks = MEM_lockfree_callocN(sizeof(ParticleTask) * numtasks, "ParticleThread");
 //  *r_numtasks = numtasks;
 //  *r_tasks = tasks;
 //
@@ -462,32 +462,32 @@
 //    }
 //  }
 //
-//  MEM_freeN(tasks);
+//  MEM_lockfree_freeN(tasks);
 //}
 //
 //void psys_thread_context_free(ParticleThreadContext *ctx)
 //{
 //  /* path caching */
 //  if (ctx->vg_length) {
-//    MEM_freeN(ctx->vg_length);
+//    MEM_lockfree_freeN(ctx->vg_length);
 //  }
 //  if (ctx->vg_clump) {
-//    MEM_freeN(ctx->vg_clump);
+//    MEM_lockfree_freeN(ctx->vg_clump);
 //  }
 //  if (ctx->vg_kink) {
-//    MEM_freeN(ctx->vg_kink);
+//    MEM_lockfree_freeN(ctx->vg_kink);
 //  }
 //  if (ctx->vg_rough1) {
-//    MEM_freeN(ctx->vg_rough1);
+//    MEM_lockfree_freeN(ctx->vg_rough1);
 //  }
 //  if (ctx->vg_rough2) {
-//    MEM_freeN(ctx->vg_rough2);
+//    MEM_lockfree_freeN(ctx->vg_rough2);
 //  }
 //  if (ctx->vg_roughe) {
-//    MEM_freeN(ctx->vg_roughe);
+//    MEM_lockfree_freeN(ctx->vg_roughe);
 //  }
 //  if (ctx->vg_twist) {
-//    MEM_freeN(ctx->vg_twist);
+//    MEM_lockfree_freeN(ctx->vg_twist);
 //  }
 //
 //  if (ctx->sim.psys->lattice_deform_data) {
@@ -497,21 +497,21 @@
 //
 //  /* distribution */
 //  if (ctx->jit) {
-//    MEM_freeN(ctx->jit);
+//    MEM_lockfree_freeN(ctx->jit);
 //  }
 //  if (ctx->jitoff) {
-//    MEM_freeN(ctx->jitoff);
+//    MEM_lockfree_freeN(ctx->jitoff);
 //  }
 //  if (ctx->weight) {
-//    MEM_freeN(ctx->weight);
+//    MEM_lockfree_freeN(ctx->weight);
 //  }
 //  if (ctx->index) {
-//    MEM_freeN(ctx->index);
+//    MEM_lockfree_freeN(ctx->index);
 //  }
 //  if (ctx->seams) {
-//    MEM_freeN(ctx->seams);
+//    MEM_lockfree_freeN(ctx->seams);
 //  }
-//  // if (ctx->vertpart) MEM_freeN(ctx->vertpart);
+//  // if (ctx->vertpart) MEM_lockfree_freeN(ctx->vertpart);
 //  BLI_kdtree_3d_free(ctx->tree);
 //
 //  if (ctx->clumpcurve != NULL) {
@@ -605,10 +605,10 @@
 //
 //  if (psys->totpart && psys->totunexist == psys->totpart) {
 //    if (psys->particles->boid) {
-//      MEM_freeN(psys->particles->boid);
+//      MEM_lockfree_freeN(psys->particles->boid);
 //    }
 //
-//    MEM_freeN(psys->particles);
+//    MEM_lockfree_freeN(psys->particles);
 //    psys->particles = NULL;
 //    psys->totpart = psys->totunexist = 0;
 //  }
@@ -617,7 +617,7 @@
 //    int newtotpart = psys->totpart - psys->totunexist;
 //    ParticleData *npa, *newpars;
 //
-//    npa = newpars = MEM_callocN(newtotpart * sizeof(ParticleData), "particles");
+//    npa = newpars = MEM_lockfree_callocN(newtotpart * sizeof(ParticleData), "particles");
 //
 //    for (p = 0, pa = psys->particles; p < newtotpart; p++, pa++, npa++) {
 //      while (pa->flag & PARS_UNEXIST) {
@@ -628,14 +628,14 @@
 //    }
 //
 //    if (psys->particles->boid) {
-//      MEM_freeN(psys->particles->boid);
+//      MEM_lockfree_freeN(psys->particles->boid);
 //    }
-//    MEM_freeN(psys->particles);
+//    MEM_lockfree_freeN(psys->particles);
 //    psys->particles = newpars;
 //    psys->totpart -= psys->totunexist;
 //
 //    if (psys->particles->boid) {
-//      BoidParticle *newboids = MEM_callocN(psys->totpart * sizeof(BoidParticle), "boid particles");
+//      BoidParticle *newboids = MEM_lockfree_callocN(psys->totpart * sizeof(BoidParticle), "boid particles");
 //
 //      LOOP_PARTICLES
 //      {
@@ -1189,7 +1189,7 @@ ParticleSystem *psys_get_target_system(Object *ob, ParticleTarget *pt)
 //  if (totpart && psys->particles->totkey != totkeys) {
 //    free_keyed_keys(psys);
 //
-//    key = MEM_callocN(totpart * totkeys * sizeof(ParticleKey), "Keyed keys");
+//    key = MEM_lockfree_callocN(totpart * totkeys * sizeof(ParticleKey), "Keyed keys");
 //
 //    LOOP_PARTICLES
 //    {
@@ -1527,7 +1527,7 @@ ParticleSystem *psys_get_target_system(Object *ob, ParticleTarget *pt)
 //  /* Are more refs required? */
 //  if (psys->alloc_fluidsprings == 0 || psys->fluid_springs == NULL) {
 //    psys->alloc_fluidsprings = PSYS_FLUID_SPRINGS_INITIAL_SIZE;
-//    psys->fluid_springs = (ParticleSpring *)MEM_callocN(
+//    psys->fluid_springs = (ParticleSpring *)MEM_lockfree_callocN(
 //        psys->alloc_fluidsprings * sizeof(ParticleSpring), "Particle Fluid Springs");
 //  }
 //  else if (psys->tot_fluidsprings == psys->alloc_fluidsprings) {
@@ -3251,7 +3251,7 @@ ParticleSystem *psys_get_target_system(Object *ob, ParticleTarget *pt)
 //{
 //  if (dvert) {
 //    if (!dvert->totweight) {
-//      dvert->dw = MEM_callocN(sizeof(MDeformWeight), "deformWeight");
+//      dvert->dw = MEM_lockfree_callocN(sizeof(MDeformWeight), "deformWeight");
 //      dvert->totweight = 1;
 //    }
 //
@@ -3293,7 +3293,7 @@ ParticleSystem *psys_get_target_system(Object *ob, ParticleTarget *pt)
 //
 //  hairdata = *r_hairdata;
 //  if (!hairdata) {
-//    *r_hairdata = hairdata = MEM_mallocN(sizeof(ClothHairData) * totpoint, "hair data");
+//    *r_hairdata = hairdata = MEM_lockfree_mallocN(sizeof(ClothHairData) * totpoint, "hair data");
 //  }
 //
 //  /* calculate maximum segment length */
@@ -3440,7 +3440,7 @@ ParticleSystem *psys_get_target_system(Object *ob, ParticleTarget *pt)
 //
 //  if (!psys->hair_in_mesh || !psys->clmd->hairdata || realloc_roots) {
 //    if (psys->clmd->hairdata) {
-//      MEM_freeN(psys->clmd->hairdata);
+//      MEM_lockfree_freeN(psys->clmd->hairdata);
 //      psys->clmd->hairdata = NULL;
 //    }
 //  }
@@ -3464,7 +3464,7 @@ ParticleSystem *psys_get_target_system(Object *ob, ParticleTarget *pt)
 //      psys->clmd, sim->depsgraph, sim->scene, sim->ob, psys->hair_in_mesh, deformedVerts);
 //  BKE_mesh_vert_coords_apply(psys->hair_out_mesh, deformedVerts);
 //
-//  MEM_freeN(deformedVerts);
+//  MEM_lockfree_freeN(deformedVerts);
 //
 //  /* restore cloth effector weights */
 //  psys->clmd->sim_parms->effector_weights = clmd_effweights;
@@ -3532,7 +3532,7 @@ ParticleSystem *psys_get_target_system(Object *ob, ParticleTarget *pt)
 //  {
 //    /* first time alloc */
 //    if (pa->totkey == 0 || pa->hair == NULL) {
-//      pa->hair = MEM_callocN((psys->part->hair_step + 1) * sizeof(HairKey), "HairKeys");
+//      pa->hair = MEM_lockfree_callocN((psys->part->hair_step + 1) * sizeof(HairKey), "HairKeys");
 //      pa->totkey = 0;
 //    }
 //
@@ -4134,7 +4134,7 @@ ParticleSystem *psys_get_target_system(Object *ob, ParticleTarget *pt)
 //{
 //  ParticleSystem *psys = sim->psys;
 //  if (psys->particles) {
-//    MEM_freeN(psys->particles);
+//    MEM_lockfree_freeN(psys->particles);
 //    psys->particles = 0;
 //    psys->totpart = 0;
 //  }
@@ -4463,7 +4463,7 @@ ParticleSystem *psys_get_target_system(Object *ob, ParticleTarget *pt)
 //    free_unexisting_particles(sim);
 //
 //    if (psys->fluid_springs) {
-//      MEM_freeN(psys->fluid_springs);
+//      MEM_lockfree_freeN(psys->fluid_springs);
 //      psys->fluid_springs = NULL;
 //    }
 //
@@ -4634,7 +4634,7 @@ ParticleSystem *psys_get_target_system(Object *ob, ParticleTarget *pt)
 //
 //  if (psys->part && psys->part->phystype == PART_PHYS_BOIDS) {
 //    if (!pa->boid) {
-//      bpa = MEM_callocN(psys->totpart * sizeof(BoidParticle), "Boid Data");
+//      bpa = MEM_lockfree_callocN(psys->totpart * sizeof(BoidParticle), "Boid Data");
 //
 //      LOOP_PARTICLES
 //      {
@@ -4643,7 +4643,7 @@ ParticleSystem *psys_get_target_system(Object *ob, ParticleTarget *pt)
 //    }
 //  }
 //  else if (pa->boid) {
-//    MEM_freeN(pa->boid);
+//    MEM_lockfree_freeN(pa->boid);
 //    LOOP_PARTICLES
 //    {
 //      pa->boid = NULL;
@@ -4716,7 +4716,7 @@ ParticleSystem *psys_get_target_system(Object *ob, ParticleTarget *pt)
 //{
 //  BKE_libblock_free_datablock(&particle_settings->id, 0);
 //  BKE_libblock_free_data(&particle_settings->id, false);
-//  MEM_freeN(particle_settings);
+//  MEM_lockfree_freeN(particle_settings);
 //}
 //
 ///* main particle update call, checks that things are ok on the large scale and

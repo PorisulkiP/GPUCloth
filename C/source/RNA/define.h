@@ -4,7 +4,7 @@
 #include <inttypes.h>
 #include <limits.h>
 
-#include "listBase.h"
+#include "listbase.cuh"
 #include "types.h"
 
 #ifdef __cplusplus

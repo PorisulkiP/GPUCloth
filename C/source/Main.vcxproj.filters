@@ -1,19 +1,16 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
-    <ClInclude Include="cloth\cloth_settings.h">
+    <ClInclude Include="cloth\cloth_settings.cuh">
       <Filter>Cloth</Filter>
     </ClInclude>
-    <ClInclude Include="cloth\SIM_mass_spring.h">
-      <Filter>SIM</Filter>
-    </ClInclude>
-    <ClInclude Include="main.cuh">
+    <ClInclude Include="main.h">
       <Filter>Main</Filter>
     </ClInclude>
     <ClInclude Include="intern\ConstrainedConjugateGradient.h">
       <Filter>intern</Filter>
     </ClInclude>
-    <ClInclude Include="intern\implicit.h">
+    <ClInclude Include="intern\implicit.cuh">
       <Filter>intern</Filter>
     </ClInclude>
     <ClInclude Include="DNA\cloth_types.cuh">
@@ -44,9 +41,6 @@
       <Filter>DNA</Filter>
     </ClInclude>
     <ClInclude Include="DNA\meshdata_types.cuh">
-      <Filter>DNA</Filter>
-    </ClInclude>
-    <ClInclude Include="DNA\listBase.h">
       <Filter>DNA</Filter>
     </ClInclude>
     <ClInclude Include="kernel\tracking_private.h">
@@ -124,10 +118,10 @@
     <ClInclude Include="lib\utildefines.h">
       <Filter>lib</Filter>
     </ClInclude>
-    <ClInclude Include="intern\mallocn_inline.h">
+    <ClInclude Include="intern\mallocn_inline.cuh">
       <Filter>intern</Filter>
     </ClInclude>
-    <ClInclude Include="intern\mallocn_intern.h">
+    <ClInclude Include="intern\mallocn_intern.cuh">
       <Filter>intern</Filter>
     </ClInclude>
     <ClInclude Include="intern\MEM_guardedalloc.cuh">
@@ -139,16 +133,16 @@
     <ClInclude Include="intern\depsgraph\DEG_depsgraph_physics.h">
       <Filter>intern\depsgraph</Filter>
     </ClInclude>
-    <ClInclude Include="intern\depsgraph\DEG_depsgraph_query.h">
+    <ClInclude Include="intern\depsgraph\DEG_depsgraph_query.cuh">
       <Filter>intern\depsgraph</Filter>
     </ClInclude>
-    <ClInclude Include="intern\depsgraph\intern\depsgraph.h">
+    <ClInclude Include="intern\depsgraph\intern\depsgraph.cuh">
       <Filter>intern\depsgraph\intern</Filter>
     </ClInclude>
-    <ClInclude Include="lib\listbase.h">
+    <ClInclude Include="lib\listbase.cuh">
       <Filter>intern\depsgraph\intern</Filter>
     </ClInclude>
-    <ClInclude Include="DNA\pointcache_types.h">
+    <ClInclude Include="DNA\pointcache_types.cuh">
       <Filter>DNA</Filter>
     </ClInclude>
     <ClInclude Include="DNA\defaults.cuh">
@@ -172,10 +166,10 @@
     <ClInclude Include="kernel\scene.h">
       <Filter>kernel</Filter>
     </ClInclude>
-    <ClInclude Include="lib\kdopbvh.h">
+    <ClInclude Include="lib\kdopbvh.cuh">
       <Filter>kernel</Filter>
     </ClInclude>
-    <ClInclude Include="intern\depsgraph\DEG_depsgraph.h">
+    <ClInclude Include="intern\depsgraph\DEG_depsgraph.cuh">
       <Filter>intern\depsgraph</Filter>
     </ClInclude>
     <ClInclude Include="lib\edgehash.h">
@@ -199,7 +193,7 @@
     <ClInclude Include="DNA\DNA_sequence_types.h">
       <Filter>DNA</Filter>
     </ClInclude>
-    <ClInclude Include="intern\atomic\atomic_ops.h">
+    <ClInclude Include="intern\atomic\atomic_ops.cuh">
       <Filter>kernel</Filter>
     </ClInclude>
     <ClInclude Include="kernel\cloth.h">
@@ -214,7 +208,7 @@
     <ClInclude Include="intern\atomic\intern\atomic_ops_utils.h">
       <Filter>kernel</Filter>
     </ClInclude>
-    <ClInclude Include="intern\atomic\intern\atomic_ops_ext.h">
+    <ClInclude Include="intern\atomic\intern\atomic_ops_ext.cuh">
       <Filter>intern</Filter>
     </ClInclude>
     <ClInclude Include="lib\task.hh">
@@ -223,7 +217,7 @@
     <ClInclude Include="lib\threads.h">
       <Filter>lib</Filter>
     </ClInclude>
-    <ClInclude Include="kernel\pointcache.h">
+    <ClInclude Include="kernel\pointcache.cuh">
       <Filter>kernel</Filter>
     </ClInclude>
     <ClInclude Include="DNA\B_texture_types.h">
@@ -241,7 +235,7 @@
     <ClInclude Include="kernel\BKE_main.h">
       <Filter>kernel</Filter>
     </ClInclude>
-    <ClInclude Include="lib\ghash.h">
+    <ClInclude Include="lib\ghash.cuh">
       <Filter>lib</Filter>
     </ClInclude>
     <ClInclude Include="DNA\particle_types.h">
@@ -253,7 +247,7 @@
     <ClInclude Include="DNA\particle_defaults.h">
       <Filter>lib</Filter>
     </ClInclude>
-    <ClInclude Include="DNA\boid_types.h">
+    <ClInclude Include="DNA\boid_types.cuh">
       <Filter>lib</Filter>
     </ClInclude>
     <ClInclude Include="kernel\boids.h">
@@ -286,7 +280,7 @@
     <ClInclude Include="kernel\object.h">
       <Filter>lib</Filter>
     </ClInclude>
-    <ClInclude Include="lib\BLI_map.hh">
+    <ClInclude Include="lib\BLI_map.cuh">
       <Filter>Data_types</Filter>
     </ClInclude>
     <ClInclude Include="lib\BLI_vector.hh">
@@ -367,7 +361,7 @@
     <ClInclude Include="lib\BLI_math_vector.hh">
       <Filter>lib</Filter>
     </ClInclude>
-    <ClInclude Include="lib\task.h">
+    <ClInclude Include="lib\task.cuh">
       <Filter>lib</Filter>
     </ClInclude>
     <ClInclude Include="lib\BLI_alloca.h">
@@ -376,10 +370,10 @@
     <ClInclude Include="lib\BLI_allocator.hh">
       <Filter>lib</Filter>
     </ClInclude>
-    <ClInclude Include="lib\BLI_hash_tables.hh">
+    <ClInclude Include="lib\BLI_hash_tables.cuh">
       <Filter>lib</Filter>
     </ClInclude>
-    <ClInclude Include="lib\BLI_map_slots.hh">
+    <ClInclude Include="lib\BLI_map_slots.cuh">
       <Filter>lib</Filter>
     </ClInclude>
     <ClInclude Include="lib\BLI_string_ref.hh">
@@ -391,16 +385,20 @@
     <ClInclude Include="kernel\intern\subdiv_inline.h">
       <Filter>kernel\intern</Filter>
     </ClInclude>
-    <ClInclude Include="lib\PIL_time_utildefines.h" />
+    <ClInclude Include="lib\PIL_time_utildefines.cuh" />
+    <ClInclude Include="cloth\SIM_mass_spring.cuh">
+      <Filter>SIM</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\BLI_memory_utils.cuh" />
+    <ClInclude Include="kernel\BKE_subdiv.h" />
+    <ClInclude Include="lib\BLI_probing_strategies.cuh" />
+    <ClInclude Include="cloth\CUDA_mem_utils.cuh" />
   </ItemGroup>
   <ItemGroup>
-    <CudaCompile Include="cloth\SIM_mass_spring.cpp">
-      <Filter>SIM</Filter>
-    </CudaCompile>
-    <CudaCompile Include="main.cu">
+    <CudaCompile Include="main.cpp">
       <Filter>Main</Filter>
     </CudaCompile>
-    <CudaCompile Include="intern\mallocn.cpp">
+    <CudaCompile Include="intern\mallocn.cu">
       <Filter>intern</Filter>
     </CudaCompile>
     <CudaCompile Include="cloth\intern\hair_volume.cpp">
@@ -411,6 +409,9 @@
     </CudaCompile>
     <CudaCompile Include="lib\intern\mempool.cpp">
       <Filter>lib\intern</Filter>
+    </CudaCompile>
+    <CudaCompile Include="cloth\SIM_mass_spring.cu">
+      <Filter>SIM</Filter>
     </CudaCompile>
   </ItemGroup>
   <ItemGroup>
@@ -476,7 +477,7 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="intern\implicit.cpp">
+    <ClCompile Include="intern\implicit.cu">
       <Filter>intern</Filter>
     </ClCompile>
     <ClCompile Include="lib\intern\array_store_utils.cpp">
@@ -485,7 +486,7 @@
     <ClCompile Include="lib\intern\array_utils.cpp">
       <Filter>lib\intern</Filter>
     </ClCompile>
-    <ClCompile Include="intern\depsgraph\intern\depsgraph.cc">
+    <ClCompile Include="intern\depsgraph\intern\depsgraph.cu">
       <Filter>intern\depsgraph\intern</Filter>
     </ClCompile>
     <ClCompile Include="lib\intern\buffer.cpp">
@@ -500,7 +501,7 @@
     <ClCompile Include="lib\intern\math_base.cpp">
       <Filter>lib\intern</Filter>
     </ClCompile>
-    <ClCompile Include="lib\intern\math_base_inline.cpp">
+    <ClCompile Include="lib\intern\math_base_inline.cu">
       <Filter>lib\intern</Filter>
     </ClCompile>
     <ClCompile Include="lib\intern\math_bits_inline.cpp">
@@ -518,16 +519,16 @@
     <ClCompile Include="lib\intern\math_color_inline.cpp">
       <Filter>lib\intern</Filter>
     </ClCompile>
-    <ClCompile Include="lib\intern\math_geom.cpp">
+    <ClCompile Include="lib\intern\math_geom.cu">
       <Filter>lib\intern</Filter>
     </ClCompile>
-    <ClCompile Include="lib\intern\math_geom_inline.cpp">
+    <ClCompile Include="lib\intern\math_geom_inline.cu">
       <Filter>lib\intern</Filter>
     </ClCompile>
     <ClCompile Include="lib\intern\math_interp.cpp">
       <Filter>lib\intern</Filter>
     </ClCompile>
-    <ClCompile Include="lib\intern\math_matrix.cpp">
+    <ClCompile Include="lib\intern\math_matrix.cu">
       <Filter>lib\intern</Filter>
     </ClCompile>
     <ClCompile Include="lib\intern\math_rotation.cpp">
@@ -542,7 +543,7 @@
     <ClCompile Include="lib\intern\math_vec.cc">
       <Filter>lib\intern</Filter>
     </ClCompile>
-    <ClCompile Include="lib\intern\math_vector.cpp">
+    <ClCompile Include="lib\intern\math_vector.cu">
       <Filter>lib\intern</Filter>
     </ClCompile>
     <ClCompile Include="lib\intern\math_vector_inline.cu">
@@ -563,7 +564,7 @@
     <ClCompile Include="lib\intern\sort_utils.cpp">
       <Filter>lib\intern</Filter>
     </ClCompile>
-    <ClCompile Include="lib\intern\stack.cpp">
+    <ClCompile Include="lib\intern\stack.cu">
       <Filter>lib\intern</Filter>
     </ClCompile>
     <ClCompile Include="lib\intern\storage.cpp">
@@ -581,7 +582,7 @@
     <ClCompile Include="kernel\intern\collision.cu">
       <Filter>kernel\intern</Filter>
     </ClCompile>
-    <ClCompile Include="kernel\intern\effect.cpp">
+    <ClCompile Include="kernel\intern\effect.cu">
       <Filter>kernel\intern</Filter>
     </ClCompile>
     <ClCompile Include="kernel\intern\rigidbody.cpp">
@@ -590,16 +591,16 @@
     <ClCompile Include="kernel\intern\simulation.cc">
       <Filter>kernel\intern</Filter>
     </ClCompile>
-    <ClCompile Include="intern\leak_detector.cc">
+    <ClCompile Include="intern\leak_detector.cu">
       <Filter>intern</Filter>
     </ClCompile>
-    <ClCompile Include="intern\mallocn_guarded_impl.cpp">
+    <ClCompile Include="intern\mallocn_guarded_impl.cu">
       <Filter>intern</Filter>
     </ClCompile>
-    <ClCompile Include="intern\mallocn_lockfree_impl.cpp">
+    <ClCompile Include="intern\mallocn_lockfree_impl.cu">
       <Filter>intern</Filter>
     </ClCompile>
-    <ClCompile Include="lib\intern\kdopbvh.cpp">
+    <ClCompile Include="lib\intern\kdopbvh.cu">
       <Filter>lib\intern</Filter>
     </ClCompile>
     <ClCompile Include="lib\intern\task_graph.cc">
@@ -632,16 +633,16 @@
     <ClCompile Include="kernel\intern\boids.cpp">
       <Filter>lib\intern</Filter>
     </ClCompile>
-    <ClCompile Include="kernel\intern\pointcache.cpp">
+    <ClCompile Include="kernel\intern\pointcache.cu">
       <Filter>kernel\intern</Filter>
     </ClCompile>
     <ClCompile Include="kernel\intern\modifier.cpp">
       <Filter>kernel\intern</Filter>
     </ClCompile>
-    <ClCompile Include="lib\intern\ghash.cpp">
+    <ClCompile Include="lib\intern\ghash.cu">
       <Filter>lib\intern</Filter>
     </ClCompile>
-    <ClCompile Include="lib\intern\ghash_utils.cpp">
+    <ClCompile Include="lib\intern\ghash_utils.cu">
       <Filter>lib\intern</Filter>
     </ClCompile>
     <ClCompile Include="mainTests.cpp">

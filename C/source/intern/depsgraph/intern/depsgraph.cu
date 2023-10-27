@@ -1,4 +1,4 @@
-#include "depsgraph.h" /* own include */
+#include "depsgraph.cuh" /* own include */
 
 #include <algorithm>
 
@@ -8,7 +8,7 @@
 
 #include "scene.h"
 
-#include "DEG_depsgraph.h"
+#include "DEG_depsgraph.cuh"
 #include "intern/eval/deg_eval_copy_on_write.h"
 
 #include "intern/node/deg_node.h"

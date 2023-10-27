@@ -1,8 +1,7 @@
-#include <math.h>
-#include <string.h>
+#include <cmath>
 
 #include "MEM_guardedalloc.cuh"
-#include "listbase.h"
+#include "listbase.cuh"
 
 #include "object_force_types.cuh"
 #include "object_types.cuh"
@@ -17,11 +16,7 @@
 #include "collision.h"
 #include "effect.h"
 #include "particle.h"
-#include "kdopbvh.h"
-
-#include "modifier.h"
-
-#include "enum_types.h"
+#include "kdopbvh.cuh"
 
 static float len_squared_v3v3_with_normal_bias(const float co_search[3],
                                                const float co_test[3],
@@ -342,7 +337,7 @@ static bool rule_avoid_collision(BoidRule *rule,
     }
   }
   //if (ptn) {
-  //  MEM_freeN(ptn);
+  //  MEM_lockfree_freeN(ptn);
   //  ptn = NULL;
   //}
 
@@ -401,14 +396,14 @@ static bool rule_avoid_collision(BoidRule *rule,
       }
 
   //    if (ptn) {
-  //      MEM_freeN(ptn);
+  //      MEM_lockfree_freeN(ptn);
   //      ptn = NULL;
   //    }
     }
   }
 
   //if (ptn && nearest == 0) {
-  //  MEM_freeN(ptn);
+  //  MEM_lockfree_freeN(ptn);
   //}
 
   return ret;
@@ -434,7 +429,7 @@ static bool rule_separate(BoidRule *UNUSED(rule),
     //ret = 1;
   }
   //if (ptn) {
-  //  MEM_freeN(ptn);
+  //  MEM_lockfree_freeN(ptn);
   //  ptn = NULL;
   //}
 
@@ -455,7 +450,7 @@ static bool rule_separate(BoidRule *UNUSED(rule),
       //}
 
       //if (ptn) {
-      //  MEM_freeN(ptn);
+      //  MEM_lockfree_freeN(ptn);
       //  ptn = NULL;
       //}
     }
@@ -720,7 +715,7 @@ static bool rule_fight(BoidRule *rule, BoidBrainData *bbd, BoidValues *val, Part
   f_strength += bbd->part->boids->strength * health;
 
   //if (ptn) {
-  //  MEM_freeN(ptn);
+  //  MEM_lockfree_freeN(ptn);
   //  ptn = NULL;
   //}
 
@@ -753,7 +748,7 @@ static bool rule_fight(BoidRule *rule, BoidBrainData *bbd, BoidValues *val, Part
       }
 
       //if (ptn) {
-      //  MEM_freeN(ptn);
+      //  MEM_lockfree_freeN(ptn);
       //  ptn = NULL;
       //}
     }
@@ -1603,27 +1598,27 @@ BoidRule *boid_new_rule(int type)
   switch (type) {
     case eBoidRuleType_Goal:
     case eBoidRuleType_Avoid:
-      rule = (BoidRule*)MEM_callocN(sizeof(BoidRuleGoalAvoid), "BoidRuleGoalAvoid");
+      rule = (BoidRule*)MEM_lockfree_callocN(sizeof(BoidRuleGoalAvoid), "BoidRuleGoalAvoid");
       break;
     case eBoidRuleType_AvoidCollision:
-      rule = (BoidRule*)MEM_callocN(sizeof(BoidRuleAvoidCollision), "BoidRuleAvoidCollision");
+      rule = (BoidRule*)MEM_lockfree_callocN(sizeof(BoidRuleAvoidCollision), "BoidRuleAvoidCollision");
       ((BoidRuleAvoidCollision *)rule)->look_ahead = 2.0f;
       break;
     case eBoidRuleType_FollowLeader:
-      rule = (BoidRule*)MEM_callocN(sizeof(BoidRuleFollowLeader), "BoidRuleFollowLeader");
+      rule = (BoidRule*)MEM_lockfree_callocN(sizeof(BoidRuleFollowLeader), "BoidRuleFollowLeader");
       ((BoidRuleFollowLeader *)rule)->distance = 1.0f;
       break;
     case eBoidRuleType_AverageSpeed:
-      rule = (BoidRule*)MEM_callocN(sizeof(BoidRuleAverageSpeed), "BoidRuleAverageSpeed");
+      rule = (BoidRule*)MEM_lockfree_callocN(sizeof(BoidRuleAverageSpeed), "BoidRuleAverageSpeed");
       ((BoidRuleAverageSpeed *)rule)->speed = 0.5f;
       break;
     case eBoidRuleType_Fight:
-      rule = (BoidRule*)MEM_callocN(sizeof(BoidRuleFight), "BoidRuleFight");
+      rule = (BoidRule*)MEM_lockfree_callocN(sizeof(BoidRuleFight), "BoidRuleFight");
       ((BoidRuleFight *)rule)->distance = 100.0f;
       ((BoidRuleFight *)rule)->flee_distance = 100.0f;
       break;
     default:
-      rule = (BoidRule*)MEM_callocN(sizeof(BoidRule), "BoidRule");
+      rule = (BoidRule*)MEM_lockfree_callocN(sizeof(BoidRule), "BoidRule");
       break;
   }
 
@@ -1661,7 +1656,7 @@ void boid_default_settings(BoidSettings *boids)
 
 BoidState *boid_new_state(BoidSettings *boids)
 {
-  BoidState *state = (BoidState*)MEM_callocN(sizeof(BoidState), "BoidState");
+  BoidState *state = (BoidState*)MEM_lockfree_callocN(sizeof(BoidState), "BoidState");
 
   state->id = boids->last_state_id++;
   if (state->id) {
@@ -1680,7 +1675,7 @@ BoidState *boid_new_state(BoidSettings *boids)
 
 BoidState *boid_duplicate_state(BoidSettings *boids, BoidState *state)
 {
-  BoidState *staten = (BoidState*)MEM_dupallocN(state);
+  BoidState *staten = (BoidState*)MEM_lockfree_dupallocN(state);
 
   BLI_duplicatelist(&staten->rules, &state->rules);
   BLI_duplicatelist(&staten->conditions, &state->conditions);
@@ -1703,7 +1698,7 @@ void boid_free_settings(BoidSettings *boids)
 
     BLI_freelistN(&boids->states);
 
-    MEM_freeN(boids);
+    MEM_lockfree_freeN(boids);
   }
 }
 BoidSettings *boid_copy_settings(const BoidSettings *boids)
@@ -1713,7 +1708,7 @@ BoidSettings *boid_copy_settings(const BoidSettings *boids)
   if (boids) {
     BoidState *state, *nstate;
 
-    nboids = (BoidSettings*)MEM_dupallocN(boids);
+    nboids = (BoidSettings*)MEM_lockfree_dupallocN(boids);
 
     BLI_duplicatelist(&nboids->states, &boids->states);
 

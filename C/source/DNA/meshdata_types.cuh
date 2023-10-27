@@ -1,7 +1,6 @@
 #pragma once
 
 #include "customdata_types.cuh"
-#include "listBase.h"
 #include "math_vector.cuh"
 
 /**
@@ -19,7 +18,7 @@ typedef struct MVert {
   char flag, bweight;
 } MVert;
 
-inline void print_MVert(MVert& mvert)
+inline void print_MVert(const MVert& mvert)
 {
     print_v3("\tcoo", mvert.co);
     //printf("\n\tnormals: %d, %d, %d", mvert.no[0], mvert.no[1], mvert.no[2]);
@@ -73,7 +72,7 @@ typedef struct MPoly {
   /** Keep signed since we need to subtract when getting the previous loop. */
   int totloop;
   short mat_nr;
-  char flag;// , _pad;
+  char flag;
 } MPoly;
 
 /** #MPoly.flag */

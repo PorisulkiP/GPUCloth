@@ -1,9 +1,9 @@
 #pragma once
 
 #include "BLI_bitmap.h"
-#include "ghash.h"
+#include "ghash.cuh"
 #include "types.h"
-#include "listBase.h"
+#include "listbase.cuh"
 #include "ID.h"
 
 #include "utildefines.h"
@@ -25,9 +25,9 @@ typedef uint BLI_bitmap;
 /* size (in bytes) used to hold '_tot' bits */
 #define BLI_BITMAP_SIZE(_tot) ((size_t)(_BITMAP_NUM_BLOCKS(_tot)) * sizeof(BLI_bitmap))
 
-/* allocate memory for a bitmap with '_tot' bits; free with MEM_freeN() */
+/* allocate memory for a bitmap with '_tot' bits; free with MEM_lockfree_freeN() */
 #define BLI_BITMAP_NEW(_tot, _alloc_string) \
-  ((BLI_bitmap *)MEM_callocN(BLI_BITMAP_SIZE(_tot), _alloc_string))
+  ((BLI_bitmap *)MEM_lockfree_callocN(BLI_BITMAP_SIZE(_tot), _alloc_string))
 
 /* allocate a bitmap on the stack */
 #define BLI_BITMAP_NEW_ALLOCA(_tot) \

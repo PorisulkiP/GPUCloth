@@ -443,4 +443,7 @@ typedef enum eMeshSymmetryType {
   ME_SYMMETRY_Z = 1 << 2,
 } eMeshSymmetryType;
 
-#define MESH_MAX_VERTS 2000000000L
+enum
+{
+	MESH_MAX_VERTS = 2000000000L
+};

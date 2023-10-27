@@ -3,6 +3,7 @@
 #include "MEM_guardedalloc.cuh"
 
 #include "compiler_compat.cuh"
+#include "mallocn_intern.cuh"
 #include "sys_types.cuh"
 
 
@@ -227,7 +228,7 @@ void BKE_subdiv_free(Subdiv *subdiv);
 
 void BKE_subdiv_displacement_attach_from_multires(Subdiv *subdiv,struct Mesh *mesh, const struct MultiresModifierData *mmd);
 
-void BKE_subdiv_displacement_detach(Subdiv *subdiv)
+inline void BKE_subdiv_displacement_detach(Subdiv *subdiv)
 {
     if (subdiv->displacement_evaluator == NULL) {
         return;
@@ -235,7 +236,7 @@ void BKE_subdiv_displacement_detach(Subdiv *subdiv)
     if (subdiv->displacement_evaluator->free != NULL) {
         subdiv->displacement_evaluator->free(subdiv->displacement_evaluator);
     }
-    MEM_freeN(subdiv->displacement_evaluator);
+    MEM_lockfree_freeN(subdiv->displacement_evaluator);
     subdiv->displacement_evaluator = NULL;
 }
 

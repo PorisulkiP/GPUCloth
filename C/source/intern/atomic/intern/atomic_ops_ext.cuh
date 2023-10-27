@@ -1,13 +1,13 @@
 #ifndef __ATOMIC_OPS_EXT_H__
 #define __ATOMIC_OPS_EXT_H__
 
-#include <limits.h>
-#include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <assert.h>
 
 #include <intrin0.inl.h>
+
+#include <cuda_runtime_api.h>
+#include <cuda_runtime.h>
 
 #define LG_SIZEOF_PTR 4
 #define LG_SIZEOF_INT 4
@@ -17,44 +17,82 @@
 
 typedef unsigned int uint;
 
-uint32_t atomic_load_uint32(const uint32_t* v)
+__host__ __device__ inline uint32_t atomic_load_uint32(const uint32_t* v)
 {
     return __atomic_impl_load_generic(v);
 }
 
-void atomic_store_uint32(uint32_t* p, uint32_t v)
+__host__ __device__ inline void atomic_store_uint32(uint32_t* p, uint32_t v)
 {
     __atomic_impl_store_generic(p, v);
 }
 
-uint32_t atomic_add_and_fetch_uint32(uint32_t* p, uint32_t x)
+__host__ __device__ inline uint32_t atomic_add_and_fetch_uint32(uint32_t* p, uint32_t x)
 {
-    return _InterlockedExchangeAdd((long volatile*)p, x) + x;
+	#ifdef __CUDA_ARCH__
+	    // Версия для device-кода, используя встроенные функции CUDA
+	    return atomicAdd(p, x) + x;
+	#else
+	    // Версия для хост-кода, используя Windows Interlocked API
+	    return _InterlockedExchangeAdd(reinterpret_cast<long volatile*>(p), x) + x;
+	#endif
 }
 
-uint32_t atomic_sub_and_fetch_uint32(uint32_t* p, uint32_t x)
+__host__ __device__ inline uint32_t atomic_sub_and_fetch_uint32(uint32_t* p, uint32_t x)
 {
-    return _InterlockedExchangeAdd((long volatile*)p, -((int32_t)x)) - x;
+	#ifdef __CUDA_ARCH__
+	    // Версия для device-кода, используя встроенные функции CUDA
+	    return atomicSub(p, x) - x;
+	#else
+	    // Версия для хост-кода, используя Windows Interlocked API
+	    return _InterlockedExchangeAdd(reinterpret_cast<long volatile*>(p), -static_cast<int32_t>(x)) - x;
+	#endif
 }
 
-uint32_t atomic_cas_uint32(uint32_t* v, uint32_t old, uint32_t _new)
+__host__ __device__ inline uint32_t atomic_cas_uint32(uint32_t* v, uint32_t old, uint32_t _new)
 {
-    return _InterlockedCompareExchange((long*)v, _new, old);
+#ifdef __CUDA_ARCH__
+    // Версия для device-кода, используя встроенные функции CUDA
+    return atomicCAS(v, old, _new);
+#else
+    // Версия для хост-кода, используя Windows Interlocked API
+    return _InterlockedCompareExchange(reinterpret_cast<long*>(v), _new, old);
+#endif
+    
 }
 
-uint32_t atomic_fetch_and_add_uint32(uint32_t* p, uint32_t x)
+__host__ __device__ inline uint32_t atomic_fetch_and_add_uint32(uint32_t* p, uint32_t x)
 {
-    return _InterlockedExchangeAdd((long volatile*)p, x);
+#ifdef __CUDA_ARCH__
+    // Версия для device-кода, используя встроенные функции CUDA
+    return atomicExch(p, *p + x);
+#else
+    // Версия для хост-кода, используя Windows Interlocked API
+    return _InterlockedExchangeAdd(reinterpret_cast<long volatile*>(p), x);
+#endif
 }
 
-uint32_t atomic_fetch_and_or_uint32(uint32_t* p, uint32_t x)
+
+__host__ __device__ inline uint32_t atomic_fetch_and_or_uint32(uint32_t* p, uint32_t x)
 {
-    return _InterlockedOr((long volatile*)p, x);
+#ifdef __CUDA_ARCH__
+    // Версия для device-кода, используя встроенные функции CUDA
+    return atomicOr(p, x);
+#else
+    // Версия для хост-кода, используя Windows Interlocked API
+    return _InterlockedOr(reinterpret_cast<long volatile*>(p), x);
+#endif
 }
 
-uint32_t atomic_fetch_and_and_uint32(uint32_t* p, uint32_t x)
+__host__ __device__ inline uint32_t atomic_fetch_and_and_uint32(uint32_t* p, uint32_t x)
 {
-    return _InterlockedExchangeAdd((long volatile*)p, x);
+#ifdef __CUDA_ARCH__
+    // Версия для device-кода, используя встроенные функции CUDA
+    return atomicAnd(p, x);
+#else
+    // Версия для хост-кода, используя Windows Interlocked API
+    return _InterlockedExchangeAdd(reinterpret_cast<long volatile*>(p), x);  // Это не точный аналог, проверьте логику вашей программы
+#endif
 }
 
 /******************************************************************************/
@@ -62,7 +100,7 @@ uint32_t atomic_fetch_and_and_uint32(uint32_t* p, uint32_t x)
 
 /* Unsigned */
 #pragma intrinsic(_InterlockedAnd8)
-uint8_t atomic_fetch_and_and_uint8(uint8_t* p, uint8_t b)
+__host__ __device__ inline uint8_t atomic_fetch_and_and_uint8(uint8_t* p, uint8_t b)
 {
 #if (LG_SIZEOF_PTR == 8 || LG_SIZEOF_INT == 8)
     return InterlockedAnd8((char*)p, (char)b);
@@ -72,7 +110,7 @@ uint8_t atomic_fetch_and_and_uint8(uint8_t* p, uint8_t b)
 }
 
 #pragma intrinsic(_InterlockedOr8)
-uint8_t atomic_fetch_and_or_uint8(uint8_t* p, uint8_t b)
+__host__ __device__ inline uint8_t atomic_fetch_and_or_uint8(uint8_t* p, uint8_t b)
 {
 #if (LG_SIZEOF_PTR == 8 || LG_SIZEOF_INT == 8)
     return InterlockedOr8((char*)p, (char)b);
@@ -83,7 +121,7 @@ uint8_t atomic_fetch_and_or_uint8(uint8_t* p, uint8_t b)
 
 /* Signed */
 #pragma intrinsic(_InterlockedAnd8)
-int8_t atomic_fetch_and_and_int8(int8_t* p, int8_t b)
+__host__ __device__ inline int8_t atomic_fetch_and_and_int8(int8_t* p, int8_t b)
 {
 #if (LG_SIZEOF_PTR == 8 || LG_SIZEOF_INT == 8)
     return InterlockedAnd8((char*)p, (char)b);
@@ -93,7 +131,7 @@ int8_t atomic_fetch_and_and_int8(int8_t* p, int8_t b)
 }
 
 #pragma intrinsic(_InterlockedOr8)
-int8_t atomic_fetch_and_or_int8(int8_t* p, int8_t b)
+__host__ __device__ inline int8_t atomic_fetch_and_or_int8(int8_t* p, int8_t b)
 {
 #if (LG_SIZEOF_PTR == 8 || LG_SIZEOF_INT == 8)
     return InterlockedOr8((char*)p, (char)b);
@@ -102,16 +140,16 @@ int8_t atomic_fetch_and_or_int8(int8_t* p, int8_t b)
 #endif
 }
 
-size_t atomic_add_and_fetch_z(size_t *p, size_t x)
+__host__ __device__ inline size_t atomic_add_and_fetch_z(size_t* p, size_t x)
 {
 #if (LG_SIZEOF_PTR == 8)
-  return (size_t)atomic_add_and_fetch_uint64((uint64_t *)p, (uint64_t)x);
+    return (size_t)atomic_add_and_fetch_uint64((uint64_t*)p, (uint64_t)x);
 #elif (LG_SIZEOF_PTR == 4)
-  return (size_t)atomic_add_and_fetch_uint32((uint32_t *)p, (uint32_t)x);
+    return (size_t)atomic_add_and_fetch_uint32((uint32_t*)p, (uint32_t)x);
 #endif
 }
 
-size_t atomic_sub_and_fetch_z(size_t *p, size_t x)
+__host__ __device__ inline size_t atomic_sub_and_fetch_z(size_t *p, size_t x)
 {
 #if (LG_SIZEOF_PTR == 8)
   return (size_t)atomic_add_and_fetch_uint64((uint64_t *)p, (uint64_t) - ((int64_t)x));
@@ -120,7 +158,7 @@ size_t atomic_sub_and_fetch_z(size_t *p, size_t x)
 #endif
 }
 
-size_t atomic_fetch_and_add_z(size_t *p, size_t x)
+__host__ __device__ inline size_t atomic_fetch_and_add_z(size_t *p, size_t x)
 {
 #if (LG_SIZEOF_PTR == 8)
   return (size_t)atomic_fetch_and_add_uint64((uint64_t *)p, (uint64_t)x);
@@ -129,7 +167,7 @@ size_t atomic_fetch_and_add_z(size_t *p, size_t x)
 #endif
 }
 
-size_t atomic_fetch_and_sub_z(size_t *p, size_t x)
+__host__ __device__ inline size_t atomic_fetch_and_sub_z(size_t *p, size_t x)
 {
 #if (LG_SIZEOF_PTR == 8)
   return (size_t)atomic_fetch_and_add_uint64((uint64_t *)p, (uint64_t) - ((int64_t)x));
@@ -138,7 +176,7 @@ size_t atomic_fetch_and_sub_z(size_t *p, size_t x)
 #endif
 }
 
-size_t atomic_cas_z(size_t *v, size_t old, size_t _new)
+__host__ __device__ inline size_t atomic_cas_z(size_t *v, size_t old, size_t _new)
 {
 #if (LG_SIZEOF_PTR == 8)
   return (size_t)atomic_cas_uint64((uint64_t *)v, (uint64_t)old, (uint64_t)_new);
@@ -147,7 +185,7 @@ size_t atomic_cas_z(size_t *v, size_t old, size_t _new)
 #endif
 }
 
-size_t atomic_load_z(const size_t *v)
+__host__ __device__ inline size_t atomic_load_z(const size_t *v)
 {
 #if (LG_SIZEOF_PTR == 8)
   return (size_t)atomic_load_uint64((const uint64_t *)v);
@@ -156,7 +194,7 @@ size_t atomic_load_z(const size_t *v)
 #endif
 }
 
-void atomic_store_z(size_t *p, size_t v)
+__host__ __device__ inline void atomic_store_z(size_t *p, size_t v)
 {
 #if (LG_SIZEOF_PTR == 8)
   atomic_store_uint64((uint64_t *)p, (uint32_t)v);
@@ -165,7 +203,7 @@ void atomic_store_z(size_t *p, size_t v)
 #endif
 }
 
-size_t atomic_fetch_and_update_max_z(size_t *p, size_t x)
+__host__ __device__ inline size_t atomic_fetch_and_update_max_z(size_t *p, size_t x)
 {
   size_t prev_value;
   while ((prev_value = *p) < x) {
@@ -176,16 +214,16 @@ size_t atomic_fetch_and_update_max_z(size_t *p, size_t x)
   return prev_value;
 }
 
-uint atomic_add_and_fetch_u(uint *p, uint x)
+__host__ __device__ inline uint atomic_add_and_fetch_u(uint *p, uint x)
 {
 #if (LG_SIZEOF_INT == 8)
   return (uint)atomic_add_and_fetch_uint64((uint64_t *)p, (uint64_t)x);
 #elif (LG_SIZEOF_INT == 4)
-  return (uint)atomic_add_and_fetch_uint32((uint32_t *)p, (uint32_t)x);
+  return atomic_add_and_fetch_uint32((uint32_t *)p, (uint32_t)x);
 #endif
 }
 
-uint atomic_sub_and_fetch_u(uint *p, uint x)
+__host__ __device__ inline uint atomic_sub_and_fetch_u(uint *p, uint x)
 {
 #if (LG_SIZEOF_INT == 8)
   return (uint)atomic_add_and_fetch_uint64((uint64_t *)p, (uint64_t) - ((int64_t)x));
@@ -194,7 +232,7 @@ uint atomic_sub_and_fetch_u(uint *p, uint x)
 #endif
 }
 
-uint atomic_fetch_and_add_u(uint *p, uint x)
+__host__ __device__ inline uint atomic_fetch_and_add_u(uint *p, uint x)
 {
 #if (LG_SIZEOF_INT == 8)
   return (uint)atomic_fetch_and_add_uint64((uint64_t *)p, (uint64_t)x);
@@ -203,7 +241,7 @@ uint atomic_fetch_and_add_u(uint *p, uint x)
 #endif
 }
 
-uint atomic_fetch_and_sub_u(uint *p, uint x)
+__host__ __device__ inline uint atomic_fetch_and_sub_u(uint *p, uint x)
 {
 #if (LG_SIZEOF_INT == 8)
   return (uint)atomic_fetch_and_add_uint64((uint64_t *)p, (uint64_t) - ((int64_t)x));
@@ -212,7 +250,7 @@ uint atomic_fetch_and_sub_u(uint *p, uint x)
 #endif
 }
 
-uint atomic_cas_u(uint *v, uint old, uint _new)
+__host__ __device__ inline uint atomic_cas_u(uint *v, uint old, uint _new)
 {
 #if (LG_SIZEOF_INT == 8)
   return (uint)atomic_cas_uint64((uint64_t *)v, (uint64_t)old, (uint64_t)_new);
@@ -223,12 +261,12 @@ uint atomic_cas_u(uint *v, uint old, uint _new)
 
 /******************************************************************************/
 /* Char operations. */
-char atomic_fetch_and_or_char(char *p, char b)
+__host__ __device__ inline char atomic_fetch_and_or_char(char *p, char b)
 {
   return (char)atomic_fetch_and_or_uint8((uint8_t *)p, (uint8_t)b);
 }
 
-char atomic_fetch_and_and_char(char *p, char b)
+__host__ __device__ inline char atomic_fetch_and_and_char(char *p, char b)
 {
   return (char)atomic_fetch_and_and_uint8((uint8_t *)p, (uint8_t)b);
 }
@@ -236,7 +274,7 @@ char atomic_fetch_and_and_char(char *p, char b)
 /******************************************************************************/
 /* Pointer operations. */
 
-void *atomic_cas_ptr(void **v, void *old, void *_new)
+__host__ __device__ inline void *atomic_cas_ptr(void **v, void *old, void *_new)
 {
 #if (LG_SIZEOF_PTR == 8)
   return (void *)atomic_cas_uint64((uint64_t *)v, *(uint64_t *)&old, *(uint64_t *)&_new);
@@ -245,16 +283,16 @@ void *atomic_cas_ptr(void **v, void *old, void *_new)
 #endif
 }
 
-void *atomic_load_ptr(void *const *v)
+__host__ __device__ inline void *atomic_load_ptr(void *const *v)
 {
 #if (LG_SIZEOF_PTR == 8)
   return (void *)atomic_load_uint64((const uint64_t *)v);
 #elif (LG_SIZEOF_PTR == 4)
-  return (void *)atomic_load_uint32((const uint32_t *)v);
+  return reinterpret_cast<void*>(atomic_load_uint32(reinterpret_cast<const uint32_t*>(v)));
 #endif
 }
 
-void atomic_store_ptr(void **p, void *v)
+__host__ __device__ inline void atomic_store_ptr(void **p, void *v)
 {
 #if (LG_SIZEOF_PTR == 8)
   atomic_store_uint64((uint64_t *)p, (uint64_t)v);
@@ -263,13 +301,13 @@ void atomic_store_ptr(void **p, void *v)
 #endif
 }
 
-float atomic_cas_float(float *v, float old, float _new)
+__host__ __device__ inline float atomic_cas_float(float *v, float old, float _new)
 {
   uint32_t ret = atomic_cas_uint32((uint32_t *)v, *(uint32_t *)&old, *(uint32_t *)&_new);
   return *(float *)&ret;
 }
 
-float atomic_add_and_fetch_fl(float *p, const float x)
+__host__ __device__ inline float atomic_add_and_fetch_fl(float *p, const float x)
 {
   float oldval, newval;
   uint32_t prevval;

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "listBase.h"
+#include "listbase.cuh"
 #include "types.h"
 #include <cstddef>
 

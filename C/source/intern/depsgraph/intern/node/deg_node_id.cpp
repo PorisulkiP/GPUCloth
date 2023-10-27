@@ -5,7 +5,7 @@
 #include "utildefines.h"
 
 #include "ID.h"
-#include "DEG_depsgraph.h"
+#include "DEG_depsgraph.cuh"
 
 //const char *linkedStateAsString(eDepsNode_LinkedState_Type linked_state)
 //{

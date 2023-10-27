@@ -2,14 +2,14 @@
 
 #include "MEM_guardedalloc.cuh"
 
-#include "ghash.h"
+#include "ghash.cuh"
 #include "utildefines.h"
 
 #include "BLT_translation.h"
 
 #include "ID.h"
 #include "defs.cuh"
-#include "listBase.h"
+#include "listbase.cuh"
 #include "anim_types.h"
 //#include "DNA_node_types.h"
 #include "scene_types.cuh"

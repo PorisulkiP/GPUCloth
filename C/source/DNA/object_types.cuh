@@ -3,7 +3,7 @@
 #include "ID.h"
 #include "customdata_types.cuh"
 #include "defs.cuh"
-#include "pointcache_types.h"
+#include "pointcache_types.cuh"
 
 struct AnimData;
 struct BoundBox;
@@ -141,7 +141,7 @@ typedef struct Object_Runtime {
   /** Did last modifier stack generation need mapping support? */
   char last_need_mapping;
 
-  char _pad0[3];
+  //char _pad0[3];
 
   /** Only used for drawing the parent/child help-line. */
   float parent_display_origin[3];
@@ -151,7 +151,7 @@ typedef struct Object_Runtime {
    * when the object is being instanced.
    */
   int select_id;
-  char _pad1[3];
+  //char _pad1[3];
 
   /**
    * Denotes whether the evaluated data is owned by this object or is referenced and owned by
@@ -189,17 +189,17 @@ typedef struct Object_Runtime {
    */
   struct Mesh *mesh_deform_eval;
 
-  /**
-   * Original grease pencil bGPdata pointer, before object->data was changed to point
-   * to gpd_eval.
-   * Is assigned by dependency graph's copy-on-write evaluation.
-   */
-  struct bGPdata *gpd_orig;
-  /**
-   * bGPdata structure created during object evaluation.
-   * It has all modifiers applied.
-   */
-  struct bGPdata *gpd_eval;
+  ///**
+  // * Original grease pencil bGPdata pointer, before object->data was changed to point
+  // * to gpd_eval.
+  // * Is assigned by dependency graph's copy-on-write evaluation.
+  // */
+  //struct bGPdata *gpd_orig;
+  ///**
+  // * bGPdata structure created during object evaluation.
+  // * It has all modifiers applied.
+  // */
+  //struct bGPdata *gpd_eval;
 
   /**
    * This is a mesh representation of corresponding object.
@@ -207,11 +207,11 @@ typedef struct Object_Runtime {
    */
   struct Mesh *object_as_temp_mesh;
 
-  /** Runtime evaluated curve-specific data, not stored in the file. */
-  struct CurveCache *curve_cache;
+  ///** Runtime evaluated curve-specific data, not stored in the file. */
+  //struct CurveCache *curve_cache;
 
   unsigned short local_collections_bits;
-  short _pad2[3];
+  //short _pad2[3];
 } Object_Runtime;
 
 typedef struct Object {
@@ -223,7 +223,7 @@ typedef struct Object {
 
   //struct SculptSession *sculpt;
 
-  short type, partype;
+  //short type{ 1 };// , partype; // 1 = OB_MESH
   /** Can be vertexnrs. */
   //int par1, par2, par3;
   /** String describing subobject info, MAX_ID_NAME-2. */
@@ -231,7 +231,7 @@ typedef struct Object {
   //struct Object *parent, *track;
   /* if ob->proxy (or proxy_group), this object is proxy for object ob->proxy */
   /* proxy_from is set in target back to the proxy. */
-  struct Object *proxy, *proxy_group, *proxy_from;
+  //struct Object *proxy, *proxy_group, *proxy_from;
   /** Old animation system, deprecated for 2.5. */
   //struct Ipo *ipo;
   ///* struct Path *path; */
@@ -255,8 +255,8 @@ typedef struct Object {
   //ListBase effect;             /* XXX deprecated... keep for readfile */
   /** List of bDeformGroup (vertex groups) names and flag only. */
   //ListBase defbase;
-  /** List of ModifierData structures. */
-  ListBase modifiers;
+  ///** List of ModifierData structures. */
+  //ListBase modifiers;
   /** List of GpencilModifierData structures. */
   //ListBase greasepencil_modifiers;
   ///** List of facemaps. */
@@ -264,9 +264,9 @@ typedef struct Object {
   ///** List of viewport effects. Actually only used by grease pencil. */
   //ListBase shader_fx;
 
-  /** Local object mode. */
-  int mode;
-  int restore_mode;
+  ///** Local object mode. */
+  //int mode;
+  //int restore_mode;
 
   /* materials */
   /** Material slots. */
@@ -417,8 +417,8 @@ typedef struct Object {
 
   //struct PreviewImage *preview;
 
-  /** Runtime evaluation data (keep last). */
-  Object_Runtime runtime;
+  ///** Runtime evaluation data (keep last). */
+  //Object_Runtime runtime;
 } Object;
 
 /* Warning, this is not used anymore because hooks are now modifiers */

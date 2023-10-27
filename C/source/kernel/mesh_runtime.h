@@ -28,8 +28,6 @@ extern "C" {
     struct Object;
     struct Scene;
 
-    typedef bool axis_t;
-
     typedef struct KDTreeNode2D {
         uint32_t neg, pos;
         uint32_t index;
@@ -101,7 +99,7 @@ extern "C" {
 
     signed char span_tri_v2_sign(const float v1[2], const float v2[2], const float v3[2]);
 
-    void mesh_ensure_looptri_data(Mesh* mesh);
+    void mesh_ensure_looptri_data(const Mesh* mesh);
 
     //void BKE_mesh_batch_cache_free(Mesh* me);
 
@@ -123,7 +121,7 @@ extern "C" {
      */
     //void BKE_mesh_runtime_reset_on_copy(struct Mesh *mesh, int flag);
     int BKE_mesh_runtime_looptri_len(const struct Mesh *mesh);
-    void BKE_mesh_runtime_looptri_recalc(struct Mesh *mesh);
+    void BKE_mesh_runtime_looptri_recalc(const struct Mesh *mesh);
     /**
      * \note This function only fills a cache, and therefore the mesh argument can
      * be considered logically const. Concurrent access is protected by a mutex.

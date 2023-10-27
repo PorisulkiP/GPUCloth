@@ -7,7 +7,7 @@
 
 #include "MEM_guardedalloc.cuh"
 
-#include "listBase.h"
+#include "listbase.cuh"
 #include "B_math.h"
 
 #include "ID.h"
@@ -18,8 +18,8 @@
 
 #include "B_collection.h"
 #include "effect.h"
-#include "DEG_depsgraph.h"
-#include "DEG_depsgraph_query.h"
+#include "DEG_depsgraph.cuh"
+#include "DEG_depsgraph_query.cuh"
 
 
 /* ************************************** */
@@ -64,7 +64,7 @@ void BKE_rigidbody_free_constraint(Object *ob)
   //}
 
   /* free data itself */
-  //MEM_freeN(rbc);
+  //MEM_lockfree_freeN(rbc);
   //ob->rigidbody_constraint = NULL;
 }
 

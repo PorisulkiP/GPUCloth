@@ -8,7 +8,7 @@
 #pragma once
 
 #include "defs.cuh"
-#include "listBase.h"
+#include "listbase.cuh"
 #include "vec_types.cuh"
 #include "DNA_view2d_types.h"
 

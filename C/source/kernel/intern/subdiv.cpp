@@ -96,7 +96,7 @@ bool BKE_subdiv_settings_equal(const SubdivSettings *settings_a, const SubdivSet
 //     * The thing here is: OpenSubdiv can only deal with faces, but our
 //     * side of subdiv also deals with loose vertices and edges. */
 //  }
-//  Subdiv *subdiv = MEM_callocN(sizeof(Subdiv), "subdiv from converetr");
+//  Subdiv *subdiv = MEM_lockfree_callocN(sizeof(Subdiv), "subdiv from converetr");
 //  subdiv->settings = *settings;
 //  subdiv->topology_refiner = osd_topology_refiner;
 //  subdiv->evaluator = NULL;
@@ -176,9 +176,9 @@ void BKE_subdiv_free(Subdiv *subdiv)
   BKE_subdiv_displacement_detach(subdiv);
   if (subdiv->cache_.face_ptex_offset != NULL) 
   {
-    MEM_freeN(subdiv->cache_.face_ptex_offset);
+    MEM_lockfree_freeN(subdiv->cache_.face_ptex_offset);
   }
-  MEM_freeN(subdiv);
+  MEM_lockfree_freeN(subdiv);
 }
 
 /* =========================== PTEX FACES AND GRIDS ========================= */
@@ -193,7 +193,7 @@ void BKE_subdiv_free(Subdiv *subdiv)
 //    return NULL;
 //  }
 //  const int num_coarse_faces = topology_refiner->getNumFaces(topology_refiner);
-//  subdiv->cache_.face_ptex_offset = MEM_malloc_arrayN(
+//  subdiv->cache_.face_ptex_offset = MEM_lockfree_malloc_arrayN(
 //      num_coarse_faces, sizeof(int), "subdiv face_ptex_offset");
 //  int ptex_offset = 0;
 //  for (int face_index = 0; face_index < num_coarse_faces; face_index++) {

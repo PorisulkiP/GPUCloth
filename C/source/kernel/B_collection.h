@@ -21,11 +21,11 @@
  */
 
 #include "compiler_compat.cuh"
-#include "ghash.h"
+#include "ghash.cuh"
 #include "BLI_iterator.h"
 #include "sys_types.cuh"
 
-#include "listBase.h"
+#include "listbase.cuh"
 
 
 /* Structs */

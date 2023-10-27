@@ -1,6 +1,8 @@
 #pragma once
 
-#include "defs.cuh"
+#ifndef __CLOTH_TYPES__
+#define __CLOTH_TYPES__
+
 #include "modifier_types.cuh"
 
 /*
@@ -13,9 +15,9 @@
  * я использовал переменные с разными именами, чтобы свести к минимуму путаницу.
 */
 typedef struct ClothSimSettings {
-	/** UNUSED atm. */
-	/* */
-	struct LinkNode* cache;
+	///** UNUSED atm. */
+	///* */
+	//LinkNode* cache;
 	/** See SB. */
 	/* */
 	float mingoal;
@@ -118,11 +120,7 @@ typedef struct ClothSimSettings {
 	 /* */
 	float fluid_density;
 	short vgroup_pressure;
-	//char _pad7[6];
 
-	/* XXX various hair stuff
-	 * should really be separate, this struct is a horrible mess already
-	 */
 	 /** Damping of bending springs. */
 	float bending_damping;
 	/** Size of voxel grid cells for continuum dynamics. */
@@ -174,13 +172,10 @@ typedef struct ClothSimSettings {
 	float internal_spring_max_diversion;
 	/** Vertex group for scaling structural stiffness. */
 	short vgroup_intern;
-	//char _pad1[2];
 	float internal_tension;
 	float internal_compression;
 	float max_internal_tension;
 	float max_internal_compression;
-	//char _pad0[4];
-
 } ClothSimSettings;
 
 /* SIMULATION FLAGS: goal flags,.. */
@@ -221,34 +216,33 @@ typedef enum {
 } CLOTH_BENDING_MODEL;
 
 typedef struct ClothCollSettings {
-  /** E.g. pointer to temp memory for collisions. */
-  struct LinkNode *collision_list;
-  /** Min distance for collisions. */
-  float epsilon;
-  /** Fiction/damping with self contact. */
-  float self_friction;
-  /** Friction/damping applied on contact with other object. */
-  float friction;
-  /** Collision restitution on contact with other object. */
-  float damping;
-  /** For selfcollision. */
-  float selfepsilon;
-  /** Collision flags defined in BKE_cloth.h. */
-  int flags;
-  /** How many iterations for the collision loop. */
-  short loop_count;
-  //char _pad[4];
-  /** Only use colliders from this group of objects. */
-  struct Collection *group;
-  /** Vgroup to paint which vertices are not used for self collisions. */
-  short vgroup_selfcol;
-  /** Vgroup to paint which vertices are not used for object collisions. */
-  short vgroup_objcol;
-  //char _pad2[4];
-  /** Impulse clamp for object collisions. */
-  float clamp;
-  /** Impulse clamp for self collisions. */
-  float self_clamp;
+	/** E.g. pointer to temp memory for collisions. */
+	LinkNode *collision_list;
+	/** Min distance for collisions. */
+	float epsilon;
+	/** Fiction/damping with self contact. */
+	float self_friction;
+	/** Friction/damping applied on contact with other object. */
+	float friction;
+	/** Collision restitution on contact with other object. */
+	float damping;
+	/** For selfcollision. */
+	float selfepsilon;
+	/** Collision flags defined in BKE_cloth.h. */
+	int flags;
+	/** How many iterations for the collision loop. */
+	short loop_count;
+	/** Only use colliders from this group of objects. */
+	Collection *group;
+	/** Vgroup to paint which vertices are not used for self collisions. */
+	short vgroup_selfcol;
+	/** Vgroup to paint which vertices are not used for object collisions. */
+	short vgroup_objcol;
+	//char _pad2[4];
+	/** Impulse clamp for object collisions. */
+	float clamp;
+	/** Impulse clamp for self collisions. */
+	float self_clamp;
 } ClothCollSettings;
 
 /* COLLISION FLAGS */
@@ -256,3 +250,5 @@ typedef enum {
   CLOTH_COLLSETTINGS_FLAG_ENABLED = (1 << 1), /* enables cloth - object collisions */
   CLOTH_COLLSETTINGS_FLAG_SELF = (1 << 2),    /* enables selfcollisions */
 } CLOTH_COLLISIONSETTINGS_FLAGS;
+
+#endif

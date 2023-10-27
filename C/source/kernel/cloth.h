@@ -1,10 +1,13 @@
 #pragma once
 
+#ifndef __CLOTH__
+#define __CLOTH__
+
 #include <float.h>
-#include "pointcache.h"
+#include "pointcache.cuh"
 #include "object.h"
 #include "mesh_types.h"
-#include "intern/atomic_ops_ext.h"
+#include "intern/atomic_ops_ext.cuh"
 
 struct ClothModifierData;
 struct CollisionModifierData;
@@ -121,9 +124,9 @@ typedef struct ColliderContacts {
 } ColliderContacts;
 
 // needed for implicit.c
-int cloth_bvh_collision(Depsgraph *depsgraph, Object *ob, ClothModifierData *clmd, float step, float dt);
+__device__ int cloth_bvh_collision(Depsgraph *depsgraph, Object *ob, ClothModifierData *clmd, float step, float dt);
 
-int do_step_cloth(Depsgraph* depsgraph, Object* ob, ClothModifierData* clmd, Mesh* result, int framenr);
+__global__ void g_do_step_cloth(Depsgraph* depsgraph, Object* ob, ClothModifierData* clmd, const Mesh* result, MVert* output);
 
 ////////////////////////////////////////////////
 
@@ -131,25 +134,25 @@ int do_step_cloth(Depsgraph* depsgraph, Object* ob, ClothModifierData* clmd, Mes
 // cloth.c
 ////////////////////////////////////////////////
 
-bool cloth_from_object(ClothModifierData* clmd, Mesh* mesh);
-void cloth_from_mesh(ClothModifierData* clmd, Mesh* mesh);
-void cloth_update_springs(ClothModifierData* clmd);
-void cloth_update_verts(Object* ob, ClothModifierData* clmd, Mesh* mesh);
-void cloth_update_spring_lengths(ClothModifierData* clmd, Mesh* mesh);
-bool cloth_build_springs(ClothModifierData* clmd, Mesh* mesh);
+__host__ bool cloth_from_object(ClothModifierData* clmd, Mesh* mesh);
+__host__ __device__ void cloth_from_mesh(ClothModifierData* clmd, Mesh* mesh);
+__host__ __device__ void cloth_update_springs(const ClothModifierData* clmd);
+__host__ __device__ void cloth_update_verts(const Object* ob, const ClothModifierData* clmd, const Mesh* mesh);
+__host__ __device__ void cloth_update_spring_lengths(const ClothModifierData* clmd, const Mesh* mesh);
+__host__ bool cloth_build_springs(ClothModifierData* clmd, Mesh* mesh);
 
 // needed for modifier.c
-void cloth_free_modifier_extern(struct ClothModifierData *clmd);
-void cloth_free_modifier(struct ClothModifierData *clmd);
-bool clothModifier_do(struct ClothModifierData *clmd, struct Depsgraph *depsgraph, struct Object *ob, struct Mesh *me);
+__host__ __device__ void cloth_free_modifier_extern(struct ClothModifierData *clmd);
+__host__ __device__ void cloth_free_modifier(struct ClothModifierData *clmd);
+__host__ __device__ bool clothModifier_do(struct ClothModifierData *clmd, struct Depsgraph *depsgraph, struct Object *ob, const struct Mesh *mesh);
 
-int cloth_uses_vgroup(struct ClothModifierData *clmd);
+__host__ __device__ int cloth_uses_vgroup(const struct ClothModifierData *clmd);
 
 // needed for collision.c
-void bvhtree_update_from_cloth(struct ClothModifierData *clmd, bool moving, bool self);
+__device__ void bvhtree_update_from_cloth(const struct ClothModifierData *clmd, bool moving, bool self);
 
 // needed for button_object.c
-void cloth_clear_cache(struct Object *ob, struct ClothModifierData *clmd, float framenr)
+__host__ __device__ inline void cloth_clear_cache(struct Object *ob, struct ClothModifierData *clmd, float framenr)
 {
     PTCacheID pid;
 
@@ -166,6 +169,6 @@ void cloth_clear_cache(struct Object *ob, struct ClothModifierData *clmd, float 
 }
 
 
-void cloth_parallel_transport_hair_frame(float mat[3][3],
-                                         const float dir_old[3],
-                                         const float dir_new[3]);
+__host__ __device__ void cloth_parallel_transport_hair_frame(float mat[3][3], const float dir_old[3], const float dir_new[3]);
+
+#endif /* __CLOTH__ */

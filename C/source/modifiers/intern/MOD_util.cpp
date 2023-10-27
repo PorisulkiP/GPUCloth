@@ -1,13 +1,6 @@
-/* SPDX-License-Identifier: GPL-2.0-or-later
- * Copyright 2005 Blender Foundation. All rights reserved. */
-
-/** \file
- * \ingroup modifiers
- */
-
 #include <string>
-//
-//#include "utildefines.h"
+
+#include "utildefines.h"
 
 //#include "BLI_bitmap.h"
 //#include "math_matrix.cuh"
@@ -15,7 +8,7 @@
 
 //#include "image_types.h"
 //#include "mesh_types.h"
-#include "meshdata_types.cuh"
+//#include "meshdata_types.cuh"
 //#include "modifier_types.cuh"
 //#include "object_types.cuh"
 //#include "scene_types.cuh"
@@ -31,12 +24,13 @@
 //#include "object.h"
 //
 #include "modifier.h"
+
 //
-//#include "DEG_depsgraph.h"
-//#include "DEG_depsgraph_query.h"
+//#include "DEG_depsgraph.cuh"
+//#include "DEG_depsgraph_query.cuh"
 //
 #include "MOD_modifiertypes.h"
-//#include "MOD_util.h"
+#include "MOD_util.h"
 //
 //#include "MEM_guardedalloc.cuh"
 //
@@ -122,7 +116,7 @@
 //        } while (fidx--);
 //      }
 //
-//      MEM_freeN(done);
+//      MEM_lockfree_freeN(done);
 //      return;
 //    }
 //
@@ -155,7 +149,7 @@
 //  while ((md = md->next) && md->type == eModifierType_Armature) {
 //    ArmatureModifierData *amd = (ArmatureModifierData *)md;
 //    if (amd->multi && amd->vert_coords_prev == NULL) {
-//      amd->vert_coords_prev = static_cast<float(*)[3]>(MEM_dupallocN(vert_coords));
+//      amd->vert_coords_prev = static_cast<float(*)[3]>(MEM_lockfree_dupallocN(vert_coords));
 //    }
 //    else {
 //      break;
@@ -269,7 +263,7 @@
 //    DEG_add_object_relation(node, object, DEG_OB_COMP_TRANSFORM, description);
 //  }
 //}
-
+//
 
 void modifier_type_init(ModifierTypeInfo *types[])
 {

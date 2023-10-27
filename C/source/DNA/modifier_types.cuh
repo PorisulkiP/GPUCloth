@@ -1,11 +1,12 @@
 #pragma once
 
 #include "defs.cuh"
-#include "pointcache_types.h"
-#include "kdopbvh.h"
+#include "pointcache_types.cuh"
+#include "kdopbvh.cuh"
 #include "bvhutils.h"
 
-#include "cloth_settings.h"
+#include "cloth_settings.cuh"
+#include "cloth_types.cuh"
 
 ////////////////////////////////////////
 // used for collisions in collision.c
@@ -59,7 +60,7 @@ typedef struct SessionUUID {
 } SessionUUID;
 
 typedef struct ModifierData {
-	struct ModifierData* next, * prev;
+	ModifierData* next, * prev;
 
 	int type, mode;
 	//char _pad0[4];
@@ -68,67 +69,46 @@ typedef struct ModifierData {
 	short ui_expand_flag;
 	/** MAX_NAME. */
 	char name[64];
-
-	//char* error;
-
-	/* Pointer to a ModifierData in the original domain. */
-	//struct ModifierData* orig_modifier_data;
-
-	/* Runtime field which contains unique identifier of the modifier. */
-	//uint64_t session_uuid;
-
-	/* Runtime field which contains runtime data which is specific to a modifier type. */
-	//void* runtime;
 } ModifierData;
 
 typedef struct CollisionModifierData {
 	ModifierData modifier;
 
 	/** Position at the beginning of the frame. */
-	struct MVert* x;
+	MVert* x;
 	/** Position at the end of the frame. */
-	struct MVert* xnew;
+	MVert* xnew;
 	/** Unused atm, but was discussed during sprint. */
-	struct MVert* xold;
+	MVert* xold;
 	/** New position at the actual inter-frame step. */
-	struct MVert* current_xnew;
+	MVert* current_xnew;
 	/** Position at the actual inter-frame step. */
-	struct MVert* current_x;
+	MVert* current_x;
 	/** (xnew - x) at the actual inter-frame step. */
-	struct MVert* current_v;
+	MVert* current_v;
 
-	struct MVertTri* tri;
+	MVertTri* tri;
 
 	uint mvert_num;
 	uint tri_num;
-	/** Cfra time of modifier. */
 	float time_x, time_xnew;
-	/** Collider doesn't move this frame, i.e. x[].co==xnew[].co. */
 	char is_static;
-	char _pad[7];
 
 	/** Bounding volume hierarchy for this cloth object. */
-	struct BVHTree* bvhtree;
+	BVHTree* bvhtree;
 } CollisionModifierData;
 
 typedef struct ClothModifierData : ModifierData {
 	ModifierData modifier;
 
 	/** The internal data structure for cloth. */
-	struct Cloth* clothObject;
+	Cloth* clothObject;
 	/** Definition is in cloth_types.cuh. */
 	struct ClothSimSettings* sim_parms;
 	/** Definition is in cloth_types.cuh. */
 	struct ClothCollSettings* coll_parms;
-
-	/* PointCache can be shared with other instances of ClothModifierData.
-	 * Inspect (modifier.flag & eModifierFlag_SharedCaches) to find out. */
-	 /** Definition is in object_force_types.cuh. */
-	struct PointCache* point_cache;
-	struct ListBase ptcaches;
-
-	/* XXX nasty hack, remove once hair can be separated from cloth modifier data */
-	struct ClothHairData* hairdata;
+	PointCache* point_cache;
+	ListBase ptcaches;
 
 	struct ClothSolverResult* solver_result;
 } ClothModifierData;
@@ -251,7 +231,7 @@ typedef struct MappingInfoModifierData {
 	ModifierData modifier;
 
 	struct Tex* texture;
-	struct Object* map_object;
+	Object* map_object;
 	char map_bone[64];
 	/** MAX_CUSTOMDATA_LAYER_NAME. */
 	char uvlayer_name[64];
@@ -305,7 +285,7 @@ typedef struct SubsurfModifierData {
 typedef struct LatticeModifierData {
 	ModifierData modifier;
 
-	struct Object* object;
+	Object* object;
 	/** Optional vertexgroup name, MAX_VGROUP_NAME. */
 	char name[64];
 	float strength;
@@ -322,7 +302,7 @@ enum {
 typedef struct CurveModifierData {
 	ModifierData modifier;
 
-	struct Object* object;
+	Object* object;
 	/** Optional vertexgroup name, MAX_VGROUP_NAME. */
 	char name[64];
 	/** Axis along which curve deforms. */
@@ -372,7 +352,7 @@ typedef struct MaskModifierData {
 	ModifierData modifier;
 
 	/** Armature to use to in place of hardcoded vgroup. */
-	struct Object* ob_arm;
+	Object* ob_arm;
 	/** Name of vertex group to use to mask, MAX_VGROUP_NAME. */
 	char vgroup[64];
 
@@ -400,13 +380,13 @@ typedef struct ArrayModifierData {
 	ModifierData modifier;
 
 	/** The object with which to cap the start of the array. */
-	struct Object* start_cap;
+	Object* start_cap;
 	/** The object with which to cap the end of the array. */
-	struct Object* end_cap;
+	Object* end_cap;
 	/** The curve object to use for #MOD_ARR_FITCURVE. */
-	struct Object* curve_ob;
+	Object* curve_ob;
 	/** The object to use for object offset. */
-	struct Object* offset_ob;
+	Object* offset_ob;
 	/**
 	 * A constant duplicate offset;
 	 * 1 means the duplicates are 1 unit apart.
@@ -485,7 +465,7 @@ typedef struct MirrorModifierData {
 	char _pad[3];
 	float uv_offset[2];
 	float uv_offset_copy[2];
-	struct Object* mirror_ob;
+	Object* mirror_ob;
 	void* _pad1;
 } MirrorModifierData;
 
@@ -661,8 +641,8 @@ typedef struct DisplaceModifierData {
 
 	/* Keep in sync with #MappingInfoModifierData. */
 
-	struct Tex* texture;
-	struct Object* map_object;
+	Tex* texture;
+	Object* map_object;
 	char map_bone[64];
 	/** MAX_CUSTOMDATA_LAYER_NAME. */
 	char uvlayer_name[64];
@@ -715,7 +695,7 @@ typedef struct UVProjectModifierData {
 	 * The objects which do the projecting.
 	 * \note 10=MOD_UVPROJECT_MAXPROJECTORS.
 	 */
-	struct Object* projectors[10];
+	Object* projectors[10];
 	char _pad2[4];
 	int projectors_num;
 	float aspectx, aspecty;
@@ -787,7 +767,7 @@ enum {
 typedef struct CastModifierData {
 	ModifierData modifier;
 
-	struct Object* object;
+	Object* object;
 	float fac;
 	float radius;
 	float size;
@@ -822,8 +802,8 @@ typedef struct WaveModifierData {
 
 	/* Keep in sync with #MappingInfoModifierData. */
 
-	struct Tex* texture;
-	struct Object* map_object;
+	Tex* texture;
+	Object* map_object;
 	char map_bone[64];
 	/** MAX_CUSTOMDATA_LAYER_NAME. */
 	char uvlayer_name[64];
@@ -831,7 +811,7 @@ typedef struct WaveModifierData {
 	int texmapping;
 	/* End MappingInfoModifierData. */
 
-	struct Object* objectcenter;
+	Object* objectcenter;
 	/** MAX_VGROUP_NAME. */
 	char defgrp_name[64];
 
@@ -864,7 +844,7 @@ typedef struct ArmatureModifierData {
 	/** #eArmature_DeformFlag use instead of #bArmature.deformflag. */
 	short deformflag, multi;
 	char _pad2[4];
-	struct Object* object;
+	Object* object;
 	/** Stored input of previous modifier, for vertex-group blending. */
 	float(*vert_coords_prev)[3];
 	/** MAX_VGROUP_NAME. */
@@ -893,7 +873,7 @@ typedef enum {
 typedef struct HookModifierData {
 	ModifierData modifier;
 
-	struct Object* object;
+	Object* object;
 	/** Optional name of bone target, MAX_ID_NAME-2. */
 	char subtarget[64];
 
@@ -927,14 +907,14 @@ typedef struct SurfaceModifierData {
 	ModifierData modifier;
 
 	/** Old position. */
-	struct MVert* x;
+	MVert* x;
 	/** Velocity. */
-	struct MVert* v;
+	MVert* v;
 
-	struct Mesh* mesh;
+	Mesh* mesh;
 
 	/** Bounding volume hierarchy of the mesh faces. */
-	struct BVHTreeFromMesh* bvhtree;
+	BVHTreeFromMesh* bvhtree;
 
 	int cfra, verts_num;
 } SurfaceModifierData;
@@ -942,8 +922,8 @@ typedef struct SurfaceModifierData {
 typedef struct BooleanModifierData {
 	ModifierData modifier;
 
-	struct Object* object;
-	struct Collection* collection;
+	Object* object;
+	Collection* collection;
 	float double_threshold;
 	char operation;
 	char solver;
@@ -993,7 +973,7 @@ typedef struct MeshDeformModifierData {
 	ModifierData modifier;
 
 	/** Mesh object. */
-	struct Object* object;
+	Object* object;
 	/** Optional vertexgroup name, MAX_VGROUP_NAME. */
 	char defgrp_name[64];
 
@@ -1035,12 +1015,12 @@ typedef struct MeshDeformModifierData {
 	float* bindcos;
 
 	/* runtime */
-	void (*bindfunc)(struct Object* object,
-		struct MeshDeformModifierData* mmd,
-		struct Mesh* cagemesh,
-		float* vertexcos,
-		int verts_num,
-		float cagemat[4][4]);
+	void (*bindfunc)(Object* object,
+	                 MeshDeformModifierData* mmd,
+	                 Mesh* cagemesh,
+	                 float* vertexcos,
+	                 int verts_num,
+	                 float cagemat[4][4]);
 } MeshDeformModifierData;
 
 enum {
@@ -1059,9 +1039,9 @@ typedef struct ParticleSystemModifierData {
 	 */
 	struct ParticleSystem* psys;
 	/** Final Mesh - its topology may differ from orig mesh. */
-	struct Mesh* mesh_final;
+	Mesh* mesh_final;
 	/** Original mesh that particles are attached to. */
-	struct Mesh* mesh_original;
+	Mesh* mesh_original;
 	int totdmvert, totdmedge, totdmface;
 	short flag;
 	char _pad[2];
@@ -1093,7 +1073,7 @@ typedef enum {
 typedef struct ParticleInstanceModifierData {
 	ModifierData modifier;
 
-	struct Object* ob;
+	Object* ob;
 	short psys, flag, axis, space;
 	float position, random_position;
 	float rotation, random_rotation;
@@ -1169,9 +1149,9 @@ typedef struct ShrinkwrapModifierData {
 	ModifierData modifier;
 
 	/** Shrink target. */
-	struct Object* target;
+	Object* target;
 	/** Additional shrink target. */
-	struct Object* auxTarget;
+	Object* auxTarget;
 	/** Optional vertexgroup name, MAX_VGROUP_NAME. */
 	char vgroup_name[64];
 	/** Distance offset to keep from mesh/projection point. */
@@ -1252,7 +1232,7 @@ typedef struct SimpleDeformModifierData {
 	ModifierData modifier;
 
 	/** Object to control the origin of modifier space coordinates. */
-	struct Object* origin;
+	Object* origin;
 	/** Optional vertexgroup name, MAX_VGROUP_NAME. */
 	char vgroup_name[64];
 	/** Factors to control simple deforms. */
@@ -1365,7 +1345,7 @@ enum {
 typedef struct ScrewModifierData {
 	ModifierData modifier;
 
-	struct Object* ob_axis;
+	Object* ob_axis;
 	uint steps;
 	uint render_steps;
 	uint iter;
@@ -1478,8 +1458,8 @@ typedef struct WarpModifierData {
 
 	/* Keep in sync with #MappingInfoModifierData. */
 
-	struct Tex* texture;
-	struct Object* map_object;
+	Tex* texture;
+	Object* map_object;
 	char map_bone[64];
 	/** MAX_CUSTOMDATA_LAYER_NAME. */
 	char uvlayer_name[64];
@@ -1487,14 +1467,14 @@ typedef struct WarpModifierData {
 	int texmapping;
 	/* End #MappingInfoModifierData. */
 
-	struct Object* object_from;
-	struct Object* object_to;
+	Object* object_from;
+	Object* object_to;
 	/** Optional name of bone target, MAX_ID_NAME-2. */
 	char bone_from[64];
 	/** Optional name of bone target, MAX_ID_NAME-2. */
 	char bone_to[64];
 
-	struct CurveMapping* curfalloff;
+	CurveMapping* curfalloff;
 	/** Optional vertexgroup name, MAX_VGROUP_NAME. */
 	char defgrp_name[64];
 	float strength;
@@ -1540,7 +1520,7 @@ typedef struct WeightVGEditModifierData {
 
 	/* Mapping stuff. */
 	/** The custom mapping curve. */
-	struct CurveMapping* cmap_curve;
+	CurveMapping* cmap_curve;
 
 	/* The add/remove vertices weight thresholds. */
 	float add_threshold, rem_threshold;
@@ -1555,9 +1535,9 @@ typedef struct WeightVGEditModifierData {
 	/** Which channel to use as weight/mask. */
 	int mask_tex_use_channel;
 	/** The texture. */
-	struct Tex* mask_texture;
+	Tex* mask_texture;
 	/** Name of the map object. */
-	struct Object* mask_tex_map_obj;
+	Object* mask_tex_map_obj;
 	/** Name of the map bone. */
 	char mask_tex_map_bone[64];
 	/** How to map the texture (using MOD_DISP_MAP_* enums). */
@@ -1609,9 +1589,9 @@ typedef struct WeightVGMixModifierData {
 	/** Which channel to use as weightf. */
 	int mask_tex_use_channel;
 	/** The texture. */
-	struct Tex* mask_texture;
+	Tex* mask_texture;
 	/** Name of the map object. */
-	struct Object* mask_tex_map_obj;
+	Object* mask_tex_map_obj;
 	/** Name of the map bone. */
 	char mask_tex_map_bone[64];
 	/** How to map the texture. */
@@ -1677,7 +1657,7 @@ typedef struct WeightVGProximityModifierData {
 
 	/* Mapping stuff. */
 	/** The custom mapping curve. */
-	struct CurveMapping* cmap_curve;
+	CurveMapping* cmap_curve;
 
 	/** Modes of proximity weighting. */
 	int proximity_mode;
@@ -1685,7 +1665,7 @@ typedef struct WeightVGProximityModifierData {
 	int proximity_flags;
 
 	/* Target object from which to calculate vertices distances. */
-	struct Object* proximity_ob_target;
+	Object* proximity_ob_target;
 
 	/* Masking options. */
 	/** The global "influence", if no vgroup nor tex is used as mask. */
@@ -1697,9 +1677,9 @@ typedef struct WeightVGProximityModifierData {
 	/** Which channel to use as weightf. */
 	int mask_tex_use_channel;
 	/** The texture. */
-	struct Tex* mask_texture;
+	Tex* mask_texture;
 	/** Name of the map object. */
-	struct Object* mask_tex_map_obj;
+	Object* mask_tex_map_obj;
 	/** Name of the map bone. */
 	char mask_tex_map_bone[64];
 	/** How to map the texture. */
@@ -1962,11 +1942,11 @@ typedef struct UVWarpModifierData {
 	float rotation;
 
 	/** Source. */
-	struct Object* object_src;
+	Object* object_src;
 	/** Optional name of bone target, MAX_ID_NAME-2. */
 	char bone_src[64];
 	/** Target. */
-	struct Object* object_dst;
+	Object* object_dst;
 	/** Optional name of bone target, MAX_ID_NAME-2. */
 	char bone_dst[64];
 
@@ -2120,7 +2100,7 @@ enum {
 typedef struct DataTransferModifierData {
 	ModifierData modifier;
 
-	struct Object* ob_source;
+	Object* ob_source;
 
 	/** See DT_TYPE_ enum in ED_object.h. */
 	int data_types;
@@ -2171,7 +2151,7 @@ typedef struct NormalEditModifierData {
 	/** MAX_VGROUP_NAME. */
 	char defgrp_name[64];
 	/** Source of normals, or center of ellipsoid. */
-	struct Object* target;
+	Object* target;
 	short mode;
 	short flag;
 	short mix_mode;
@@ -2254,7 +2234,7 @@ typedef struct SurfaceDeformModifierData {
 
 	struct Depsgraph* depsgraph;
 	/** Bind target object. */
-	struct Object* target;
+	Object* target;
 	/** Vertex bind data. */
 	SDefVert* verts;
 	void* _pad1;
@@ -2320,13 +2300,13 @@ enum {
 
 typedef struct NodesModifierSettings {
 	/* This stores data that is passed into the node group. */
-	struct IDProperty* properties;
+	IDProperty* properties;
 } NodesModifierSettings;
 
 typedef struct NodesModifierData {
 	ModifierData modifier;
 	struct bNodeTree* node_group;
-	struct NodesModifierSettings settings;
+	NodesModifierSettings settings;
 
 	/**
 	 * Contains logged information from the last evaluation.
@@ -2340,7 +2320,7 @@ typedef struct MeshToVolumeModifierData {
 	ModifierData modifier;
 
 	/** This is the object that is supposed to be converted to a volume. */
-	struct Object* object;
+	Object* object;
 
 	/** MeshToVolumeModifierResolutionMode */
 	int resolution_mode;
@@ -2373,8 +2353,8 @@ typedef enum MeshToVolumeModifierResolutionMode {
 typedef struct VolumeDisplaceModifierData {
 	ModifierData modifier;
 
-	struct Tex* texture;
-	struct Object* texture_map_object;
+	Tex* texture;
+	Object* texture_map_object;
 	int texture_map_mode;
 
 	float strength;
@@ -2393,7 +2373,7 @@ typedef struct VolumeToMeshModifierData {
 	ModifierData modifier;
 
 	/** This is the volume object that is supposed to be converted to a mesh. */
-	struct Object* object;
+	Object* object;
 
 	float threshold;
 	float adaptivity;

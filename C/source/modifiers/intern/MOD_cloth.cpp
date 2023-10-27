@@ -1,8 +1,6 @@
-#include <string.h>
-
 #include "utildefines.h"
 
-#include "listbase.h"
+#include "listbase.cuh"
 
 #include "BLT_translation.h"
 
@@ -20,13 +18,13 @@
 #include "cloth.h"
 //#include "BKE_context.h"
 //#include "BKE_effect.h"
-#include "global.h"
+//#include "global.h"
 //#include "BKE_key.h"
 #include "BKE_lib_id.h"
 #include "lib_query.h"
-#include "BKE_mesh.h"
+//#include "BKE_mesh.h"
 #include "modifier.h"
-#include "pointcache.h"
+//#include "pointcache.cuh"
 //#include "BKE_screen.h"
 
 //#include "UI_interface.h"
@@ -36,16 +34,16 @@
 //#include "RNA_prototypes.h"
 
 #include "DEG_depsgraph_physics.h"
-#include "DEG_depsgraph_query.h"
+#include "DEG_depsgraph_query.cuh"
 
-#include "MOD_ui_common.h"
+//#include "MOD_ui_common.h"
 #include "MOD_util.h"
 
 PointCache* BKE_ptcache_add(ListBase* ptcaches)
 {
     PointCache* cache;
 
-    cache = (PointCache*)MEM_callocN(sizeof(PointCache), "PointCache");
+    cache = static_cast<PointCache*>(MEM_lockfree_callocN(sizeof(PointCache), "PointCache"));
     cache->startframe = 1;
     cache->endframe = 250;
     cache->step = 1;
@@ -58,14 +56,14 @@ PointCache* BKE_ptcache_add(ListBase* ptcaches)
 
 EffectorWeights* BKE_effector_add_weights(Collection* collection)
 {
-    EffectorWeights* weights = (EffectorWeights*)MEM_callocN(sizeof(EffectorWeights), "EffectorWeights");
+	auto* weights = static_cast<EffectorWeights*>(MEM_lockfree_callocN(sizeof(EffectorWeights), "EffectorWeights"));
     for (int i = 0; i < NUM_PFIELD_TYPES; i++) {
         weights->weight[i] = 1.0f;
     }
 
     weights->global_gravity = 1.0f;
 
-    weights->group = collection;
+    //weights->group = collection;
 
     return weights;
 }
@@ -73,11 +71,11 @@ EffectorWeights* BKE_effector_add_weights(Collection* collection)
 
 static void initData(ModifierData *md)
 {
-    ClothModifierData *clmd = (ClothModifierData *)md;
-    auto tmp = (const ClothModifierData*)DNA_default_table[_SDNA_TYPE_ClothModifierData];
+	auto*clmd = static_cast<ClothModifierData*>(md);
+    auto tmp = static_cast<const ClothModifierData*>(DNA_default_table[_SDNA_TYPE_ClothModifierData]);
     MEMCPY_STRUCT_AFTER(clmd, tmp, ClothModifierData::modifier);
-    clmd->sim_parms = (ClothSimSettings*)_DNA_struct_default_alloc_impl((const uint8_t*)DNA_default_table[_SDNA_TYPE_ClothSimSettings], sizeof(ClothSimSettings), "");
-    clmd->coll_parms = (ClothCollSettings*)_DNA_struct_default_alloc_impl((const uint8_t*)DNA_default_table[_SDNA_TYPE_ClothCollSettings], sizeof(ClothCollSettings), "");
+    clmd->sim_parms = (ClothSimSettings*)_DNA_struct_default_alloc_impl(static_cast<const uint8_t*>(DNA_default_table[_SDNA_TYPE_ClothSimSettings]), sizeof(ClothSimSettings), "");
+    clmd->coll_parms = (ClothCollSettings*)_DNA_struct_default_alloc_impl(static_cast<const uint8_t*>(DNA_default_table[_SDNA_TYPE_ClothCollSettings]), sizeof(ClothCollSettings), "");
 
     clmd->point_cache = BKE_ptcache_add(&clmd->ptcaches);
 
@@ -89,7 +87,7 @@ static void initData(ModifierData *md)
 
     if (!clmd->sim_parms->effector_weights) 
     {
-        clmd->sim_parms->effector_weights = BKE_effector_add_weights(NULL);
+        clmd->sim_parms->effector_weights = BKE_effector_add_weights(nullptr);
     }
 
     if (clmd->point_cache) 
@@ -105,7 +103,7 @@ static void deformVerts(ModifierData *md,
                         int verts_num)
 {
   Mesh *mesh_src;
-  ClothModifierData *clmd = (ClothModifierData *)md;
+  auto*clmd = static_cast<ClothModifierData*>(md);
   Scene *scene = DEG_get_evaluated_scene(ctx->depsgraph);
 
   /* check for alloc failing */
@@ -152,7 +150,7 @@ static void deformVerts(ModifierData *md,
 
   //clothModifier_do(clmd, ctx->depsgraph, scene, ctx->object, mesh_src, vertexCos);
 
-  BKE_id_free(NULL, mesh_src);
+  BKE_id_free(nullptr, mesh_src);
 }
 
 static void updateDepsgraph(ModifierData *md, const ModifierUpdateDepsgraphContext *ctx)
@@ -176,7 +174,7 @@ static void requiredDataMask(Object *UNUSED(ob),
                              ModifierData *md,
                              CustomData_MeshMasks *r_cddata_masks)
 {
-  ClothModifierData *clmd = (ClothModifierData *)md;
+	auto*clmd = static_cast<ClothModifierData*>(md);
 
   if (cloth_uses_vgroup(clmd)) 
   {
@@ -191,20 +189,20 @@ static void requiredDataMask(Object *UNUSED(ob),
 
 static void copyData(const ModifierData *md, ModifierData *target, const int flag)
 {
-  const ClothModifierData *clmd = (const ClothModifierData *)md;
-  ClothModifierData *tclmd = (ClothModifierData *)target;
+  const auto*clmd = static_cast<const ClothModifierData*>(md);
+  auto*tclmd = static_cast<ClothModifierData*>(target);
 
   if (tclmd->sim_parms) 
   {
     if (tclmd->sim_parms->effector_weights) 
     {
-      MEM_freeN(tclmd->sim_parms->effector_weights);
+      MEM_lockfree_freeN(tclmd->sim_parms->effector_weights);
     }
-    MEM_freeN(tclmd->sim_parms);
+    MEM_lockfree_freeN(tclmd->sim_parms);
   }
 
   if (tclmd->coll_parms) {
-    MEM_freeN(tclmd->coll_parms);
+    MEM_lockfree_freeN(tclmd->coll_parms);
   }
 
   //BKE_ptcache_free_list(&tclmd->ptcaches);
@@ -218,18 +216,18 @@ static void copyData(const ModifierData *md, ModifierData *target, const int fla
   else {
     const int clmd_point_cache_index = BLI_findindex(&clmd->ptcaches, clmd->point_cache);
     //BKE_ptcache_copy_list(&tclmd->ptcaches, &clmd->ptcaches, flag);
-    tclmd->point_cache = (PointCache*)BLI_findlink(&tclmd->ptcaches, clmd_point_cache_index);
+    tclmd->point_cache = static_cast<PointCache*>(BLI_findlink(&tclmd->ptcaches, clmd_point_cache_index));
   }
 
-  tclmd->sim_parms = (ClothSimSettings*)MEM_dupallocN(clmd->sim_parms);
+  tclmd->sim_parms = static_cast<ClothSimSettings*>(MEM_lockfree_dupallocN(clmd->sim_parms));
   if (clmd->sim_parms->effector_weights) 
   {
-    tclmd->sim_parms->effector_weights = (EffectorWeights*)MEM_dupallocN(clmd->sim_parms->effector_weights);
+    tclmd->sim_parms->effector_weights = static_cast<EffectorWeights*>(MEM_lockfree_dupallocN(clmd->sim_parms->effector_weights));
   }
-  tclmd->coll_parms = (ClothCollSettings*)MEM_dupallocN(clmd->coll_parms);
-  tclmd->clothObject = NULL;
-  tclmd->hairdata = NULL;
-  tclmd->solver_result = NULL;
+  tclmd->coll_parms = static_cast<ClothCollSettings*>(MEM_lockfree_dupallocN(clmd->coll_parms));
+  tclmd->clothObject = nullptr;
+  //tclmd->hairdata = NULL;
+  tclmd->solver_result = nullptr;
 }
 
 static bool dependsOnTime(struct ModifierData* md)
@@ -239,58 +237,58 @@ static bool dependsOnTime(struct ModifierData* md)
 
 static void freeData(ModifierData *md)
 {
-  ClothModifierData *clmd = (ClothModifierData *)md;
+	auto* clmd = static_cast<ClothModifierData*>(md);
 
-  if (clmd) 
-  {
-    cloth_free_modifier_extern(clmd);
+	if (clmd) 
+	{
+	cloth_free_modifier_extern(clmd);
 
-    if (clmd->sim_parms) 
-    {
-      if (clmd->sim_parms->effector_weights) 
-      {
-        MEM_freeN(clmd->sim_parms->effector_weights);
-      }
-      MEM_freeN(clmd->sim_parms);
-    }
-    if (clmd->coll_parms) 
-    {
-      MEM_freeN(clmd->coll_parms);
-    }
+	if (clmd->sim_parms) 
+	{
+	  if (clmd->sim_parms->effector_weights) 
+	  {
+	    MEM_lockfree_freeN(clmd->sim_parms->effector_weights);
+	  }
+	  MEM_lockfree_freeN(clmd->sim_parms);
+	}
+	if (clmd->coll_parms) 
+	{
+	  MEM_lockfree_freeN(clmd->coll_parms);
+	}
 
-    if (md->flag & eModifierFlag_SharedCaches) 
-    {
-      BLI_listbase_clear(&clmd->ptcaches);
-    }
-    else 
-    {
-      //BKE_ptcache_free_list(&clmd->ptcaches);
-    }
-    clmd->point_cache = NULL;
+	if (md->flag & eModifierFlag_SharedCaches) 
+	{
+	  BLI_listbase_clear(&clmd->ptcaches);
+	}
+	else 
+	{
+	  //BKE_ptcache_free_list(&clmd->ptcaches);
+	}
+	clmd->point_cache = nullptr;
 
-    if (clmd->hairdata) 
-    {
-      MEM_freeN(clmd->hairdata);
-    }
+	//if (clmd->hairdata) 
+	//{
+	//  MEM_lockfree_freeN(clmd->hairdata);
+	//}
 
-    if (clmd->solver_result) 
-    {
-      MEM_freeN(clmd->solver_result);
-    }
-  }
+	if (clmd->solver_result) 
+	{
+	  MEM_lockfree_freeN(clmd->solver_result);
+	}
+	}
 }
 
 static void foreachIDLink(ModifierData *md, Object *ob, IDWalkFunc walk, void *userData)
 {
-  ClothModifierData *clmd = (ClothModifierData *)md;
+	const auto* clmd = reinterpret_cast<ClothModifierData*>(md);
 
-  if (clmd->coll_parms) {
-    walk(userData, ob, (ID **)&clmd->coll_parms->group, IDWALK_CB_NOP);
-  }
+	if (clmd->coll_parms) {
+	walk(userData, ob, reinterpret_cast<ID**>(&clmd->coll_parms->group), IDWALK_CB_NOP);
+	}
 
-  if (clmd->sim_parms && clmd->sim_parms->effector_weights) {
-    walk(userData, ob, (ID **)&clmd->sim_parms->effector_weights->group, IDWALK_CB_USER);
-  }
+	//if (clmd->sim_parms && clmd->sim_parms->effector_weights) {
+	//walk(userData, ob, reinterpret_cast<ID**>(&clmd->sim_parms->effector_weights->group), IDWALK_CB_USER);
+	//}
 }
 
 static void panel_draw(const bContext *UNUSED(C), Panel *panel)
@@ -316,31 +314,32 @@ ModifierTypeInfo modifierType_Cloth =
     /* structSize */ sizeof(ClothModifierData),
     /* srna */ nullptr,
     /* type */ (ModifierTypeType)eModifierTypeType_OnlyDeform,
-    /* flags */ (ModifierTypeFlag)(eModifierTypeFlag_AcceptsMesh | eModifierTypeFlag_UsesPointCache | eModifierTypeFlag_Single),
+    /* flags */ static_cast<ModifierTypeFlag>(eModifierTypeFlag_AcceptsMesh | eModifierTypeFlag_UsesPointCache |
+	    eModifierTypeFlag_Single),
     /* icon */ NULL,
 
     /* copyData */ copyData,
 
     /* deformVerts */ deformVerts,
-    /* deformMatrices */ NULL,
-    /* deformVertsEM */ NULL,
-    /* deformMatricesEM */ NULL,
-    /* modifyMesh */ NULL,
-    /* modifyHair */ NULL,
-    /* modifyGeometrySet */ NULL,
-    /* modifyVolume */ NULL,
+    /* deformMatrices */ nullptr,
+    /* deformVertsEM */ nullptr,
+    /* deformMatricesEM */ nullptr,
+    /* modifyMesh */ nullptr,
+    /* modifyHair */ nullptr,
+    /* modifyGeometrySet */ nullptr,
+    /* modifyVolume */ nullptr,
 
     /* initData */ initData,
     /* requiredDataMask */ requiredDataMask,
     /* freeData */ freeData,
-    /* isDisabled */ NULL,
+    /* isDisabled */ nullptr,
     /* updateDepsgraph */ updateDepsgraph,
     /* dependsOnTime */ dependsOnTime,
-    /* dependsOnNormals */ NULL,
+    /* dependsOnNormals */ nullptr,
     /* foreachIDLink */ foreachIDLink,
-    /* foreachTexLink */ NULL,
-    /* freeRuntimeData */ NULL,
+    /* foreachTexLink */ nullptr,
+    /* freeRuntimeData */ nullptr,
     /* panelRegister */ panelRegister,
-    /* blendWrite */ NULL,
-    /* blendRead */ NULL,
+    /* blendWrite */ nullptr,
+    /* blendRead */ nullptr,
 };

@@ -6,7 +6,7 @@
 
 #include "utildefines.h"
 
-#include "listbase.h"
+#include "listbase.cuh"
 //#include "BKE_anim_data.h"
 #include "BLI_assert.h"
 //#include "BKE_idprop.h"
@@ -21,7 +21,7 @@
 
 #include "lib_intern.h"
 
-#include "DEG_depsgraph.h"
+#include "DEG_depsgraph.cuh"
 
 void BKE_libblock_free_datablock(ID* id, const int /*flag*/)
 {
@@ -140,7 +140,7 @@ void BKE_id_free_ex(Main* bmain, void* idv, int flag, const bool use_flag_from_i
     }
 
     if ((flag & LIB_ID_FREE_NOT_ALLOCATED) == 0) {
-        MEM_freeN(id);
+        MEM_lockfree_freeN(id);
     }
 }
 
@@ -153,10 +153,10 @@ void BKE_id_free(Main* bmain, void* idv)
 void lib_override_library_property_operation_clear(IDOverrideLibraryPropertyOperation* opop)
 {
     if (opop->subitem_reference_name) {
-        MEM_freeN(opop->subitem_reference_name);
+        MEM_lockfree_freeN(opop->subitem_reference_name);
     }
     if (opop->subitem_local_name) {
-        MEM_freeN(opop->subitem_local_name);
+        MEM_lockfree_freeN(opop->subitem_local_name);
     }
 }
 
@@ -165,7 +165,7 @@ void lib_override_library_property_clear(IDOverrideLibraryProperty* op)
 {
     BLI_assert(op->rna_path != nullptr);
 
-    MEM_freeN(op->rna_path);
+    MEM_lockfree_freeN(op->rna_path);
 
     LISTBASE_FOREACH(IDOverrideLibraryPropertyOperation*, opop, &op->operations) {
         lib_override_library_property_operation_clear(opop);
@@ -202,7 +202,7 @@ void BKE_lib_override_library_free(IDOverrideLibrary** override, const bool do_i
     //}
 
     BKE_lib_override_library_clear(*override, do_id_user);
-    MEM_freeN(*override);
+    MEM_lockfree_freeN(*override);
     *override = nullptr;
 }
 
@@ -210,7 +210,7 @@ void BKE_libblock_free_data(ID *id, const bool do_id_user)
 {
   if (id->properties) {
     //IDP_FreePropertyContent_ex(id->properties, do_id_user);
-    MEM_freeN(id->properties);
+    MEM_lockfree_freeN(id->properties);
     id->properties = NULL;
   }
 

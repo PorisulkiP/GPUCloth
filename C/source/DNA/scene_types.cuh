@@ -12,7 +12,7 @@
 #include "ID.h"
 #include "color_types.h"      /* color management */
 #include "customdata_types.cuh" /* Scene's runtime cddata masks. */
-#include "pointcache_types.h"
+#include "pointcache_types.cuh"
 #include "vec_types.cuh"
 #include "math_vector.cuh"
 
@@ -764,10 +764,10 @@ typedef struct RenderProfile {
   short particle_perc;
   short subsurf_max;
   short shadbufsample_max;
-  char _pad1[2];
+  //char _pad1[2];
 
   float ao_error;
-  char _pad2[4];
+  //char _pad2[4];
 
 } RenderProfile;
 
@@ -875,17 +875,17 @@ typedef struct ImagePaintSettings {
   int mode;
 
   /** Workaround until we support true layer masks. */
-  struct Image *stencil;
+  //struct Image *stencil;
   /** Clone layer for image mode for projective texture painting. */
-  struct Image *clone;
+  //struct Image *clone;
   /** Canvas when the explicit system is used for painting. */
-  struct Image *canvas;
+  //struct Image *canvas;
   float stencil_col[3];
   /** Dither amount used when painting on byte images. */
   float dither;
   /** Display texture interpolation method. */
   int interp;
-  char _pad[4];
+  //char _pad[4];
 } ImagePaintSettings;
 
 /* ------------------------------------------- */
@@ -908,9 +908,9 @@ typedef struct ParticleEditSettings {
   short totaddkey;
   short brushtype;
 
-  ParticleBrushData brush[7];
+  //ParticleBrushData brush[7];
   /** Runtime. */
-  void *paintcursor;
+  //void *paintcursor;
 
   float emitterdist, rt;
 
@@ -919,9 +919,9 @@ typedef struct ParticleEditSettings {
 
   int draw_step, fade_frames;
 
-  struct Scene *scene;
-  struct Object *object;
-  struct Object *shape_object;
+  //struct Scene *scene;
+  //struct Object *object;
+  //struct Object *shape_object;
 } ParticleEditSettings;
 
 /* ------------------------------------------- */
@@ -1638,7 +1638,7 @@ typedef struct SceneEEVEE {
 
 typedef struct SceneGpencil {
   float smaa_threshold;
-  char _pad[4];
+  //char _pad[4];
 } SceneGpencil;
 
 /* *************************************************************** */
@@ -1648,7 +1648,7 @@ typedef struct TransformOrientationSlot {
   int type;
   int index_custom;
   char flag;
-  char _pad0[7];
+  //char _pad0[7];
 } TransformOrientationSlot;
 
 /** Indices when used in #Scene.orientation_slots */
@@ -1774,7 +1774,7 @@ typedef struct Scene {
 	//struct SceneGpencil grease_pencil_settings;
 } Scene;
 
-void print_Scene(Scene* scene)
+inline void print_Scene(Scene* scene)
 {
 	printf("\nSCENE:\n");
 	printf("\tflag: %d", scene->physics_settings.flag);

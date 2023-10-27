@@ -5,7 +5,7 @@
 #include "B_math.h"
 #include "rand.h"
 #include "BLI_sort.h"
-#include "task.h"
+#include "task.cuh"
 #include "utildefines.h"
 
 #include "mesh_types.h"
@@ -18,7 +18,7 @@
 #include "object.h"
 #include "particle.h"
 
-#include "DEG_depsgraph_query.h"
+#include "DEG_depsgraph_query.cuh"
 
 //#include "B_kdtree_impl.h"
 
@@ -39,7 +39,7 @@ static void alloc_child_particles(ParticleSystem* psys, int tot)
             return;
         }
 
-        MEM_freeN(psys->child);
+        MEM_lockfree_freeN(psys->child);
         psys->child = NULL;
         psys->totchild = 0;
     }
@@ -47,7 +47,7 @@ static void alloc_child_particles(ParticleSystem* psys, int tot)
     if (psys->part->childtype) {
         psys->totchild = tot;
         if (psys->totchild) {
-            psys->child = (ChildParticle*)MEM_callocN(psys->totchild * sizeof(ChildParticle), "child_particles");
+            psys->child = (ChildParticle*)MEM_lockfree_callocN(psys->totchild * sizeof(ChildParticle), "child_particles");
         }
     }
 }
@@ -500,9 +500,9 @@ static int psys_thread_context_init_distribute(ParticleThreadContext* ctx, Parti
         return 0;
     }
 
-    element_weight = (float*)MEM_callocN(sizeof(float) * totelem, "particle_distribution_weights");
-    particle_element = (int*)MEM_callocN(sizeof(int) * totpart, "particle_distribution_indexes");
-    jitter_offset = (float*)MEM_callocN(sizeof(float) * totelem, "particle_distribution_jitoff");
+    element_weight = (float*)MEM_lockfree_callocN(sizeof(float) * totelem, "particle_distribution_weights");
+    particle_element = (int*)MEM_lockfree_callocN(sizeof(int) * totpart, "particle_distribution_indexes");
+    jitter_offset = (float*)MEM_lockfree_callocN(sizeof(float) * totelem, "particle_distribution_jitoff");
 
     /* Calculate weights from face areas */
     if ((part->flag & PART_EDISTR || children) && from != PART_FROM_VERT) {
@@ -590,7 +590,7 @@ static int psys_thread_context_init_distribute(ParticleThreadContext* ctx, Parti
                 element_weight[i] *= tweight;
             }
         }
-        MEM_freeN(vweight);
+        MEM_lockfree_freeN(vweight);
     }
 
     /* Calculate total weight of all elements */
@@ -608,11 +608,11 @@ static int psys_thread_context_init_distribute(ParticleThreadContext* ctx, Parti
         if (mesh != final_mesh) {
             //BKE_id_free(NULL, mesh);
         }
-        MEM_freeN(tree);
-        MEM_freeN(rng);
-        MEM_freeN(element_weight);
-        MEM_freeN(particle_element);
-        MEM_freeN(jitter_offset);
+        MEM_lockfree_freeN(tree);
+        MEM_lockfree_freeN(rng);
+        MEM_lockfree_freeN(element_weight);
+        MEM_lockfree_freeN(particle_element);
+        MEM_lockfree_freeN(jitter_offset);
         return 0;
     }
 
@@ -624,8 +624,8 @@ static int psys_thread_context_init_distribute(ParticleThreadContext* ctx, Parti
      * This simplifies greatly the filtering of zero-weighted items - and can be much more efficient
      * especially in random case (reducing a lot the size of binary-searched array)...
      */
-    float* element_sum = (float*)MEM_mallocN(sizeof(*element_sum) * totmapped, __func__);
-    int* element_map = (int*)MEM_mallocN(sizeof(*element_map) * totmapped, __func__);
+    float* element_sum = (float*)MEM_lockfree_mallocN(sizeof(*element_sum) * totmapped, __func__);
+    int* element_map = (int*)MEM_lockfree_mallocN(sizeof(*element_map) * totmapped, __func__);
     int i_mapped = 0;
 
     for (i = 0; i < totelem && element_weight[i] == 0.0f; i++) {
@@ -684,8 +684,8 @@ static int psys_thread_context_init_distribute(ParticleThreadContext* ctx, Parti
         }
     }
 
-    MEM_freeN(element_sum);
-    MEM_freeN(element_map);
+    MEM_lockfree_freeN(element_sum);
+    MEM_lockfree_freeN(element_map);
 
     /* For hair, sort by origindex (allows optimization's in rendering), */
     /* however with virtual parents the children need to be in random order. */
@@ -725,7 +725,7 @@ static int psys_thread_context_init_distribute(ParticleThreadContext* ctx, Parti
             }
         }
 
-        jit = (float*)MEM_callocN((2 + jitlevel * 2) * sizeof(float), "jit");
+        jit = (float*)MEM_lockfree_callocN((2 + jitlevel * 2) * sizeof(float), "jit");
 
         /* for small amounts of particles we use regular jitter since it looks
          * a bit better, for larger amounts we switch to hammersley sequence
@@ -799,14 +799,14 @@ static void init_mv_jit(float *jit, int num, int seed2, float amount)
     x -= (float)floor(x);
   }
 
-  jit2 = (float*)MEM_mallocN(12 + sizeof(float[2]) * num, "initjit");
+  jit2 = (float*)MEM_lockfree_mallocN(12 + sizeof(float[2]) * num, "initjit");
 
   //for (i = 0; i < 4; i++) {
   //  BLI_jitterate1((float(*)[2])jit, (float(*)[2])jit2, num, rad1);
   //  BLI_jitterate1((float(*)[2])jit, (float(*)[2])jit2, num, rad1);
   //  BLI_jitterate2((float(*)[2])jit, (float(*)[2])jit2, num, rad2);
   //}
-  MEM_freeN(jit2);
+  MEM_lockfree_freeN(jit2);
   BLI_rng_free(rng);
 }
 

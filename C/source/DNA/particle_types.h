@@ -1,7 +1,7 @@
 #pragma once
 
 #include "ID.h"
-#include "boid_types.h"
+#include "boid_types.cuh"
 #include "defs.cuh"
 #include "texture_types.h"
 

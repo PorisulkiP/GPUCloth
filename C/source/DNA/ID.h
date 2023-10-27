@@ -1,7 +1,7 @@
 #pragma once
 
 #include "sys_types.cuh"
-#include "pointcache_types.h"
+#include "pointcache_types.cuh"
 
 /* 2 characters for ID code and 64 for actual name */
 #define MAX_ID_NAME 66
@@ -73,52 +73,21 @@ enum {
 
 /* Main container for all overriding data info of a data-block. */
 typedef struct IDOverrideLibrary {
-	/** Reference linked ID which this one overrides. */
 	struct ID* reference;
-	/** List of IDOverrideLibraryProperty structs. */
 	ListBase properties;
-
-	/** Override hierarchy root ID. Usually the actual root of the hierarchy, but not always
-	 * in degenerated cases.
-	 *
-	 * All liboverrides of a same hierarchy (e.g. a character collection) share the same root.
-	 */
 	struct ID* hierarchy_root;
-
-	/* Read/write data. */
-	/* Temp ID storing extra override data (used for differential operations only currently).
-	 * Always NULL outside of read/write context. */
 	struct ID* storage;
-
-	//IDOverrideLibraryRuntime* runtime;
-
 	uint flag;
-	//char _pad_1[4];
 } IDOverrideLibrary;
 
 typedef struct IDProperty {
-	struct IDProperty* next, * prev;
+	IDProperty* next, * prev;
 	char type, subtype;
 	short flag;
-	/** MAX_IDPROP_NAME. */
 	char name[64];
-
-	/* saved is used to indicate if this struct has been saved yet.
-	 * seemed like a good idea as a '_pad' var was needed anyway :) */
 	int saved;
-	/** NOTE: alignment for 64 bits. */
-	//IDPropertyData data;
-
-	/* Array length, also (this is important!) string length + 1.
-	 * the idea is to be able to reuse array realloc functions on strings. */
 	int len;
-
-	/* Strings and arrays are both buffered, though the buffer isn't saved. */
-	/* totallen is total length of allocated array/string, including a buffer.
-	 * Note that the buffering is mild; the code comes from python's list implementation. */
 	int totallen;
-
-	//IDPropertyUIData* ui_data;
 } IDProperty;
 
 /* There's a nasty circular dependency here.... 'void *' to the rescue! I
@@ -127,74 +96,21 @@ typedef struct IDProperty {
  * Мне действительно интересно, зачем это нужно. */
 typedef struct ID {
 	void* next, * prev;
-	struct ID* newid;
+	ID* newid;
 
 	struct Library* lib;
 
-	/** If the ID is an asset, this pointer is set. Owning pointer. */
-	/** Если идентификатор является активом, этот указатель устанавливается. Владеющий указателем. */
-	//struct AssetMetaData* asset_data;
-
-	/** MAX_ID_NAME. */
 	char name[66];
-	/**
-	 * LIB_... flags report on status of the data-block this ID belongs to
-	 * (persistent, saved to and read from .blend).
-	 */
 	short flag;
-	/**
-	 * LIB_TAG_... tags (runtime only, cleared at read time).
-	 */
 	int tag;
 	int us;
 	int icon_id;
 	int recalc;
-	/**
-	 * Used by undo code. recalc_after_undo_push contains the changes between the
-	 * last undo push and the current state. This is accumulated as IDs are tagged
-	 * for update in the depsgraph, and only cleared on undo push.
-	 *
-	 * recalc_up_to_undo_push is saved to undo memory, and is the value of
-	 * recalc_after_undo_push at the time of the undo push. This means it can be
-	 * used to find the changes between undo states.
-	 */
-	//int recalc_up_to_undo_push;
-	//int recalc_after_undo_push;
-
-	/**
-	 * A session-wide unique identifier for a given ID, that remain the same across potential
-	 * re-allocations (e.g. due to undo/redo steps).
-	 */
 	unsigned int session_uuid;
 
 	IDProperty* properties;
-
-	/** Reference linked ID which this one overrides. */
 	IDOverrideLibrary* override_library;
-
-	/**
-	 * Only set for data-blocks which are coming from copy-on-write, points to
-	 * the original version of it.
-	 * Also used temporarily during memfile undo to keep a reference to old ID when found.
-	 */
-	struct ID* orig_id;
-
-	/**
-	 * Holds the #PyObject reference to the ID (initialized on demand).
-	 *
-	 * This isn't essential, it could be removed however it gives some advantages:
-	 *
-	 * - Every time the #ID is accessed a #BPy_StructRNA doesn't have to be created & destroyed
-	 *   (consider all the polling and drawing functions that access ID's).
-	 *
-	 * - When this #ID is deleted, the #BPy_StructRNA can be invalidated
-	 *   so accessing it from Python raises an exception instead of crashing.
-	 *
-	 *   This is of limited benefit though, as it doesn't apply to non #ID data
-	 *   that references this ID (the bones of an armature or the modifiers of an object for e.g.).
-	 */
-	//void* py_instance;
-	//void* _pad1;
+	ID* orig_id;
 } ID;
 
 
@@ -208,11 +124,11 @@ struct UniqueName_Map;
 
 /* Runtime display data */
 struct DrawData;
-typedef void (*DrawDataInitCb)(struct DrawData* engine_data);
-typedef void (*DrawDataFreeCb)(struct DrawData* engine_data);
+typedef void (*DrawDataInitCb)(DrawData* engine_data);
+typedef void (*DrawDataFreeCb)(DrawData* engine_data);
 
 typedef struct DrawData {
-	struct DrawData* next, * prev;
+	DrawData* next, * prev;
 	struct DrawEngineType* engine_type;
 	/* Only nested data, NOT the engine data itself. */
 	DrawDataFreeCb free;
@@ -221,7 +137,7 @@ typedef struct DrawData {
 } DrawData;
 
 typedef struct DrawDataList {
-	struct DrawData* first, * last;
+	DrawData* first, * last;
 } DrawDataList;
 
 
@@ -283,7 +199,7 @@ enum {
 /* Static ID override structs. */
 
 typedef struct IDOverrideLibraryPropertyOperation {
-	struct IDOverrideLibraryPropertyOperation* next, * prev;
+	IDOverrideLibraryPropertyOperation* next, * prev;
 
 	/* Type of override. */
 	short operation;
@@ -343,7 +259,7 @@ enum {
 
 /** A single overridden property, contain all operations on this one. */
 typedef struct IDOverrideLibraryProperty {
-	struct IDOverrideLibraryProperty* next, * prev;
+	IDOverrideLibraryProperty* next, * prev;
 
 	/**
 	 * Path from ID to overridden property.
@@ -417,7 +333,7 @@ typedef struct ID_Runtime {
 
 typedef struct Library_Runtime {
 	/* Used for efficient calculations of unique names. */
-	struct UniqueName_Map* name_map;
+	UniqueName_Map* name_map;
 } Library_Runtime;
 
 /**
@@ -426,34 +342,6 @@ typedef struct Library_Runtime {
  */
 typedef struct Library {
 	ID id;
-	//struct FileData* filedata;
-	/** Path name used for reading, can be relative and edited in the outliner. */
-	//char filepath[1024];
-
-	/**
-	 * Run-time only, absolute file-path (set on read).
-	 * This is only for convenience, `filepath` is the real path
-	 * used on file read but in some cases its useful to access the absolute one.
-	 *
-	 * Use #BKE_library_filepath_set() rather than setting `filepath`
-	 * directly and it will be kept in sync - campbell
-	 */
-	//char filepath_abs[1024];
-
-	/** Set for indirectly linked libs, used in the outliner and while reading. */
-	//struct Library* parent;
-
-	//struct PackedFile* packedfile;
-
-	//ushort tag;
-	//char _pad_0[6];
-
-	/** Temp data needed by read/write code, and lib-override recursive re-synchronized. */
-	//int temp_index;
-	/** See BLENDER_FILE_VERSION, BLENDER_FILE_SUBVERSION, needed for do_versions. */
-	//short versionfile, subversionfile;
-
-	//struct Library_Runtime runtime;
 } Library;
 
 /** #Library.tag */
@@ -505,7 +393,7 @@ typedef struct PreviewImage {
 	uint* rect[2];
 
 	/* Runtime-only data. */
-	struct GPUTexture* gputexture[2];
+	GPUTexture* gputexture[2];
 	/** Used by previews outside of ID context. */
 	int icon_id;
 
@@ -712,56 +600,21 @@ struct Object;
 
 typedef struct Collection {
 	ID id;
-
 	/** CollectionObject. */
 	ListBase gobject;
 	/** CollectionChild. */
 	ListBase children;
-
-	//struct PreviewImage* preview;
-
-	//uint layer;
-	//float instance_offset[3];
-
-	//short flag;
-	/* Runtime-only, always cleared on file load. */
-	//short tag;
-
-	//short lineart_usage;         /* eCollectionLineArt_Usage */
-	//unsigned char lineart_flags; /* eCollectionLineArt_Flags */
-	//unsigned char lineart_intersection_mask;
-	//unsigned char lineart_intersection_priority;
-	//char _pad[5];
-
-	//int16_t color_tag;
-
-	/* Runtime. Cache of objects in this collection and all its
-	 * children. This is created on demand when e.g. some physics
-	 * simulation needs it, we don't want to have it for every
-	 * collections due to memory usage reasons. */
-	//ListBase object_cache;
-
-	/* Need this for line art sub-collection selections. */
-	//ListBase object_cache_instanced;
-
-	/* Runtime. List of collections that are a parent of this
-	 * datablock. */
-	//ListBase parents;
-
-	/* Deprecated */
-	//struct SceneCollection* collection;
-	//struct ViewLayer* view_layer;
 } Collection;
 
 
 typedef struct CollectionObject {
-	struct CollectionObject* next, * prev;
-	struct Object* ob;
+	CollectionObject* next, * prev;
+	Object* ob;
 } CollectionObject;
 
 typedef struct CollectionChild {
-	struct CollectionChild* next, * prev;
-	struct Collection* collection;
+	CollectionChild* next, * prev;
+	Collection* collection;
 } CollectionChild;
 
 enum eCollectionLineArt_Usage {

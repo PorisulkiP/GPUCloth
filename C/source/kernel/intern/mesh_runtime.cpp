@@ -1,4 +1,4 @@
-#include "atomic_ops.h"
+#include "atomic_ops.cuh"
 
 #include "MEM_guardedalloc.cuh"
 
@@ -7,16 +7,18 @@
 #include "object_types.cuh"
 
 #include "math_geom.cuh"
-#include "task.hh"
+#include "task.cuh"
 //#include "BLI_timeit.hh"
 
 #include "bvhutils.h"
-#include "BKE_editmesh_cache.h"
+//#include "BKE_editmesh_cache.h"
 #include "BKE_lib_id.h"
 #include "BKE_mesh.h"
 #include "mesh_runtime.h"
-#include "BKE_shrinkwrap.h"
+//#include "BKE_shrinkwrap.h"
 #include "BKE_subdiv_ccg.h"
+#include "BLI_span.hh"
+#include "mallocn_intern.cuh"
 
 using blender::Span;
 
@@ -38,7 +40,7 @@ namespace blender::bke {
     {
         if (mesh_runtime.edit_data) {
             edit_data_reset(*mesh_runtime.edit_data);
-            MEM_freeN(mesh_runtime.edit_data);
+            MEM_lockfree_freeN(mesh_runtime.edit_data);
             mesh_runtime.edit_data = nullptr;
         }
     }
@@ -340,7 +342,7 @@ void CustomData_debug_info_from_layers(const CustomData* data, const char* inden
             const char* name = CustomData_layertype_name(type);
             const int size = CustomData_sizeof(type);
             const void* pt = CustomData_get_layer(data, type);
-            const int pt_size = pt ? int(MEM_allocN_len(pt) / size) : 0;
+            const int pt_size = pt ? int(MEM_lockfree_allocN_len(pt) / size) : 0;
             const char* structname;
             int structnum;
             CustomData_file_write_info(type, &structname, &structnum);
@@ -412,7 +414,7 @@ void BKE_mesh_debug_print(const Mesh* me)
     char* str = BKE_mesh_debug_info(me);
     puts(str);
     fflush(stdout);
-    MEM_freeN(str);
+    MEM_lockfree_freeN(str);
 }
 
 bool BKE_mesh_runtime_is_valid(Mesh* me_eval)

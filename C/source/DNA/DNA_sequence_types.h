@@ -1,7 +1,7 @@
 #pragma once
 
 #include "defs.cuh"
-#include "listBase.h"
+#include "listbase.cuh"
 #include "DNA_session_uuid_types.h" /* for #SessionUUID */
 #include "vec_types.cuh"          /* for #rctf */
 

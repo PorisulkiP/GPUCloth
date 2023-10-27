@@ -2,9 +2,9 @@
 
 #include "anim_types.h"
 
-#include "ghash.h"
+#include "ghash.cuh"
 #include "BLI_linklist_stack.h"
-#include "listbase.h"
+#include "listbase.cuh"
 #include "utildefines.h"
 
 //#include "BKE_anim_data.h"

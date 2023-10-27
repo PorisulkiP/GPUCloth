@@ -1,6 +1,7 @@
 #pragma once
 
 #include "utildefines.h"
+#include "cuda_runtime_api.h"
 
 struct Collection;
 struct Depsgraph;
@@ -12,7 +13,7 @@ struct ParticleSimulationData;
 struct Scene;
 struct ViewLayer;
 
-struct EffectorWeights *effector_add_weights(struct Collection *collection);
+__host__ __device__ struct EffectorWeights *effector_add_weights(struct Collection *collection);
 
 /* Input to effector code */
 typedef struct EffectedPoint {
@@ -85,35 +86,33 @@ typedef struct EffectorRelation {
 
 struct PartDeflect *BKE_partdeflect_new(int type);
 struct PartDeflect *BKE_partdeflect_copy(const struct PartDeflect *pd_src);
-extern void BKE_partdeflect_free(struct PartDeflect *pd);
+__host__ __device__ extern void BKE_partdeflect_free(struct PartDeflect *pd);
 
-struct ListBase *effector_relations_create(struct Depsgraph *depsgraph,
+__host__ __device__ struct ListBase *effector_relations_create(struct Depsgraph *depsgraph,
                                                struct ViewLayer *view_layer,
                                                struct Collection *collection);
-extern void effector_relations_free(struct ListBase *lb);
+__host__ __device__ extern void effector_relations_free(struct ListBase *lb);
 
-struct ListBase *effectors_create(struct Depsgraph *depsgraph,
+__host__ __device__ struct ListBase *effectors_create(struct Depsgraph *depsgraph,
                                       struct Object *ob_src,
                                       struct ParticleSystem *psys_src,
                                       struct EffectorWeights *weights,
                                       bool use_rotation);
-void effectors_apply(struct ListBase *effectors,
+__host__ __device__ void effectors_apply(struct ListBase *effectors,
                          struct ListBase *colliders,
                          struct EffectorWeights *weights,
                          struct EffectedPoint *point,
                          float *force,
                          float *wind_force,
                          float *impulse);
-void effectors_free(struct ListBase *lb);
+__host__ __device__ void effectors_free(struct ListBase *lb);
 
-void pd_point_from_particle(struct ParticleSimulationData *sim,
+__host__ __device__ void pd_point_from_particle(struct ParticleSimulationData *sim,
                             struct ParticleData *pa,
                             struct ParticleKey *state,
                             struct EffectedPoint *point);
-void pd_point_from_loc(
-    struct Scene *scene, float *loc, float *vel, int index, struct EffectedPoint *point);
-void pd_point_from_soft(
-    struct Scene *scene, float *loc, float *vel, int index, struct EffectedPoint *point);
+__host__ __device__ void pd_point_from_loc(struct Scene *scene, float *loc, float *vel, int index, struct EffectedPoint *point);
+void pd_point_from_soft(struct Scene *scene, float *loc, float *vel, int index, struct EffectedPoint *point);
 
 /* needed for boids */
 float effector_falloff(struct EffectorCache *eff,
@@ -189,11 +188,11 @@ typedef struct SimDebugData {
 
 extern SimDebugData *_sim_debug_data;
 
-void BKE_sim_debug_data_set_enabled(bool enable);
-bool BKE_sim_debug_data_get_enabled(void);
-void BKE_sim_debug_data_free(void);
+__host__ __device__ void BKE_sim_debug_data_set_enabled(bool enable);
+__host__ __device__ bool BKE_sim_debug_data_get_enabled(void);
+__host__ __device__ void BKE_sim_debug_data_free(void);
 
-void BKE_sim_debug_data_add_element(int type,
+__host__ __device__ void BKE_sim_debug_data_add_element(int type,
                                     const float v1[3],
                                     const float v2[3],
                                     const char *str,
@@ -202,7 +201,7 @@ void BKE_sim_debug_data_add_element(int type,
                                     float b,
                                     const char *category,
                                     unsigned int hash);
-void BKE_sim_debug_data_remove_element(unsigned int hash);
+__host__ __device__ void BKE_sim_debug_data_remove_element(unsigned int hash);
 
 #define BKE_sim_debug_data_add_dot(p, r, g, b, category, ...) \
   { \
