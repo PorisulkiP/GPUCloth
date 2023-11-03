@@ -15,10 +15,11 @@
 #include "PIL_time_utildefines.cuh"
 #include "../source/kernel/cloth.h"
 
+using namespace cudaMemUtils;
+
 #ifdef _WIN32
 int main()
 {
-
 	Scene tmpScene;
 	ToolSettings tmpToolSettings;
 	memset(&tmpScene, 1, sizeof(Scene));
@@ -67,7 +68,7 @@ int main()
 		{-1.0f, -1.0f, 1.0f},
 		{-1.0f, -1.0f, -1.0f}
 	};
-	for (int i = 0; i < 8; ++i) {
+	for (int i = 0; i < mesh.totvert; ++i) {
 		mesh.mvert[i].co[0] = coords[i][0];
 		mesh.mvert[i].co[1] = coords[i][1];
 		mesh.mvert[i].co[2] = coords[i][2];
@@ -79,7 +80,7 @@ int main()
 		{2, 3}, {4, 5}, {2, 6}, {0, 2},
 		{7, 3}, {6, 4}, {4, 2}, {3, 1}
 	};
-	for (int i = 0; i < 12; ++i) {
+	for (int i = 0; i < mesh.totedge; ++i) {
 		mesh.medge[i].v1 = edges[i][0];
 		mesh.medge[i].v2 = edges[i][1];
 		mesh.medge[i].crease = 0;
@@ -90,7 +91,7 @@ int main()
 	constexpr int polys[6][2] = {
 		{0, 4}, {4, 4}, {8, 4}, {12, 4}, {16, 4}, {20, 4}
 	};
-	for (int i = 0; i < 6; ++i) {
+	for (int i = 0; i < mesh.totpoly; ++i) {
 		mesh.mpoly[i].loopstart = polys[i][0];
 		mesh.mpoly[i].totloop = polys[i][1];
 	}
@@ -104,7 +105,7 @@ int main()
 		{1, 2}, {0, 7}, {2, 4}, {3, 11}, // Back face
 		{5, 5}, {4, 10}, {0, 2}, {1, 1} // Left face
 	};
-	for (int i = 0; i < 24; ++i) {
+	for (int i = 0; i < mesh.totloop; ++i) {
 		mesh.mloop[i].v = loops[i][0];
 		mesh.mloop[i].e = loops[i][1];
 	}
@@ -119,7 +120,7 @@ int main()
 
 	BuildClothSprings(clmd, &mesh);
 
-	clmd->clothObject->implicit = SIM_mass_spring_solver_create(8, clmd->clothObject->numsprings);
+	clmd->clothObject->implicit = SIM_mass_spring_solver_create(mesh.totvert, clmd->clothObject->numsprings);
 
     SIM_solver(&depsgraph, &ob, clmd, &mesh);
 
@@ -301,7 +302,7 @@ bool SIM_solver(const Depsgraph* depsgraph, const Object* ob, const ClothModifie
 			ClothVertex* d_clothVertex;
             LinkNode* d_springs;
             BVHTree* d_bvhtree;
-            BVHTree* d_bvhselftree;
+			BVHTree* d_bvhselftree;
             MVertTri* d_tri;
             Implicit_Data* d_implicit;
             EdgeSet* d_edgeset;
@@ -381,11 +382,11 @@ bool SIM_solver(const Depsgraph* depsgraph, const Object* ob, const ClothModifie
 	tempCloth.springs = d_springs;
 
 	// Обновление bvhtree
-	copyBVHTreeToDevice(d_bvhtree, clmd->clothObject->bvhtree, clmd->clothObject->primitive_num);
+	d_bvhtree = copyBVHTreeToDevice(clmd->clothObject->bvhtree, clmd->clothObject->primitive_num);
 	tempCloth.bvhtree = d_bvhtree;
 
 	// Обновление bvhselftree
-	copyBVHTreeToDevice(d_bvhselftree, clmd->clothObject->bvhselftree, clmd->clothObject->primitive_num);
+	d_bvhselftree = copyBVHTreeToDevice(clmd->clothObject->bvhselftree, clmd->clothObject->primitive_num);
 	tempCloth.bvhselftree = d_bvhselftree;
 
 	// Обновление edgeset
@@ -419,7 +420,8 @@ bool SIM_solver(const Depsgraph* depsgraph, const Object* ob, const ClothModifie
 	}
 
 	// Обновление implicit
-	tempCloth.implicit = copyImplicit_DataToDevice(tempCloth.implicit, clmd->clothObject->mvert_num);
+	d_implicit = copyImplicit_DataToDevice(clmd->clothObject->implicit, clmd->clothObject->mvert_num);
+	tempCloth.implicit = d_implicit;
 	gpuErrchk(cudaMemcpy(d_tri, &clmd->clothObject->tri, sizeof(MVertTri), cudaMemcpyHostToDevice))
 	for (uint i = 0; i < clmd->clothObject->mvert_num; ++i)
 	{
@@ -485,16 +487,15 @@ bool SIM_solver(const Depsgraph* depsgraph, const Object* ob, const ClothModifie
 	gpuErrchk(cudaMemcpy(d_clmd, &tempclmd, sizeof(ClothModifierData), cudaMemcpyHostToDevice))
 
 	/*int blockSize = 256;
-    int numBlocks = (clmd->clothObject->numsprings + blockSize - 1) / blockSize*/
+	int numBlocks = (clmd->clothObject->numsprings + blockSize - 1) / blockSize*/
 
 	// Засечение времени симуляции
-	TIMEIT_START(cloth_step);
+	CUDA_TIMEIT_START(cloth_step);
 	gpuErrchk(cudaDeviceSynchronize())
-	g_do_step_cloth<<<16, 16>>>(d_depsgraph, d_ob, d_clmd, d_mesh, d_mvert);
+	g_do_step_cloth<<<32, 1>>>(d_depsgraph, d_ob, d_clmd, d_mesh, d_mvert);
 	gpuErrchk(cudaDeviceSynchronize())
 
-	TIMEIT_END(cloth_step);
-	cleanup_cuda_timer();
+	CUDA_TIMEIT_END(cloth_step);
 
 	// Шаг 1: Создание временного массива
 	auto original_coords = static_cast<float(*)[3]>(malloc(sizeof(float[3]) * mesh->totvert));

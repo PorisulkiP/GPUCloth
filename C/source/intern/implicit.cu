@@ -6,6 +6,7 @@
 
 #include "meshdata_types.cuh"
 #include "object_force_types.cuh"
+#include <cuda/atomic>
 
 #include "cloth.h"
 
@@ -54,7 +55,11 @@ __host__ __device__ void mul_fvectorT_fvectorS(float to[3][3], float vectorA[3],
 /* create long vector */
 __host__ __device__ lfVector* create_lfvector(const uint verts)
 {
+#ifdef __CUDA_ARCH__
+    return static_cast<lfVector*>((lfVector*)malloc(verts * sizeof(lfVector)));
+#else
     return static_cast<lfVector*>(MEM_lockfree_callocN(verts * sizeof(lfVector), "cloth_implicit_alloc_vector"));
+#endif
 }
 
 /* delete long vector */
@@ -63,6 +68,7 @@ __host__ __device__ void del_lfvector(float(*fLongVector)[3])
     if (fLongVector) 
     {
         MEM_lockfree_freeN(fLongVector);
+        fLongVector = nullptr;
     }
 }
 /* copy long vector */
@@ -373,9 +379,17 @@ __host__ __device__ void muladd_fmatrixT_fvector(float to[3], const float matrix
 
 __host__ __device__ void outerproduct(float r[3][3], const float a[3], const float b[3])
 {
+#ifdef __CUDA_ARCH__
+    const uint idx = threadIdx.x;
+    if (idx < 3)
+    {
+        mul_v3_v3fl(r[idx], a, b[idx]);
+    }
+#else
     mul_v3_v3fl(r[0], a, b[0]);
     mul_v3_v3fl(r[1], a, b[1]);
     mul_v3_v3fl(r[2], a, b[2]);
+#endif
 }
 
 __host__ __device__ void cross_m3_v3m3(float r[3][3], const float v[3], const float m[3][3])
@@ -544,17 +558,20 @@ __host__ __device__ void mul_bfmatrix_lfvector(float(*to)[3], const fmatrix3x3* 
     const uint i = blockIdx.x * blockDim.x + threadIdx.x;
     const uint vcount = from[0].vcount;
     const uint numverts = from[0].vcount + from[0].scount;
-    lfVector* tmp = create_lfvector(vcount);
+    lfVector* tmp = (lfVector*)malloc(numverts * sizeof(lfVector));
 
     zero_lfvector(to, vcount);
 
     if (i < numverts)
     {
         muladd_fmatrix_fvector(tmp[from[i].r], from[i].m, fLongVector[from[i].c]);
-	}
+    }
     add_lfvector_lfvector(to, to, tmp, vcount);
-
-    del_lfvector(tmp);
+    if (tmp)
+    {
+        free(tmp);
+        tmp = nullptr;
+	}
 #else
     const uint vcount = from[0].vcount;
     lfVector* tmp = create_lfvector(vcount);
@@ -720,7 +737,7 @@ __host__ __device__ static int cg_filtered(lfVector* ldV,
 {
     /* Solves for unknown X in equation AX=B */
     uint conjgrad_loopcount = 0, conjgrad_looplimit = 100;
-    const float conjgrad_epsilon = 0.01f;
+    constexpr float conjgrad_epsilon = 0.01f;
 
     uint numverts = lA[0].vcount;
     lfVector* fB = create_lfvector(numverts);
@@ -729,15 +746,15 @@ __host__ __device__ static int cg_filtered(lfVector* ldV,
     lfVector* c = create_lfvector(numverts);
     lfVector* q = create_lfvector(numverts);
     lfVector* s = create_lfvector(numverts);
-    float bnorm2, delta_new, delta_old, delta_target, alpha;
+    float delta_old, alpha;
 
     cp_lfvector(ldV, z, numverts);
 
     /* d0 = filter(B)^T * P * filter(B) */
     cp_lfvector(fB, lB, numverts);
     filter(fB, S);
-    bnorm2 = dot_lfvector(fB, fB, numverts);
-    delta_target = conjgrad_epsilon * conjgrad_epsilon * bnorm2;
+    const float bnorm2 = dot_lfvector(fB, fB, numverts);
+    const float delta_target = conjgrad_epsilon * conjgrad_epsilon * bnorm2;
 
     /* r = filter(B - A * dV) */
     mul_bfmatrix_lfvector(AdV, lA, ldV);
@@ -749,7 +766,7 @@ __host__ __device__ static int cg_filtered(lfVector* ldV,
     filter(c, S);
 
     /* delta = r^T * c */
-    delta_new = dot_lfvector(r, c, numverts);
+    float delta_new = dot_lfvector(r, c, numverts);
 
 #  ifdef IMPLICIT_PRINT_SOLVER_INPUT_OUTPUT
     printf("==== A ====\n");
@@ -788,48 +805,56 @@ __host__ __device__ static int cg_filtered(lfVector* ldV,
     print_lvector(ldV, numverts);
     printf("========\n");
 #  endif
-
+#ifdef __CUDA_ARCH__
+    free(fB);
+    free(AdV);
+    free(r);
+    free(c);
+    free(q);
+    free(s);
+#else
     del_lfvector(fB);
     del_lfvector(AdV);
     del_lfvector(r);
     del_lfvector(c);
     del_lfvector(q);
     del_lfvector(s);
+#endif
+
     // printf("W/O conjgrad_loopcount: %d\n", conjgrad_loopcount);
 
-    result->status = conjgrad_loopcount < conjgrad_looplimit ? SIM_SOLVER_SUCCESS :
-        SIM_SOLVER_NO_CONVERGENCE;
+    result->status = conjgrad_loopcount < conjgrad_looplimit ? SIM_SOLVER_SUCCESS : SIM_SOLVER_NO_CONVERGENCE;
     result->iterations = conjgrad_loopcount;
     result->error = bnorm2 > 0.0f ? sqrtf(delta_new / bnorm2) : 0.0f;
 
-    return conjgrad_loopcount <
-        conjgrad_looplimit; /* true means we reached desired accuracy in given time - ie stable */
+    return conjgrad_loopcount < conjgrad_looplimit; /* true means we reached desired accuracy in given time - ie stable */
 }
 
 __host__ __device__ void SIM_mass_spring_solve_velocities(const Implicit_Data* data, const float dt, ImplicitSolverResult* result)
 {
     const uint numverts = data->dFdV[0].vcount;
-    if (numverts > 0)
+    auto dFdXmV = static_cast<lfVector*>(malloc(numverts * sizeof(lfVector)));
+    zero_lfvector(data->dV, numverts);
+
+    cp_bfmatrix(data->A, data->M);
+
+    subadd_bfmatrixS_bfmatrixS(data->A, data->dFdV, dt, data->dFdX, (dt * dt));
+
+    mul_bfmatrix_lfvector(dFdXmV, data->dFdX, data->V);
+
+    add_lfvectorS_lfvectorS(data->B, data->F, dt, dFdXmV, (dt * dt), numverts);
+
+    if (dFdXmV)
     {
-        lfVector* dFdXmV = create_lfvector(numverts);
-        zero_lfvector(data->dV, numverts);
+        free(dFdXmV);
+        dFdXmV = nullptr;
+    }
 
-        cp_bfmatrix(data->A, data->M);
+    /* Conjugate gradient algorithm to solve Ax=b. */
+    cg_filtered(data->dV, data->A, data->B, data->z, data->S, result);
 
-        subadd_bfmatrixS_bfmatrixS(data->A, data->dFdV, dt, data->dFdX, (dt * dt));
-
-        mul_bfmatrix_lfvector(dFdXmV, data->dFdX, data->V);
-
-        add_lfvectorS_lfvectorS(data->B, data->F, dt, dFdXmV, (dt * dt), numverts);
-
-        /* Conjugate gradient algorithm to solve Ax=b. */
-        cg_filtered(data->dV, data->A, data->B, data->z, data->S, result);
-
-        /* advance velocities */
-        add_lfvector_lfvector(data->Vnew, data->V, data->dV, numverts);
-
-        del_lfvector(dFdXmV);
-	}
+    /* advance velocities */
+    add_lfvector_lfvector(data->Vnew, data->V, data->dV, numverts);
 }
 
 __host__ __device__  void SIM_mass_spring_solve_positions(const Implicit_Data* data, const float dt)
@@ -926,9 +951,25 @@ __host__ __device__ void SIM_mass_spring_set_new_velocity(const Implicit_Data* d
 
 /* -------------------------------- */
 
-__host__ __device__ int SIM_mass_spring_add_block(Implicit_Data* data, const int v1, const int v2)
+__host__ __device__ uint SIM_mass_spring_add_block(Implicit_Data* data, const int v1, const int v2)
 {
     const uint s = data->M[0].vcount + data->num_blocks; /* index from array start */
+#ifdef __CUDA_ARCH__
+    const uint idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (idx < s)
+    {
+        atomicAdd(&data->num_blocks, 1);
+        /* tfm and S don't have spring entries (diagonal blocks only) */
+        init_fmatrix(data->bigI + s, v1, v2);
+        init_fmatrix(data->M + s, v1, v2);
+        init_fmatrix(data->dFdX + s, v1, v2);
+        init_fmatrix(data->dFdV + s, v1, v2);
+        init_fmatrix(data->A + s, v1, v2);
+        init_fmatrix(data->P + s, v1, v2);
+        init_fmatrix(data->Pinv + s, v1, v2);
+    }
+#else
     BLI_assert(s < data->M[0].vcount + data->M[0].scount);
     ++data->num_blocks;
 
@@ -940,7 +981,7 @@ __host__ __device__ int SIM_mass_spring_add_block(Implicit_Data* data, const int
     init_fmatrix(data->A + s, v1, v2);
     init_fmatrix(data->P + s, v1, v2);
     init_fmatrix(data->Pinv + s, v1, v2);
-
+#endif
     return s;
 }
 
@@ -1204,7 +1245,8 @@ __host__ __device__  void SIM_mass_spring_force_face_wind(Implicit_Data* data, c
     const float factor = effector_scale * area / 3.0f;
 
     /* Calculate wind pressure at each vertex by projecting the wind field on the normal. */
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < 3; i++) 
+    {
         world_to_root_v3(data, vs[i], win, winvec[vs[i]]);
 
         force[i] = dot_v3v3(win, nor);
@@ -1334,69 +1376,70 @@ __host__ __device__ static void edge_wind_vertex(const float dir[3],
 
 __host__ __device__ void SIM_mass_spring_force_edge_wind(Implicit_Data* data, const int v1, const int v2, const float radius1, const float radius2, const float(*winvec)[3])
 {
-    float win[3], dir[3];
-    float f[3], dfdx[3][3], dfdv[3][3];
+	float win[3], dir[3];
+	float f[3], dfdx[3][3], dfdv[3][3];
 
-    sub_v3_v3v3(dir, data->X[v1], data->X[v2]);
-    const float length = normalize_v3(dir);
+	sub_v3_v3v3(dir, data->X[v1], data->X[v2]);
+	const float length = normalize_v3(dir);
 
-    world_to_root_v3(data, v1, win, winvec[v1]);
-    edge_wind_vertex(dir, length, radius1, win, f, dfdx, dfdv);
-    add_v3_v3(data->F[v1], f);
+	world_to_root_v3(data, v1, win, winvec[v1]);
+	edge_wind_vertex(dir, length, radius1, win, f, dfdx, dfdv);
+	add_v3_v3(data->F[v1], f);
 
-    world_to_root_v3(data, v2, win, winvec[v2]);
-    edge_wind_vertex(dir, length, radius2, win, f, dfdx, dfdv);
-    add_v3_v3(data->F[v2], f);
+	world_to_root_v3(data, v2, win, winvec[v2]);
+	edge_wind_vertex(dir, length, radius2, win, f, dfdx, dfdv);
+	add_v3_v3(data->F[v2], f);
 }
 
-__global__ void SIM_mass_spring_force_vertex_wind(Implicit_Data* data, const int v, const float(*winvec)[3])
+__global__ void SIM_mass_spring_force_vertex_wind(Implicit_Data* data, const int v, const float (*winvec)[3])
 {
 	constexpr float density = 0.01f; /* XXX arbitrary value, corresponds to effect of air density */
 
-    float wind[3];
-    float f[3];
+	float wind[3];
+	float f[3];
 
-    world_to_root_v3(data, v, wind, winvec[v]);
-    mul_v3_v3fl(f, wind, density);
-    add_v3_v3(data->F[v], f);
+	world_to_root_v3(data, v, wind, winvec[v]);
+	mul_v3_v3fl(f, wind, density);
+	add_v3_v3(data->F[v], f);
 }
 
-__host__ __device__ void dfdx_spring(float to[3][3], const float dir[3], const float length, const float L, const float k)
+__host__ __device__ void dfdx_spring(float to[3][3], const float dir[3], const float length, const float L,
+                                     const float k)
 {
-    constexpr float I[3][3] = { {1, 0, 0}, {0, 1, 0}, {0, 0, 1} };
-    /* dir is unit length direction, rest is spring's restlength, k is spring constant. */
-    // return  ( (I-outerprod(dir, dir))*Min(1.0f, rest/length) - I) * -k;
-    outerproduct(to, dir, dir);
-    sub_m3_m3m3(to, I, to);
+	constexpr float I[3][3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
+	/* dir is unit length direction, rest is spring's restlength, k is spring constant. */
+	// return  ( (I-outerprod(dir, dir))*Min(1.0f, rest/length) - I) * -k;
+	outerproduct(to, dir, dir);
+	sub_m3_m3m3(to, I, to);
 
-    mul_m3_fl(to, (L / length));
-    sub_m3_m3m3(to, to, I);
-    mul_m3_fl(to, k);
+	mul_m3_fl(to, (L / length));
+	sub_m3_m3m3(to, to, I);
+	mul_m3_fl(to, k);
 }
 
 __host__ __device__ void dfdv_damp(float to[3][3], const float dir[3], const float damping)
 {
-    /* Derivative of force with regards to velocity. */
-    outerproduct(to, dir, dir);
-    mul_m3_fl(to, -damping);
+	/* Derivative of force with regards to velocity. */
+	outerproduct(to, dir, dir);
+	mul_m3_fl(to, -damping);
 }
 
 
 __host__ __device__ float fb(const float length, const float L)
 {
-    const float x = length / L;
-    const float xx = x * x;
-    const float xxx = xx * x;
-    const float xxxx = xxx * x;
-    return (-11.541f * xxxx + 34.193f * xxx - 39.083f * xx + 23.116f * x - 9.713f);
+	const float x = length / L;
+	const float xx = x * x;
+	const float xxx = xx * x;
+	const float xxxx = xxx * x;
+	return (-11.541f * xxxx + 34.193f * xxx - 39.083f * xx + 23.116f * x - 9.713f);
 }
 
-__host__ __device__  float fbderiv(const float length, const float L)
+__host__ __device__ float fbderiv(const float length, const float L)
 {
 	const float x = length / L;
 	const float xx = x * x;
 	const float xxx = xx * x;
-    return (-46.164f * xxx + 102.579f * xx - 78.166f * x + 23.116f);
+	return (-46.164f * xxx + 102.579f * xx - 78.166f * x + 23.116f);
 }
 
 __host__ __device__ float fbstar(const float length, const float L, const float kb, const float cb)
@@ -1404,11 +1447,12 @@ __host__ __device__ float fbstar(const float length, const float L, const float 
 	const float tempfb_fl = kb * fb(length, L);
 	const float fbstar_fl = cb * (length - L);
 
-    if (tempfb_fl < fbstar_fl) {
-        return fbstar_fl;
-    }
+	if (tempfb_fl < fbstar_fl)
+	{
+		return fbstar_fl;
+	}
 
-    return tempfb_fl;
+	return tempfb_fl;
 }
 
 /* Function to calculate bending spring force (taken from Choi & Co). */
@@ -1417,112 +1461,112 @@ __host__ __device__ float fbstar_jacobi(const float length, const float L, const
 	const float tempfb_fl = kb * fb(length, L);
 	const float fbstar_fl = cb * (length - L);
 
-    if (tempfb_fl < fbstar_fl) {
-        return -cb;
-    }
+	if (tempfb_fl < fbstar_fl)
+	{
+		return -cb;
+	}
 
-    return -kb * fbderiv(length, L);
+	return -kb * fbderiv(length, L);
 }
 
 /* calculate elongation */
-__host__ __device__  bool spring_length(Implicit_Data* data,
-                   const int i,
-                   const int j,
-    float r_extent[3],
-    float r_dir[3],
-    float* r_length,
-    float r_vel[3])
+__host__ __device__ bool spring_length(Implicit_Data* data,
+                                       const int i,
+                                       const int j,
+                                       float r_extent[3],
+                                       float r_dir[3],
+                                       float* r_length,
+                                       float r_vel[3])
 {
-    sub_v3_v3v3(r_extent, data->X[j], data->X[i]);
-    sub_v3_v3v3(r_vel, data->V[j], data->V[i]);
-    *r_length = len_v3(r_extent);
+	sub_v3_v3v3(r_extent, data->X[j], data->X[i]);
+	sub_v3_v3v3(r_vel, data->V[j], data->V[i]);
+	*r_length = len_v3(r_extent);
 
-    if (*r_length > ALMOST_ZERO) 
-    {
-        mul_v3_v3fl(r_dir, r_extent, 1.0f / (*r_length));
-    }
-    else 
-    {
-        zero_v3(r_dir);
-    }
+	if (*r_length > ALMOST_ZERO)
+	{
+		mul_v3_v3fl(r_dir, r_extent, 1.0f / (*r_length));
+	}
+	else
+	{
+		zero_v3(r_dir);
+	}
 
-    return true;
+	return true;
 }
 
 __global__ void g_spring_length(Implicit_Data* data,
-    const int i,
-    const int j,
-    float r_extent[3],
-    float r_dir[3],
-    float* r_length,
-    float r_vel[3])
+                                const int i,
+                                const int j,
+                                float r_extent[3],
+                                float r_dir[3],
+                                float* r_length,
+                                float r_vel[3])
 {
-    sub_v3_v3v3(r_extent, data->X[j], data->X[i]);
-    sub_v3_v3v3(r_vel, data->V[j], data->V[i]);
-    *r_length = len_v3(r_extent);
+	sub_v3_v3v3(r_extent, data->X[j], data->X[i]);
+	sub_v3_v3v3(r_vel, data->V[j], data->V[i]);
+	*r_length = len_v3(r_extent);
 
-    if (*r_length > ALMOST_ZERO)
-    {
-        mul_v3_v3fl(r_dir, r_extent, 1.0f / (*r_length));
-    }
-    else
-    {
-        zero_v3(r_dir);
-    }
+	if (*r_length > ALMOST_ZERO)
+	{
+		mul_v3_v3fl(r_dir, r_extent, 1.0f / (*r_length));
+	}
+	else
+	{
+		zero_v3(r_dir);
+	}
 }
 
-__host__ __device__ void apply_spring(Implicit_Data* data, const int i, const int j,
-    const float f[3],
-    const float dfdx[3][3],
-    const float dfdv[3][3])
+__host__ __device__ void apply_spring(Implicit_Data* data, const int i, const int j, const float f[3],
+                                      const float dfdx[3][3], const float dfdv[3][3])
 {
-    const int block_ij = SIM_mass_spring_add_block(data, i, j);
+	const uint block_ij = SIM_mass_spring_add_block(data, i, j);
 
-    add_v3_v3(data->F[i], f);
-    sub_v3_v3(data->F[j], f);
+	add_v3_v3(data->F[i], f);
+	sub_v3_v3(data->F[j], f);
 
-    add_m3_m3m3(data->dFdX[i].m, data->dFdX[i].m, dfdx);
-    add_m3_m3m3(data->dFdX[j].m, data->dFdX[j].m, dfdx);
-    sub_m3_m3m3(data->dFdX[block_ij].m, data->dFdX[block_ij].m, dfdx);
+	add_m3_m3m3(data->dFdX[i].m, data->dFdX[i].m, dfdx);
+	add_m3_m3m3(data->dFdX[j].m, data->dFdX[j].m, dfdx);
+	sub_m3_m3m3(data->dFdX[block_ij].m, data->dFdX[block_ij].m, dfdx);
 
-    add_m3_m3m3(data->dFdV[i].m, data->dFdV[i].m, dfdv);
-    add_m3_m3m3(data->dFdV[j].m, data->dFdV[j].m, dfdv);
-    sub_m3_m3m3(data->dFdV[block_ij].m, data->dFdV[block_ij].m, dfdv);
+	add_m3_m3m3(data->dFdV[i].m, data->dFdV[i].m, dfdv);
+	add_m3_m3m3(data->dFdV[j].m, data->dFdV[j].m, dfdv);
+	sub_m3_m3m3(data->dFdV[block_ij].m, data->dFdV[block_ij].m, dfdv);
 }
 
-__host__ __device__ bool SIM_mass_spring_force_spring_bending(Implicit_Data* data, const int i, const int j, const float restlen, const float kb, const float cb)
+__host__ __device__ bool SIM_mass_spring_force_spring_bending(Implicit_Data* data, const int i, const int j,
+                                                              const float restlen, const float kb, const float cb)
 {
-    /* Смотрите "Стабильная, но отзывчивая ткань" / "Stable but Responsive Cloth" (Choi, Ko, 2005).*/
-    float extent[3], length, dir[3], vel[3];
+	/* Смотрите "Стабильная, но отзывчивая ткань" / "Stable but Responsive Cloth" (Choi, Ko, 2005).*/
+	float extent[3], length, dir[3], vel[3];
 
-    /* рассчитать относительное удлинение */
-    spring_length(data, i, j, extent, dir, &length, vel);
+	/* рассчитать относительное удлинение */
+	spring_length(data, i, j, extent, dir, &length, vel);
 
-    if (length < restlen) 
-    {
-        float f[3], dfdx[3][3], dfdv[3][3];
+	if (length < restlen)
+	{
+		float f[3], dfdx[3][3], dfdv[3][3];
 
-        mul_v3_v3fl(f, dir, fbstar(length, restlen, kb, cb));
+		mul_v3_v3fl(f, dir, fbstar(length, restlen, kb, cb));
 
-        outerproduct(dfdx, dir, dir);
-        mul_m3_fl(dfdx, fbstar_jacobi(length, restlen, kb, cb));
+		outerproduct(dfdx, dir, dir);
+		mul_m3_fl(dfdx, fbstar_jacobi(length, restlen, kb, cb));
 
-        /* XXX демпфирование не поддерживается */
-        zero_m3(dfdv);
+		/* XXX демпфирование не поддерживается */
+		zero_m3(dfdv);
 
-        apply_spring(data, i, j, f, dfdx, dfdv);
+		apply_spring(data, i, j, f, dfdx, dfdv);
 
-        return true;
-    }
+		return true;
+	}
 
-    return false;
+	return false;
 }
 
 __host__ __device__ void poly_avg(const lfVector* data, const int* inds, const int len, float r_avg[3])
 {
 	const float fact = 1.0f / static_cast<float>(len);
 
-    zero_v3(r_avg);
+	zero_v3(r_avg);
 
 #ifdef __CUDA_ARCH__
     const uint i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -1532,33 +1576,34 @@ __host__ __device__ void poly_avg(const lfVector* data, const int* inds, const i
         madd_v3_v3fl(r_avg, data[inds[i]], fact);
     }
 #else
-    for (int i = 0; i < len; i++)
-    {
-        madd_v3_v3fl(r_avg, data[inds[i]], fact);
-    }
-#endif    
+	for (int i = 0; i < len; i++)
+	{
+		madd_v3_v3fl(r_avg, data[inds[i]], fact);
+	}
+#endif
 }
 
-__host__ __device__ void poly_norm(const lfVector* data, const int i, const int j, const int* inds, const int len, float r_dir[3])
+__host__ __device__ void poly_norm(const lfVector* data, const int i, const int j, const int* inds, const int len,
+                                   float r_dir[3])
 {
-    float mid[3];
+	float mid[3];
 
-    poly_avg(data, inds, len, mid);
+	poly_avg(data, inds, len, mid);
 
-    normal_tri_v3(r_dir, data[i], data[j], mid);
+	normal_tri_v3(r_dir, data[i], data[j], mid);
 }
 
 __host__ __device__ void edge_avg(const lfVector* data, const int i, const int j, float r_avg[3])
 {
-    r_avg[0] = (data[i][0] + data[j][0]) * 0.5f;
-    r_avg[1] = (data[i][1] + data[j][1]) * 0.5f;
-    r_avg[2] = (data[i][2] + data[j][2]) * 0.5f;
+	r_avg[0] = (data[i][0] + data[j][0]) * 0.5f;
+	r_avg[1] = (data[i][1] + data[j][1]) * 0.5f;
+	r_avg[2] = (data[i][2] + data[j][2]) * 0.5f;
 }
 
-__host__ __device__  void edge_norm(const lfVector* data, const int i, const int j, float r_dir[3])
+__host__ __device__ void edge_norm(const lfVector* data, const int i, const int j, float r_dir[3])
 {
-    sub_v3_v3v3(r_dir, data[i], data[j]);
-    normalize_v3(r_dir);
+	sub_v3_v3v3(r_dir, data[i], data[j]);
+	normalize_v3(r_dir);
 }
 
 __host__ __device__ float bend_angle(const float dir_a[3], const float dir_b[3], const float dir_e[3])
@@ -1567,36 +1612,36 @@ __host__ __device__ float bend_angle(const float dir_a[3], const float dir_b[3],
 
 	const float cos = dot_v3v3(dir_a, dir_b);
 
-    cross_v3_v3v3(tmp, dir_a, dir_b);
+	cross_v3_v3v3(tmp, dir_a, dir_b);
 	const float sin = dot_v3v3(tmp, dir_e);
 
-    return atan2f(sin, cos);
+	return atan2f(sin, cos);
 }
 
-__host__ __device__  void spring_angle(const Implicit_Data* data,
-    const int i, const int j,
-    const int* i_a, const int* i_b,
-    const int len_a, const int len_b,
-    float r_dir_a[3], float r_dir_b[3],
-    float* r_angle, float r_vel_a[3],
-    float r_vel_b[3])
+__host__ __device__ void spring_angle(const Implicit_Data* data,
+                                      const int i, const int j,
+                                      const int* i_a, const int* i_b,
+                                      const int len_a, const int len_b,
+                                      float r_dir_a[3], float r_dir_b[3],
+                                      float* r_angle, float r_vel_a[3],
+                                      float r_vel_b[3])
 {
-    float dir_e[3], vel_e[3];
+	float dir_e[3], vel_e[3];
 
-    poly_norm(data->X, j, i, i_a, len_a, r_dir_a);
-    poly_norm(data->X, i, j, i_b, len_b, r_dir_b);
+	poly_norm(data->X, j, i, i_a, len_a, r_dir_a);
+	poly_norm(data->X, i, j, i_b, len_b, r_dir_b);
 
-    edge_norm(data->X, i, j, dir_e);
+	edge_norm(data->X, i, j, dir_e);
 
-    *r_angle = bend_angle(r_dir_a, r_dir_b, dir_e);
+	*r_angle = bend_angle(r_dir_a, r_dir_b, dir_e);
 
-    poly_avg(data->V, i_a, len_a, r_vel_a);
-    poly_avg(data->V, i_b, len_b, r_vel_b);
+	poly_avg(data->V, i_a, len_a, r_vel_a);
+	poly_avg(data->V, i_b, len_b, r_vel_b);
 
-    edge_avg(data->V, i, j, vel_e);
+	edge_avg(data->V, i, j, vel_e);
 
-    sub_v3_v3(r_vel_a, vel_e);
-    sub_v3_v3(r_vel_b, vel_e);
+	sub_v3_v3(r_vel_a, vel_e);
+	sub_v3_v3(r_vel_b, vel_e);
 }
 
 ///* Jacobian of a direction vector.
@@ -1836,41 +1881,42 @@ __host__ __device__  void spring_angle(const Implicit_Data* data,
 //}
 
 __host__ __device__ bool SIM_mass_spring_force_spring_goal(Implicit_Data* data,
-                                       const int i,
-    const float goal_x[3],
-    const float goal_v[3],
-                                       const float stiffness,
-                                       const float damping)
+                                                           const int i,
+                                                           const float goal_x[3],
+                                                           const float goal_v[3],
+                                                           const float stiffness,
+                                                           const float damping)
 {
-    float root_goal_x[3], root_goal_v[3], extent[3], dir[3], vel[3];
-    float f[3], dfdx[3][3], dfdv[3][3];
+	float root_goal_x[3], root_goal_v[3], extent[3], dir[3], vel[3];
+	float f[3], dfdx[3][3], dfdv[3][3];
 
-    /* goal is in world space */
-    world_to_root_v3(data, i, root_goal_x, goal_x);
-    world_to_root_v3(data, i, root_goal_v, goal_v);
+	/* goal is in world space */
+	world_to_root_v3(data, i, root_goal_x, goal_x);
+	world_to_root_v3(data, i, root_goal_v, goal_v);
 
-    sub_v3_v3v3(extent, root_goal_x, data->X[i]);
-    sub_v3_v3v3(vel, root_goal_v, data->V[i]);
-    const float length = normalize_v3_v3(dir, extent);
+	sub_v3_v3v3(extent, root_goal_x, data->X[i]);
+	sub_v3_v3v3(vel, root_goal_v, data->V[i]);
+	const float length = normalize_v3_v3(dir, extent);
 
-    if (length > ALMOST_ZERO) {
-        mul_v3_v3fl(f, dir, stiffness * length);
+	if (length > ALMOST_ZERO)
+	{
+		mul_v3_v3fl(f, dir, stiffness * length);
 
-        /* Ascher & Boxman, p.21: Damping only during elongation
-         * something wrong with it. */
-        madd_v3_v3fl(f, dir, damping * dot_v3v3(vel, dir));
+		/* Ascher & Boxman, p.21: Damping only during elongation
+		 * something wrong with it. */
+		madd_v3_v3fl(f, dir, damping * dot_v3v3(vel, dir));
 
-        dfdx_spring(dfdx, dir, length, 0.0f, stiffness);
-        dfdv_damp(dfdv, dir, damping);
+		dfdx_spring(dfdx, dir, length, 0.0f, stiffness);
+		dfdv_damp(dfdv, dir, damping);
 
-        add_v3_v3(data->F[i], f);
-        add_m3_m3m3(data->dFdX[i].m, data->dFdX[i].m, dfdx);
-        add_m3_m3m3(data->dFdV[i].m, data->dFdV[i].m, dfdv);
+		add_v3_v3(data->F[i], f);
+		add_m3_m3m3(data->dFdX[i].m, data->dFdX[i].m, dfdx);
+		add_m3_m3m3(data->dFdV[i].m, data->dFdV[i].m, dfdv);
 
-        return true;
-    }
+		return true;
+	}
 
-    return false;
+	return false;
 }
 
 #endif /* IMPLICIT_SOLVER_BLENDER */

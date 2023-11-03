@@ -141,7 +141,11 @@ __host__ __device__ void MEM_lockfree_freeN(void *vmemh)
     aligned_free(MEMHEAD_REAL_PTR(memh_aligned));
   }
   else {
-    free(memh);
+      if (memh)
+      {
+          free(memh);
+          memh = nullptr;
+      }
   }
 }
 

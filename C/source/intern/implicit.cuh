@@ -83,7 +83,7 @@ __host__ __device__ void SIM_mass_spring_set_new_position(const Implicit_Data *d
 __host__ __device__ void SIM_mass_spring_get_new_velocity(const Implicit_Data *data, int index, float v[3]);
 __host__ __device__ void SIM_mass_spring_set_new_velocity(const Implicit_Data *data, int index, const float v[3]);
 
-__host__ __device__ int SIM_mass_spring_add_block(Implicit_Data* data, int v1, int v2);
+__host__ __device__ uint SIM_mass_spring_add_block(Implicit_Data* data, int v1, int v2);
 
 __host__ __device__  void SIM_mass_spring_clear_constraints(Implicit_Data* data);
 __global__ void g_SIM_mass_spring_clear_constraints(Implicit_Data *data);
@@ -249,16 +249,16 @@ inline float* copyLfVectorArrayToDevice(const float h_ptr[3])
 }
 
 // Функция для копирования типа fmatrix3x3
-inline fmatrix3x3* copyFmatrix3x3ArrayToDevice(const fmatrix3x3* h_ptr)
+inline fmatrix3x3* copyFmatrix3x3ArrayToDevice(const fmatrix3x3& h_ptr)
 {
     fmatrix3x3* d_ptr;
     gpuErrchk(cudaMalloc(reinterpret_cast<void**>(&d_ptr), sizeof(fmatrix3x3)))
-    gpuErrchk(cudaMemcpy(d_ptr, h_ptr, sizeof(fmatrix3x3), cudaMemcpyHostToDevice))
+    gpuErrchk(cudaMemcpy(d_ptr, &h_ptr, sizeof(fmatrix3x3), cudaMemcpyHostToDevice))
     return d_ptr;
 }
 
 // Функция для копирования массивов типа fmatrix3x3
-inline Implicit_Data* copyImplicit_DataToDevice(Implicit_Data* data, const uint count)
+inline Implicit_Data* copyImplicit_DataToDevice(const Implicit_Data* data, const uint count)
 {
     Implicit_Data* d_data;
     Implicit_Data h_data;
@@ -282,109 +282,53 @@ inline Implicit_Data* copyImplicit_DataToDevice(Implicit_Data* data, const uint 
     gpuErrchk(cudaMalloc(reinterpret_cast<void**>(&h_data.P), sizeof(fmatrix3x3) * count))
     gpuErrchk(cudaMalloc(reinterpret_cast<void**>(&h_data.Pinv), sizeof(fmatrix3x3) * count))
 
-    auto** tempX =     new float* [count];  // временный хостовый массив указателей
-    auto** tempXnew =  new float* [count];  // временный хостовый массив указателей
-    auto** tempF =     new float* [count];  // временный хостовый массив указателей
-    auto** tempV =     new float* [count];  // временный хостовый массив указателей
-    auto** tempVnew =  new float* [count];  // временный хостовый массив указателей
-    auto** tempdV =    new float* [count];  // временный хостовый массив указателей
-    auto** tempz =     new float* [count];  // временный хостовый массив указателей
-    auto** tempB =     new float* [count];  // временный хостовый массив указателей
-
-    auto** tempbigI = new fmatrix3x3 * [count];  // временный хостовый массив указателей
-    auto** temptfm =  new fmatrix3x3 * [count];  // временный хостовый массив указателей
-    auto** tempM =    new fmatrix3x3 * [count];  // временный хостовый массив указателей
-    auto** tempdFdV = new fmatrix3x3 * [count];  // временный хостовый массив указателей
-    auto** tempdFdX = new fmatrix3x3 * [count];  // временный хостовый массив указателей
-    auto** tempPinv = new fmatrix3x3 * [count];  // временный хостовый массив указателей
-    auto** tempP =    new fmatrix3x3 * [count];  // временный хостовый массив указателей
-    auto** tempS =    new fmatrix3x3 * [count];  // временный хостовый массив указателей
-    auto** tempA =    new fmatrix3x3 * [count];  // временный хостовый массив указателей
-    for (uint i = 0; i < count; ++i)
-    {
-        tempX[i] = copyLfVectorArrayToDevice(data->X[i]);
-        tempXnew[i] = copyLfVectorArrayToDevice(data->Xnew[i]);
-        tempF[i] = copyLfVectorArrayToDevice(data->F[i]);
-        tempV[i] = copyLfVectorArrayToDevice(data->V[i]);
-        tempVnew[i] = copyLfVectorArrayToDevice(data->Vnew[i]);
-        tempdV[i] = copyLfVectorArrayToDevice(data->dV[i]);
-        tempz[i] = copyLfVectorArrayToDevice(data->z[i]);
-        tempB[i] = copyLfVectorArrayToDevice(data->B[i]);
-
-        tempbigI[i] = copyFmatrix3x3ArrayToDevice(&data->bigI[i]);
-        temptfm[i] = copyFmatrix3x3ArrayToDevice(&data->tfm[i]);
-        tempM[i] = copyFmatrix3x3ArrayToDevice(&data->M[i]);
-        tempdFdV[i] = copyFmatrix3x3ArrayToDevice(&data->dFdV[i]);
-        tempdFdX[i] = copyFmatrix3x3ArrayToDevice(&data->dFdX[i]);
-        tempS[i] = copyFmatrix3x3ArrayToDevice(&data->S[i]);
-        tempA[i] = copyFmatrix3x3ArrayToDevice(&data->A[i]);
-        tempP[i] = copyFmatrix3x3ArrayToDevice(&data->P[i]);
-        tempPinv[i] = copyFmatrix3x3ArrayToDevice(&data->Pinv[i]);
-    }
-
-    gpuErrchk(cudaMemcpy(h_data.X, tempX, sizeof(float) * count, cudaMemcpyHostToDevice))
-    gpuErrchk(cudaMemcpy(h_data.Xnew, tempXnew, sizeof(float) * count, cudaMemcpyHostToDevice))
-    gpuErrchk(cudaMemcpy(h_data.F, tempF, sizeof(float) * count, cudaMemcpyHostToDevice))
-    gpuErrchk(cudaMemcpy(h_data.V, tempV, sizeof(float) * count, cudaMemcpyHostToDevice))
-    gpuErrchk(cudaMemcpy(h_data.Vnew, tempVnew, sizeof(float) * count, cudaMemcpyHostToDevice))
-    gpuErrchk(cudaMemcpy(h_data.dV, tempdV, sizeof(float) * count, cudaMemcpyHostToDevice))
-    gpuErrchk(cudaMemcpy(h_data.z, tempz, sizeof(float) * count, cudaMemcpyHostToDevice))
-    gpuErrchk(cudaMemcpy(h_data.B, tempB, sizeof(float) * count, cudaMemcpyHostToDevice))
-    gpuErrchk(cudaMemcpy(h_data.bigI, tempbigI, sizeof(fmatrix3x3) * count, cudaMemcpyHostToDevice))
-    gpuErrchk(cudaMemcpy(h_data.tfm, temptfm, sizeof(fmatrix3x3) * count, cudaMemcpyHostToDevice))
-    gpuErrchk(cudaMemcpy(h_data.M, tempM, sizeof(fmatrix3x3) * count, cudaMemcpyHostToDevice))
-    gpuErrchk(cudaMemcpy(h_data.dFdV, tempdFdV, sizeof(fmatrix3x3) * count, cudaMemcpyHostToDevice))
-    gpuErrchk(cudaMemcpy(h_data.dFdX, tempdFdX, sizeof(fmatrix3x3) * count, cudaMemcpyHostToDevice))
-    gpuErrchk(cudaMemcpy(h_data.S, tempS, sizeof(fmatrix3x3) * count, cudaMemcpyHostToDevice))
-    gpuErrchk(cudaMemcpy(h_data.A, tempA, sizeof(fmatrix3x3) * count, cudaMemcpyHostToDevice))
-    gpuErrchk(cudaMemcpy(h_data.P, tempP, sizeof(fmatrix3x3) * count, cudaMemcpyHostToDevice))
-    gpuErrchk(cudaMemcpy(h_data.Pinv, tempPinv, sizeof(fmatrix3x3) * count, cudaMemcpyHostToDevice))
+    gpuErrchk(cudaMemcpy(h_data.X, data->X, sizeof(float) * count, cudaMemcpyHostToDevice))
+    gpuErrchk(cudaMemcpy(h_data.Xnew, data->Xnew, sizeof(float) * count, cudaMemcpyHostToDevice))
+    gpuErrchk(cudaMemcpy(h_data.F, data->F, sizeof(float) * count, cudaMemcpyHostToDevice))
+    gpuErrchk(cudaMemcpy(h_data.V, data->V, sizeof(float) * count, cudaMemcpyHostToDevice))
+    gpuErrchk(cudaMemcpy(h_data.Vnew, data->Vnew, sizeof(float) * count, cudaMemcpyHostToDevice))
+    gpuErrchk(cudaMemcpy(h_data.dV, data->dV, sizeof(float) * count, cudaMemcpyHostToDevice))
+    gpuErrchk(cudaMemcpy(h_data.z, data->z, sizeof(float) * count, cudaMemcpyHostToDevice))
+    gpuErrchk(cudaMemcpy(h_data.B, data->B, sizeof(float) * count, cudaMemcpyHostToDevice))
+    gpuErrchk(cudaMemcpy(h_data.bigI, data->bigI, sizeof(fmatrix3x3) * count, cudaMemcpyHostToDevice))
+    gpuErrchk(cudaMemcpy(h_data.tfm, data->tfm, sizeof(fmatrix3x3) * count, cudaMemcpyHostToDevice))
+    gpuErrchk(cudaMemcpy(h_data.M, data->M, sizeof(fmatrix3x3) * count, cudaMemcpyHostToDevice))
+    gpuErrchk(cudaMemcpy(h_data.dFdV, data->dFdV, sizeof(fmatrix3x3) * count, cudaMemcpyHostToDevice))
+    gpuErrchk(cudaMemcpy(h_data.dFdX, data->dFdX, sizeof(fmatrix3x3) * count, cudaMemcpyHostToDevice))
+    gpuErrchk(cudaMemcpy(h_data.S, data->S, sizeof(fmatrix3x3) * count, cudaMemcpyHostToDevice))
+    gpuErrchk(cudaMemcpy(h_data.A, data->A, sizeof(fmatrix3x3) * count, cudaMemcpyHostToDevice))
+    gpuErrchk(cudaMemcpy(h_data.P, data->P, sizeof(fmatrix3x3) * count, cudaMemcpyHostToDevice))
+    gpuErrchk(cudaMemcpy(h_data.Pinv, data->Pinv, sizeof(fmatrix3x3) * count, cudaMemcpyHostToDevice))
 
     gpuErrchk(cudaMemcpy(d_data, &h_data, sizeof(Implicit_Data), cudaMemcpyHostToDevice))
-
-    delete[] tempX;
-    delete[] tempXnew;
-    delete[] tempF;
-    delete[] tempV;
-    delete[] tempVnew;
-    delete[] tempz;
-    delete[] tempB;
-    delete[] tempbigI;
-    delete[] temptfm;
-    delete[] tempM;
-    delete[] tempdFdV;
-    delete[] tempdFdX;
-    delete[] tempS;
-    delete[] tempA;
-    delete[] tempP;
-    delete[] tempPinv;
 
     return d_data;
 }
 
-
 inline void freeImplicitDataOnDevice(Implicit_Data* d_data)
 {
-    cudaFree(d_data->X);
-    cudaFree(d_data->Xnew);
-    cudaFree(d_data->F);
-    cudaFree(d_data->V);
-    cudaFree(d_data->Vnew);
-    cudaFree(d_data->dV);
-    cudaFree(d_data->z);
-    cudaFree(d_data->B);
-    cudaFree(d_data->bigI);
-    cudaFree(d_data->tfm);
-    cudaFree(d_data->M);
-    cudaFree(d_data->dFdV);
-    cudaFree(d_data->dFdX);
-    cudaFree(d_data->S);
-    cudaFree(d_data->A);
-    cudaFree(d_data->P);
-    cudaFree(d_data->Pinv);
-    cudaFree(d_data);
-}
+    Implicit_Data h_data;
+    gpuErrchk(cudaMemcpy(&h_data, d_data, sizeof(Implicit_Data), cudaMemcpyDeviceToHost))
 
+	gpuErrchk(cudaFree(h_data.X))
+    gpuErrchk(cudaFree(h_data.Xnew))
+    gpuErrchk(cudaFree(h_data.F))
+    gpuErrchk(cudaFree(h_data.V))
+    gpuErrchk(cudaFree(h_data.Vnew))
+    gpuErrchk(cudaFree(h_data.dV))
+    gpuErrchk(cudaFree(h_data.z))
+    gpuErrchk(cudaFree(h_data.B))
+    gpuErrchk(cudaFree(h_data.bigI))
+    gpuErrchk(cudaFree(h_data.tfm))
+    gpuErrchk(cudaFree(h_data.M))
+    gpuErrchk(cudaFree(h_data.dFdV))
+    gpuErrchk(cudaFree(h_data.dFdX))
+    gpuErrchk(cudaFree(h_data.S))
+    gpuErrchk(cudaFree(h_data.A))
+    gpuErrchk(cudaFree(h_data.P))
+    gpuErrchk(cudaFree(h_data.Pinv))
+    gpuErrchk(cudaFree(d_data))
+}
 
 
 #endif // __CLOTH_IMPLICIT_H__

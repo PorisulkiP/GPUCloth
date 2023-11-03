@@ -17,6 +17,14 @@
       <Configuration>Release</Configuration>
       <Platform>x64</Platform>
     </ProjectConfiguration>
+    <ProjectConfiguration Include="TEST|Win32">
+      <Configuration>TEST</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="TEST|x64">
+      <Configuration>TEST</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="cloth\cloth_settings.cuh" />
@@ -61,6 +69,11 @@
     <ClInclude Include="intern\depsgraph\intern\depsgraph.cuh" />
     <ClInclude Include="intern\depsgraph\intern\node\deg_node_id.h" />
     <ClInclude Include="intern\implicit.cuh" />
+    <ClInclude Include="intern\kernel_compat_cuda.h" />
+    <ClInclude Include="intern\kernel_compat_opencl.h" />
+    <ClInclude Include="intern\kernel_compat_optix.h" />
+    <ClInclude Include="intern\kernel_config.h" />
+    <ClInclude Include="intern\kernel_cuda_image.h" />
     <ClInclude Include="intern\mallocn_inline.cuh" />
     <ClInclude Include="intern\mallocn_intern.cuh" />
     <ClInclude Include="intern\MEM_guardedalloc.cuh" />
@@ -157,6 +170,8 @@
   <ItemGroup>
     <CudaCompile Include="cloth\intern\hair_volume.cpp" />
     <CudaCompile Include="cloth\SIM_mass_spring.cu" />
+    <CudaCompile Include="intern\kernel.cu" />
+    <CudaCompile Include="intern\kernel_split.cu" />
     <CudaCompile Include="intern\mallocn.cu" />
     <CudaCompile Include="lib\intern\memarena.cpp" />
     <CudaCompile Include="lib\intern\mempool.cpp" />
@@ -250,6 +265,15 @@
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <CharacterSet>Unicode</CharacterSet>
+    <PlatformToolset>v143</PlatformToolset>
+    <WholeProgramOptimization>false</WholeProgramOptimization>
+    <PreferredToolArchitecture>x64</PreferredToolArchitecture>
+    <EnableASAN />
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='TEST|x64'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
     <CharacterSet>Unicode</CharacterSet>
@@ -273,6 +297,9 @@
   <PropertyGroup Label="Configuration" Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <PlatformToolset>v143</PlatformToolset>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='TEST|Win32'" Label="Configuration">
+    <PlatformToolset>v143</PlatformToolset>
+  </PropertyGroup>
   <PropertyGroup Label="Configuration" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <PlatformToolset>v143</PlatformToolset>
     <ConfigurationType>DynamicLibrary</ConfigurationType>
@@ -285,6 +312,9 @@
     <Import Project="$(VCTargetsPath)\BuildCustomizations\CUDA 12.2.props" />
   </ImportGroup>
   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='TEST|x64'" Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -302,6 +332,19 @@
     <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
     <CallingConvention-pthreads>
     </CallingConvention-pthreads>
+    <GenerateManifest>true</GenerateManifest>
+    <LinkIncremental>false</LinkIncremental>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='TEST|x64'">
+    <OutDir>C:\Users\Alex\AppData\Roaming\Blender Foundation\Blender\3.6\scripts\addons\SimplyClothPro\dll\</OutDir>
+    <IncludePath>$(IncludePath);$(SolutionDir)\kernel;$(SolutionDir)\lib;$(SolutionDir)\intern\depsgraph\intern;$(SolutionDir)\intern\depsgraph;$(SolutionDir)\intern\atomic;$(SolutionDir)\intern;$(SolutionDir)\RNA;$(SolutionDir)\cloth;$(SolutionDir)\bmesh\operators;$(SolutionDir)\bmesh\intern;$(SolutionDir)\bmesh\tools;$(SolutionDir)\bmesh;$(SolutionDir)\modifiers\intern;$(SolutionDir)\modifiers;$(SolutionDir)\DNA</IncludePath>
+    <ExternalIncludePath>$(VC_IncludePath);$(WindowsSDK_IncludePath);</ExternalIncludePath>
+    <LibraryPath>$(VC_LibraryPath_x64);$(WindowsSDK_LibraryPath_x64)</LibraryPath>
+    <ReferencePath>$(VC_ReferencesPath_x64);$(SolutionDir);</ReferencePath>
+    <SourcePath>$(VC_SourcePath);$(SolutionDir);</SourcePath>
+    <ExecutablePath>$(VC_ExecutablePath_x64);$(CommonExecutablePath)</ExecutablePath>
+    <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+    <CallingConvention-pthreads />
     <GenerateManifest>true</GenerateManifest>
     <LinkIncremental>false</LinkIncremental>
   </PropertyGroup>
@@ -381,7 +424,94 @@
       <AdditionalDependencies>cudart_static.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <LinkTimeCodeGeneration>Default</LinkTimeCodeGeneration>
       <ForceFileOutput>Enabled</ForceFileOutput>
-      <AdditionalOptions>/NODEFAULTLIB:LIBCMT %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>/NODEFAULTLIB:LIBCMT /ignore:4006 %(AdditionalOptions)</AdditionalOptions>
+      <EnableUAC>false</EnableUAC>
+      <TargetMachine>MachineX64</TargetMachine>
+      <IgnoreSpecificDefaultLibraries>
+      </IgnoreSpecificDefaultLibraries>
+    </Link>
+    <CudaCompile>
+      <TargetMachinePlatform>64</TargetMachinePlatform>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <Include>$(ProjectDir);%(Include);%(AdditionalIncludeDirectories)</Include>
+      <Warning>InheritFromHost</Warning>
+      <NvccCompilation>compile</NvccCompilation>
+      <CudaRuntime>Static</CudaRuntime>
+      <AdditionalOptions>-Xcudafe --diag_suppress=esa_on_defaulted_function_ignored --expt-relaxed-constexpr --std c++20 %(AdditionalOptions)</AdditionalOptions>
+      <GPUDebugInfo>true</GPUDebugInfo>
+      <CodeGeneration>compute_86,sm_86</CodeGeneration>
+      <GenerateRelocatableDeviceCode>true</GenerateRelocatableDeviceCode>
+      <ExtensibleWholeProgramCompilation>false</ExtensibleWholeProgramCompilation>
+      <Runtime>MDd</Runtime>
+      <GenerateLineInfo>false</GenerateLineInfo>
+      <FastMath>true</FastMath>
+      <AdditionalDeps>
+      </AdditionalDeps>
+      <Keep>true</Keep>
+      <InterleaveSourceInPTX>false</InterleaveSourceInPTX>
+      <TypeInfo>true</TypeInfo>
+    </CudaCompile>
+    <PostBuildEvent>
+      <Command>
+      </Command>
+    </PostBuildEvent>
+    <CudaLink>
+      <GPUDebugInfo>true</GPUDebugInfo>
+    </CudaLink>
+    <CudaLink>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+    </CudaLink>
+    <CudaLink>
+      <Optimization>Od</Optimization>
+      <PerformDeviceLink>true</PerformDeviceLink>
+    </CudaLink>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='TEST|x64'">
+    <ClCompile>
+      <WarningLevel>TurnOffAllWarnings</WarningLevel>
+      <Optimization>Disabled</Optimization>
+      <FunctionLevelLinking>
+      </FunctionLevelLinking>
+      <IntrinsicFunctions>false</IntrinsicFunctions>
+      <PreprocessorDefinitions>WIN64;_XKEYCHECK_H;_WINDLL;_USRDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <LanguageStandard_C>stdc17</LanguageStandard_C>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <InlineFunctionExpansion>Default</InlineFunctionExpansion>
+      <FavorSizeOrSpeed>Neither</FavorSizeOrSpeed>
+      <EnableFiberSafeOptimizations>
+      </EnableFiberSafeOptimizations>
+      <WholeProgramOptimization>false</WholeProgramOptimization>
+      <CallingConvention>Cdecl</CallingConvention>
+      <ScanSourceForModuleDependencies>true</ScanSourceForModuleDependencies>
+      <RemoveUnreferencedCodeData>true</RemoveUnreferencedCodeData>
+      <ExceptionHandling>Sync</ExceptionHandling>
+      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
+      <BasicRuntimeChecks>Default</BasicRuntimeChecks>
+      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <SDLCheck>false</SDLCheck>
+      <GuardEHContMetadata>
+      </GuardEHContMetadata>
+      <ExpandAttributedSource>false</ExpandAttributedSource>
+      <AssemblerOutput>NoListing</AssemblerOutput>
+      <DisableLanguageExtensions>false</DisableLanguageExtensions>
+      <AdditionalOptions>/wd4244 %(AdditionalOptions)</AdditionalOptions>
+      <SupportJustMyCode>false</SupportJustMyCode>
+      <BrowseInformation>true</BrowseInformation>
+      <AdditionalModuleDependencies>
+      </AdditionalModuleDependencies>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>DebugFull</GenerateDebugInformation>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>false</OptimizeReferences>
+      <SubSystem>NotSet</SubSystem>
+      <AdditionalDependencies>cudart_static.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <LinkTimeCodeGeneration>Default</LinkTimeCodeGeneration>
+      <ForceFileOutput>Enabled</ForceFileOutput>
+      <AdditionalOptions>/NODEFAULTLIB:LIBCMT /ignore:4006 %(AdditionalOptions)</AdditionalOptions>
       <EnableUAC>false</EnableUAC>
       <TargetMachine>MachineX64</TargetMachine>
       <IgnoreSpecificDefaultLibraries>
@@ -535,6 +665,12 @@
     </CudaLink>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <Link>
+      <ForceFileOutput>Enabled</ForceFileOutput>
+      <LinkTimeCodeGeneration>Default</LinkTimeCodeGeneration>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='TEST|Win32'">
     <Link>
       <ForceFileOutput>Enabled</ForceFileOutput>
       <LinkTimeCodeGeneration>Default</LinkTimeCodeGeneration>

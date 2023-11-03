@@ -389,10 +389,33 @@
     <ClInclude Include="cloth\SIM_mass_spring.cuh">
       <Filter>SIM</Filter>
     </ClInclude>
-    <ClInclude Include="lib\BLI_memory_utils.cuh" />
-    <ClInclude Include="kernel\BKE_subdiv.h" />
-    <ClInclude Include="lib\BLI_probing_strategies.cuh" />
-    <ClInclude Include="cloth\CUDA_mem_utils.cuh" />
+    <ClInclude Include="lib\BLI_memory_utils.cuh">
+      <Filter>lib</Filter>
+    </ClInclude>
+    <ClInclude Include="lib\BLI_probing_strategies.cuh">
+      <Filter>lib</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\BKE_subdiv.h">
+      <Filter>kernel</Filter>
+    </ClInclude>
+    <ClInclude Include="cloth\CUDA_mem_utils.cuh">
+      <Filter>SIM</Filter>
+    </ClInclude>
+    <ClInclude Include="intern\kernel_compat_cuda.h">
+      <Filter>intern\kernel</Filter>
+    </ClInclude>
+    <ClInclude Include="intern\kernel_compat_opencl.h">
+      <Filter>intern\kernel</Filter>
+    </ClInclude>
+    <ClInclude Include="intern\kernel_compat_optix.h">
+      <Filter>intern\kernel</Filter>
+    </ClInclude>
+    <ClInclude Include="intern\kernel_config.h">
+      <Filter>intern\kernel</Filter>
+    </ClInclude>
+    <ClInclude Include="intern\kernel_cuda_image.h">
+      <Filter>intern\kernel</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <CudaCompile Include="main.cpp">
@@ -412,6 +435,12 @@
     </CudaCompile>
     <CudaCompile Include="cloth\SIM_mass_spring.cu">
       <Filter>SIM</Filter>
+    </CudaCompile>
+    <CudaCompile Include="intern\kernel.cu">
+      <Filter>intern\kernel</Filter>
+    </CudaCompile>
+    <CudaCompile Include="intern\kernel_split.cu">
+      <Filter>intern\kernel</Filter>
     </CudaCompile>
   </ItemGroup>
   <ItemGroup>
@@ -474,6 +503,9 @@
     </Filter>
     <Filter Include="modifiers">
       <UniqueIdentifier>{50ad1a43-09e6-4cc8-a610-3897b1282b95}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="intern\kernel">
+      <UniqueIdentifier>{98e649ac-e397-46e3-9994-159b0485a108}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
