@@ -814,7 +814,7 @@ __device__ bool SIM_cloth_solve(const Depsgraph* depsgraph, Object* ob, ClothMod
     Cloth* cloth = clmd->clothObject;
     ClothVertex* verts = cloth->verts;
     const uint mvert_num = cloth->mvert_num;
-    const float dt = 0.1f; // clmd->sim_parms->dt * clmd->sim_parms->timescale
+    const float dt = clmd->sim_parms->dt * clmd->sim_parms->timescale;
     Implicit_Data* id = cloth->implicit;
 
     // Включить или отключить воздействие ускорения на гидростатическое давление жидкости внутри объекта
