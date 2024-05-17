@@ -1,59 +1,59 @@
 air damping - трение о воздух
-bending damping - 
-bending model
-bending stiffness
-bending stiffness max
-bl rna
-collider friction
-compression damping
-compression stiffness
-compression stiffness max
-density strength
-density target
-effector weights
-fluid density
-goal default
-goal friction
-goal max
-goal min
-goal spring
-gravity
-internal compression stiffness
-internal compression stiffness max
-internal friction
-internal spring max diversion
-internal spring max length
-internal spring normal check
-internal tension stiffness
-internal tension stiffness max
-mass
-pin stiffness
-pressure factor
-quality
-rest shape key
-rna type
-sewing force max
-shear damping
-shear stiffness
-shear stiffness max
-shrink max
-shrink min
-target volume
-tension damping
-tension stiffness
-tension stiffness max
-time scale
-uniform pressure force
-use dynamic mesh
-use internal springs
-use pressure
-use pressure volume
-use sewing springs
-vertex group bending
-vertex group intern
-vertex group mass
-vertex group pressure
-vertex group shear stiffness
-vertex group shrink
-vertex group structural stiffness
-voxel cell size
+bending damping - демпфирование изгиба
+bending model - модель изгиба
+bending stiffness - жёсткость изгиба
+bending stiffness max - максимальная жёсткость изгиба
+bl rna - bl rna (специфичный термин Blender, обычно не переводится)
+collider friction - трение коллайдера
+compression damping - демпфирование сжатия
+compression stiffness - жёсткость сжатия
+compression stiffness max - максимальная жёсткость сжатия
+density strength - плотность силы
+density target - целевая плотность
+effector weights - веса эффекторов
+fluid density - плотность жидкости
+goal default - целевое значение по умолчанию
+goal friction - трение цели
+goal max - максимальная цель
+goal min - минимальная цель
+goal spring - целевая пружина
+gravity - гравитация
+internal compression stiffness - внутренняя жёсткость сжатия
+internal compression stiffness max - максимальная внутренняя жёсткость сжатия
+internal friction - внутреннее трение
+internal spring max diversion - максимальное отклонение внутренней пружины
+internal spring max length - максимальная длина внутренней пружины
+internal spring normal check - проверка нормали внутренней пружины
+internal tension stiffness - внутренняя жёсткость напряжения
+internal tension stiffness max - максимальная внутренняя жёсткость напряжения
+mass - масса
+pin stiffness - жёсткость фиксации
+pressure factor - коэффициент давления
+quality - качество
+rest shape key - ключ формы покоя
+rna type - тип rna (специфичный термин Blender, обычно не переводится)
+sewing force max - максимальная сила шва
+shear damping - демпфирование сдвига
+shear stiffness - жёсткость сдвига
+shear stiffness max - максимальная жёсткость сдвига
+shrink max - максимальное сжатие
+shrink min - минимальное сжатие
+target volume - целевой объём
+tension damping - демпфирование натяжения
+tension stiffness - жёсткость натяжения
+tension stiffness max - максимальная жёсткость натяжения
+time scale - временной масштаб
+uniform pressure force - равномерная сила давления
+use dynamic mesh - использовать динамическую сетку
+use internal springs - использовать внутренние пружины
+use pressure - использовать давление
+use pressure volume - использовать объём давления
+use sewing springs - использовать пружины шва
+vertex group bending - группа вершин изгиба
+vertex group intern - внутренняя группа вершин
+vertex group mass - группа вершин массы
+vertex group pressure - группа вершин давления
+vertex group shear stiffness - группа вершин жёсткости сдвига
+vertex group shrink - группа вершин сжатия
+vertex group structural stiffness - группа вершин структурной жёсткости
+voxel cell size - размер ячейки вокселя

@@ -14,7 +14,6 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
 lib64/
 parts/
 sdist/
@@ -154,3 +153,7 @@ softBody/
 *.pdb
 *.txt
 *.recipe
+*.signature.p7s
+/src/engine/source/Debug/
+/src/engine/source/Release/
+/src/engine/source/packages/
