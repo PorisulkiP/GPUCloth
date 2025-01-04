@@ -19,6 +19,8 @@ import sys
 import subprocess
 import numpy as np
 
+import time
+
 from ctypes import *
 from . import cpp_types as CType
 from . import pycloth as lib
@@ -36,6 +38,54 @@ g_clmd = []
 g_mesh = []
 g_clothOBJs = []
 g_clothCollisionOBJs = []
+
+def free_gpu_memory(context=None):
+    global g_dll
+    global g_scene
+    global g_obj
+    global g_mesh
+    global g_clmd
+    global g_clothOBJs
+    global g_clothCollisionOBJs
+
+    # Вызываем FreeSolverData() из g_dll
+    if g_dll is not None:
+        try:
+            g_dll.FreeSolverData()
+        except Exception as e:
+            print(f"Failed to free solver data: {e}")
+            return False
+
+    # Очищаем глобальные списки
+    g_scene = None
+    g_obj = []
+    g_clmd = []
+    g_mesh = []
+    g_clothOBJs = []
+    g_clothCollisionOBJs = []
+
+    # Сбрасываем флаг и счетчики, если к ним есть доступ
+    if context is not None and hasattr(context.scene, 'gpu_cloth_springs_built'):
+        context.scene.gpu_cloth_springs_built = False
+
+    return True
+
+class GPUCloth_FreeVRAM(bpy.types.Operator):
+    """Освободить память GPU от данных"""
+    bl_idname = "gpucloth.destroy_simulation_data"
+    bl_label = "Free GPU memory from data"
+
+    @classmethod
+    def poll(cls, context):
+        return True
+        
+    def execute(self, context):
+        success = free_gpu_memory(context)
+        if not success:
+            self.report({'ERROR'}, "Failed to free GPU memory.")
+            return {'CANCELLED'}
+        self.report({'INFO'}, "GPU memory successfully freed.")
+        return {'FINISHED'}
 
 class GPUCloth_LoadDLL(bpy.types.Operator):
     """Загрузить DLL для GPUCloth"""
@@ -68,10 +118,10 @@ class GPUCloth_LoadDLL(bpy.types.Operator):
 
             # addons_path = vcu.get_script_paths_pref()
             # filename = addons_path + "\\engine\\build\\GPUCloth.dll"
-            filename = "D:\\source\\repos\\CUDACloth\\build\\GPUCloth.dll"
+            filename = "E:\\source\\repos\\CUDACloth\\build\\GPUCloth.dll"
             try:
                 g_dll = cdll.LoadLibrary(filename)
-                self.report({'INFO'}, "The DLL has been loaded successfully")
+                self.report({'INFO'}, "The DLL has been loaded successfully")   
 
                 # Заполнение данных для вычислителя
                 g_dll.FillSolverData.argtypes = [POINTER(CType.Scene)]
@@ -90,19 +140,19 @@ class GPUCloth_LoadDLL(bpy.types.Operator):
                 g_dll.SIM_solver.restype = c_bool
 
                 # Добавление одного объекта ткани в массив
-                g_dll.AddCloth.argtypes = [POINTER(CType.ClothModifierData), POINTER(CType.Mesh), POINTER(CType.Object), c_bool]
+                g_dll.AddCloth.argtypes = [POINTER(CType.ClothModifierData), POINTER(CType.Mesh), POINTER(CType.Object)]
                 g_dll.AddCloth.restype = c_bool
 
                 # Удаление одного объекта ткани из массива
-                g_dll.RemoveCloth.argtypes = [POINTER(CType.ClothModifierData), POINTER(CType.Mesh), POINTER(CType.Object), c_bool]
+                g_dll.RemoveCloth.argtypes = [POINTER(CType.ClothModifierData), POINTER(CType.Mesh), POINTER(CType.Object)]
                 g_dll.RemoveCloth.restype = c_bool
 
                 # Добавление одного объекта столкновения в массив
-                g_dll.AddCollisionObject.argtypes = [POINTER(CType.Object), c_bool]
+                g_dll.AddCollisionObject.argtypes = [POINTER(CType.Object)]
                 g_dll.AddCollisionObject.restype = c_bool
 
                 # Удаление одного объекта столкновения из массива
-                g_dll.RemoveCollisionObject.argtypes = [POINTER(CType.Object), c_bool]
+                g_dll.RemoveCollisionObject.argtypes = [POINTER(CType.Object)]
                 g_dll.RemoveCollisionObject.restype = c_bool
 
                 # Обновление данных сцены
@@ -110,7 +160,7 @@ class GPUCloth_LoadDLL(bpy.types.Operator):
                 g_dll.UpdateScene.restype = c_bool
 
             except OSError as e:
-                self.report({'ERROR'}, e)
+                self.report({'ERROR'}, e.strerror)
                 self.report({'ERROR'}, "\nНе удаётся установить соединение с DLL файлом")
                 self.report({'ERROR'}, "Unable to set up a connection with the DLL file\n")
                 g_dll = None
@@ -126,6 +176,36 @@ class GPUCloth_LoadDLL(bpy.types.Operator):
             return {'CANCELLED'}
         return {'FINISHED'}
 
+class GPUCloth_UnloadDLL(bpy.types.Operator):
+    """Выгрузить dll файл из blender"""
+    bl_idname = "gpucloth.unload_dll"
+    bl_label = "To download a dll file from blender"
+
+    @classmethod
+    def poll(cls, context):
+        return g_dll is not None
+
+    def execute(self, context):
+        global g_dll
+        if g_dll is not None:
+            try:
+                # Получаем дескриптор DLL
+                handle = c_void_p(g_dll._handle)
+                # Освобождаем DLL (для Windows)
+                result = windll.kernel32.FreeLibrary(handle)
+                if result == 0:
+                    raise ctypes.WinError()
+                self.report({'INFO'}, "The DLL has been successfully unloaded.")
+            except Exception as e:
+                self.report({'ERROR'}, f"Error when unloading DLL: {e}")
+                return {'CANCELLED'}
+            finally:
+                g_dll = None
+        else:
+            self.report({'WARNING'}, "The DLL is not loaded.")
+            return {'CANCELLED'}
+        return {'FINISHED'}
+
 class GPUCloth_PrepareSimulation(bpy.types.Operator):
     """Подготовить данные для симуляции GPUCloth"""
     bl_idname = "gpucloth.prepare_simulation"
@@ -134,7 +214,7 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
     @classmethod
     def poll(cls, context):
         return True
-
+        
     def fill_MVertTri_from_Object(self, obj:bpy.types.Object):
         # Убедимся, что объект - это меш
         if obj.type != 'MESH':
@@ -147,15 +227,13 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
         mvert_tris = (CType.MVertTri * len(mesh.loop_triangles))()
         
         for i, tri in enumerate(mesh.loop_triangles):
+            # print(f"tri.vertices[{i}] = {tri.vertices[0]}, {tri.vertices[1]}, {tri.vertices[2]}")
             # Заполняем данные о треугольнике
             mvert_tris[i].tri[0] = tri.vertices[0]
             mvert_tris[i].tri[1] = tri.vertices[1]
             mvert_tris[i].tri[2] = tri.vertices[2]
 
         return mvert_tris
-
-    def float_to_short(self, f):
-        return int(round(f * 32767))
 
     def fill_Scene(self, context):
         scene = context.scene
@@ -178,11 +256,12 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
     def fill_Object(self, OBJ:bpy.types.Object) -> POINTER(CType.Object):
         new_object = CType.Object()
 
-        # Заполняем поля объекта ID
-        new_object.id = tests.fill_ID(OBJ)
+        # Поле ID генерируется в dll файле
+        # # Заполняем поля объекта ID
+        # new_object.id = tests.fill_ID(OBJ)
 
-        # Заполняем данные объекта
-        new_object.data = OBJ.data.as_pointer()
+        # # Заполняем данные объекта
+        # new_object.data = OBJ.data.as_pointer()
 
         # Заполняем матрицы объекта
         obmat = np.array(OBJ.matrix_world, dtype=np.float32)
@@ -192,13 +271,13 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
                 new_object.obmat[i][j] = obmat[i][j]
                 new_object.imat[i][j] = imat[i][j]
 
-        # Заполняем систему частиц объекта
-        new_object.particlesystem = tests.fill_ListBase(0)
+        # # Заполняем систему частиц объекта
+        # new_object.particlesystem = tests.fill_ListBase(0)
 
         # Заполняем поля PartDeflect, если доступны
         new_object.pd = None
-        if hasattr(OBJ, 'pd'):
-            new_object.pd = fill_PartDeflect(OBJ.pd)
+        # if hasattr(OBJ, 'pd'):
+        #     new_object.pd = fill_PartDeflect(OBJ.pd)
 
         for modif in OBJ.modifiers:
             if modif.type == 'COLLISION':
@@ -207,11 +286,10 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
                 mvertType = CType.MVert * len(OBJ.data.vertices)
                 mvert = mvertType()
 
-                for i, v in enumerate(OBJ.data.vertices):
-                    mvert[i].co = (c_float * 3)(*v.co)
-                    mvert[i].no = (c_short * 3)(self.float_to_short(v.normal.x), self.float_to_short(v.normal.y), self.float_to_short(v.normal.z))
+                for i, mv in enumerate(OBJ.data.vertices):
+                    v = vcu.element_multiply(OBJ.matrix_world, mv.co)
+                    mvert[i].co = (c_float * 3)(*v)
                     mvert[i].flag = 0
-                    mvert[i].bweight = 0
 
                 mvert_xnew = mvert
                 mvert_xold = mvert
@@ -229,9 +307,9 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
                 tmp_collision.current_v = cast(mvert_current_v, POINTER(CType.MVert))
                 tmp_collision.tri = cast(mvert_tri, POINTER(CType.MVertTri))
                 tmp_collision.mvert_num = len(OBJ.data.vertices)
-                tmp_collision.tri_num = int(len(OBJ.data.vertices)/3)
-                tmp_collision.time_x = 0
-                tmp_collision.time_xnew = 0
+                tmp_collision.tri_num = len(OBJ.data.loop_triangles)
+                tmp_collision.time_x = -1000
+                tmp_collision.time_xnew = -1000
                 tmp_collision.is_static = True
                 tmp_collision.bvhtree = None
                 new_object.modifiers = pointer(tmp_collision)
@@ -371,9 +449,7 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
 
             for i, v in enumerate(obj.vertices):
                 mvert[i].co = (c_float * 3)(*v.co)
-                mvert[i].no = (c_short * 3)(self.float_to_short(v.normal.x), self.float_to_short(v.normal.y), self.float_to_short(v.normal.z))
                 mvert[i].flag = 0
-                mvert[i].bweight = 0
 
             mesh.mvert = cast(mvert, POINTER(CType.MVert))
 
@@ -382,9 +458,9 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
             for i in obj.edges:
                 medge[i.index].v1 = i.vertices[0]
                 medge[i.index].v2 = i.vertices[1]
-                medge[i.index].crease = 0#int(i.crease)
-                medge[i.index].bweight = 0#int(i.bevel_weight)
-                medge[i.index].flag = 0
+                medge[i.index].crease = 0 #int(i.crease)
+                medge[i.index].bweight = 0 #int(i.bevel_weight)
+                medge[i.index].flag = 35 # 
         
             mesh.medge = cast(medge, POINTER(CType.MEdge))
 
@@ -393,10 +469,10 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
             for i in obj.polygons:
                 mpoly[i.index].loopstart = i.loop_start
                 mpoly[i.index].totloop = i.loop_total
-                mpoly[i.index].mat_nr = i.material_index
-                mpoly[i.index].flag = 0
-                if (i.use_smooth):
-                    mpoly[i.index].flag = 1
+                # mpoly[i.index].mat_nr = i.material_index
+                # mpoly[i.index].flag = 0
+                # if (i.use_smooth):
+                #     mpoly[i.index].flag = 1
                 
             mesh.mpoly = cast(mpoly, POINTER(CType.MPoly))
 
@@ -421,16 +497,15 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
         # Часть из них стандартная. см. _DNA_DEFAULT_ClothSimSettings
         sim_parms = CType.ClothSimSettings()
         sim_parms.mingoal = 0
-        sim_parms.air_damping = OBJ.GPUCloth
-        sim_parms.Cvi = 1
-        sim_parms.Cdis = 1
+        sim_parms.Cvi = 1.0
+        sim_parms.Cdis = 1.0
         sim_parms.gravity[0] = context.scene.gpu_cloth_helper.gravity_x
         sim_parms.gravity[1] = context.scene.gpu_cloth_helper.gravity_y
         sim_parms.gravity[2] = context.scene.gpu_cloth_helper.gravity_z
         sim_parms.mass = OBJ.GPUCloth.vertex_mass # cloth_settings.mass
         sim_parms.structural = 0 # cloth_settings.tension_stiffness
         sim_parms.shear = 5.0 # cloth_settings.shear_stiffness
-        sim_parms.bending = 0 if OBJ.GPUCloth.bending_model == 'ANGULAR' else 1 # cloth_settings.bending_stiffness
+        sim_parms.bending = 0.5 
         sim_parms.vgroup_mass = 0 # OBJ.vertex_groups.find(cloth_settings.vertex_group_mass)
         sim_parms.stepsPerFrame = OBJ.GPUCloth.quality_step # cloth_settings.quality
         sim_parms.maxgoal = 1.0 # cloth_settings.goal_max
@@ -459,7 +534,7 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
         sim_parms.eff_force_scale = 1000.0
         sim_parms.eff_wind_scale = 250.0
         sim_parms.effector_weights = None
-        sim_parms.reset = 2
+        sim_parms.reset = 0
         sim_parms.presets = 2
         sim_parms.shapekey_rest = 0
         sim_parms.fluid_density = 0.0
@@ -468,18 +543,19 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
         sim_parms.uniform_pressure_force = 0.0
         sim_parms.time_scale = OBJ.GPUCloth.speed_multiplier
         sim_parms.timescale = 1.0
-        sim_parms.dt = 0.01
+        sim_parms.dt = 1 #0.01
         sim_parms.avg_spring_len = 0.0
         sim_parms.goalfrict = 0.0
         sim_parms.goalspring = 1.0
-        sim_parms.flags = 512 #CLOTH_SIMSETTINGS_FLAG_INTERNAL_SPRINGS_NORMAL
+        sim_parms.flags = CType.CLOTH_SIMSETTINGS_FLAG_INTERNAL_SPRINGS_NORMAL
+        sim_parms.bending_model = CType.CLOTH_BENDING_ANGULAR if OBJ.GPUCloth.bending_model == 'ANGULAR' else CType.CLOTH_BENDING_LINEAR
 
         clmd.sim_parms = pointer(sim_parms)
 
         coll_parms = pointer(CType.ClothCollSettings())
         clmd.clothObject = None
 
-        # Заполняем поля coll_parms на основе полученных настроек
+        # Заполняем поля coll_parms
         coll_parms.contents.epsilon = 0.015
         coll_parms.contents.self_friction = 5.0
         coll_parms.contents.friction = 5.0
@@ -491,13 +567,12 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
         coll_parms.contents.vgroup_objcol = 0
         coll_parms.contents.clamp = 0.0
         coll_parms.contents.self_clamp = 0.0
-        coll_parms.contents.flags = 2
+        coll_parms.contents.flags = CType.CLOTH_COLLSETTINGS_FLAG_ENABLED
 
         clmd.coll_parms = coll_parms
 
         # clmd.point_cache = PointCache()
         # clmd.ptcaches = ListBase()
-        # clmd.hairdata = ClothHairData()
         solver_result = CType.ClothSolverResult()
 
         # Инициализация полей с некоторыми значениями по умолчанию
@@ -527,35 +602,20 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
         global g_clmd
         global g_clothOBJs
         global g_clothCollisionOBJs
-
-        # Если пружины уже построены, очищаем данные и вызываем FreeSolverData()
-        if context.scene.gpu_cloth_springs_built:
-            # Очищаем глобальные списки
-            g_scene = None
-            g_obj = []
-            g_clmd = []
-            g_mesh = []
-            g_clothOBJs = []
-            g_clothCollisionOBJs = []
-
-            # Вызываем FreeSolverData() из g_dll
-            if g_dll is not None:
-                try:
-                    g_dll.FreeSolverData()
-                except Exception as e:
-                    self.report({'ERROR'}, f"Failed to free solver data: {e}")
-                    print(f"Failed to free solver data: {e}")
-                    return {'CANCELLED'}
-
-            # Сбрасываем флаг
-            context.scene.gpu_cloth_springs_built = False
-
+        
         # Проверяется загружена ли DLL
         if g_dll is None: 
             bpy.ops.gpucloth.load_dll()
             if g_dll is None: 
                 self.report({'ERROR'}, "Не удаётся загрузить dll.\n")
                 print("Не удаётся загрузить dll.")
+                return {'CANCELLED'}
+
+        # Если пружины уже построены, очищаем данные и вызываем FreeSolverData()
+        if context.scene.gpu_cloth_springs_built:
+            success = free_gpu_memory(context)
+            if not success:
+                self.report({'ERROR'}, "Failed to free GPU memory.")
                 return {'CANCELLED'}
         
         # Если файл не сохранён, то сохраняем во временную папку
@@ -591,18 +651,12 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
                         else:
                             g_clothCollisionOBJs.append(data_ptr)
 
-        # # Запускаются тесты
-        # # Run tests
-        # if (debug):
-        #     test = tests.DLL_Test(g_dll, g_clothOBJs)    
-        #     if not test.start_test():
-        #         self.report({'ERROR'}, "Тесты завершились c ошибкой")  
-        #         self.report({'ERROR'}, "Tests failed with an error")  
-        #         return {'CANCELLED'}
-
         # ClothModifierData и Mesh заполняются данными
         # ClothModifierData and Mesh is filled with data
         for cloth_obj in g_clothOBJs:
+            if cloth_obj is None or not hasattr(cloth_obj, 'data'):
+                return {'CANCELLED'}
+            
             data_ptr = self.setMesh(context, cloth_obj.data)
             if not data_ptr:
                 self.report({'ERROR'}, "Получен NULL указатель от setMesh")
@@ -632,6 +686,16 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
             return {'CANCELLED'}
 
         self.fill_Scene(context)
+        
+        for i in range(0, len(g_clothCollisionOBJs)):
+            try:                    
+                # Если получилось, то добавляем объект на GPU
+                if(not g_dll.AddCollisionObject(g_clothCollisionOBJs[i])):
+                    self.report({'ERROR'}, "Failed on AddCollisionObject")
+                    return {'CANCELLED'}
+            except OSError:
+                self.report({'ERROR'}, "OSError in AddCollisionObject.")
+                return {'CANCELLED'}
 
         if (not g_dll.FillSolverData(g_scene)):
             self.report({'ERROR'}, "Failed to load scene data")
@@ -651,6 +715,7 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
                 self.report({'ERROR'}, "Failed to create cloth spring connections.")
                 print("Failed to create cloth spring connections.")
                 return {'CANCELLED'}
+
             try:
                 # Если не получилось, то останавливаем весь кардебалет
                 if g_clmd[i].contents.clothObject is None:
@@ -666,23 +731,13 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
                     
             try:
                 # Если получилось, то добавляем объект на GPU
-                if(not g_dll.AddCloth(g_clmd[i], g_mesh[i], g_obj[i], True)):
+                if(not g_dll.AddCloth(g_clmd[i], g_mesh[i], g_obj[i])):
                     self.report({'ERROR'}, "Failed on AddCloth")
                     print("Failed on AddCloth")
                     return {'CANCELLED'}
             except OSError:
                 self.report({'ERROR'}, "OSError on AddCloth.")
                 print("OSError on AddCloth.")
-                return {'CANCELLED'}
-
-        for i in range(0, len(g_clothCollisionOBJs)):
-            try:                    
-                # Если получилось, то добавляем объект на GPU
-                if(not g_dll.AddCollisionObject(g_clothCollisionOBJs[i], True)):
-                    self.report({'ERROR'}, "Failed on AddCollisionObject")
-                    return {'CANCELLED'}
-            except OSError:
-                self.report({'ERROR'}, "OSError in AddCollisionObject.")
                 return {'CANCELLED'}
 
         # back to whatever mode we were in
@@ -699,20 +754,28 @@ class GPUCloth_UpdateSimulation(bpy.types.Operator):
     bl_label = "Update GPUCloth Simulation"
 
     def updateBlenderMesh(self, mesh_ptr: POINTER(CType.Mesh), blender_obj: bpy.types.Object):
-        if not blender_obj or not mesh_ptr:
+        update_start_time = time.perf_counter_ns()
+        if not blender_obj or not mesh_ptr :
             self.report({'ERROR'}, f"Neither the mesh pointer nor the Blender object should be None")
+            bpy.ops.screen.animation_cancel()
+            return {'CANCELLED'}
+
+        if not hasattr(blender_obj, 'data'):
+            bpy.ops.screen.animation_cancel()
             return {'CANCELLED'}
             
         mesh_data = mesh_ptr.contents
         try:
             if blender_obj.type != 'MESH':
                 self.report({'ERROR'}, f"The Blender object should be of type 'MESH'")
+                bpy.ops.screen.animation_cancel()
                 return {'CANCELLED'}
 
             mesh = blender_obj.data
             
             if len(mesh.vertices) != mesh_data.totvert:
                 self.report({'ERROR'}, f"Vertex count mismatch between Blender object and mesh data")
+                bpy.ops.screen.animation_cancel()
                 return {'CANCELLED'}
 
             for i in range(len(mesh.vertices)):
@@ -723,14 +786,29 @@ class GPUCloth_UpdateSimulation(bpy.types.Operator):
                     mesh_vertex.co[2]
                 )
 
-            mesh.update()
-            blender_obj.update_from_editmode()
-            blender_obj.update_tag()
-            bpy.context.view_layer.update()
+            # mesh.update()
+            # blender_obj.update_from_editmode()
+            # blender_obj.update_tag()
+            # bpy.context.view_layer.update()
 
         except ReferenceError as e:
             self.report({'ERROR'}, f"ReferenceError: {e}")
+            bpy.ops.screen.animation_cancel()
             return {'CANCELLED'}
+            
+        update_end_time = time.perf_counter_ns()
+        update_elapsed_ms = (update_end_time - update_start_time) / 1_000_000  # Перевод из наносекунд в миллисекунды
+        print(f"updateBlenderMesh для объекта {blender_obj.name} заняло {update_elapsed_ms} миллисекунд.")
+
+    def validate_objects(self):
+        for obj in g_clothOBJs:
+            if obj is None or obj.name not in bpy.data.objects:
+                self.report({'ERROR'}, f"Объект {obj} не существует в сцене.")
+                return False
+            if obj.type != 'MESH':
+                self.report({'ERROR'}, f"Объект {obj.name} не является типом 'MESH'.")
+                return False
+        return True
 
     def execute(self, context):
         '''
@@ -746,21 +824,33 @@ class GPUCloth_UpdateSimulation(bpy.types.Operator):
         global g_clmd
         global g_clothOBJs
 
-        if g_dll is None: 
-            bpy.ops.gpucloth.load_dll()
-            if g_dll is None: 
-                self.report({'ERROR'}, f"Fail to load dll in gpucloth.update_simulation")  
-                return {'CANCELLED'}
+        if g_dll is None or context.scene.frame_current < 2 or not self.validate_objects(): 
+            return {'FINISHED'}
 
+        total_start_time = time.perf_counter_ns()
         try:
             if (len(g_clothOBJs) == len(g_clmd) == len(g_obj) == len(g_mesh)):
                 for i in range(len(g_clothOBJs)):
-                    if (g_dll.SIM_solver()):
+                    if (g_dll.SIM_solver()): # 
                         self.updateBlenderMesh(g_mesh[i], g_clothOBJs[i])
                     else:
                         self.report({'ERROR'}, f"Error in SIM_solver")  
                         bpy.ops.screen.animation_cancel()
                         return {'CANCELLED'}
+
+                # # Обновляем  меш и перерисовываем сцену
+                # try:
+                #     for clothOBJ in g_clothOBJs:
+                #         clothOBJ.update_tag()
+                # except ReferenceError as e:
+                #     self.report({'ERROR'}, f"ReferenceError: {e}")
+                #     # Обновим тогда пружины, чтобы не было проблем в дальнейшем
+                #     context.scene.gpu_cloth_springs_built = True
+                #     bpy.ops.screen.animation_cancel()
+                #     return {'CANCELLED'}
+                # bpy.context.view_layer.update()
+                # if debug:
+                #     print("Frame was updated")
             else:
                 self.report({'ERROR'}, f"len(g_clothOBJs): {len(g_clothOBJs)}")  
                 self.report({'ERROR'}, f"len(g_clmd): {len(g_clmd)}")  
@@ -770,27 +860,23 @@ class GPUCloth_UpdateSimulation(bpy.types.Operator):
                 return {'CANCELLED'}
         except OSError as err:
             print(err)
+            bpy.ops.screen.animation_cancel()
             return {'CANCELLED'}
-        
-        print("Frame was updated")
 
-        # Обновляем  меш и перерисовываем сцену
-        try:
-            for clothOBJ in g_clothOBJs:
-                clothOBJ.update_tag()
-        except ReferenceError as e:
-            self.report({'ERROR'}, f"ReferenceError: {e}")
-            # Обновим тогда пружины, чтобы не было проблем в дальнейшем
-            context.scene.gpu_cloth_springs_built = True
-            return {'CANCELLED'}
-        bpy.context.view_layer.update()
+        total_end_time = time.perf_counter_ns()
+        total_elapsed_ms = (total_end_time - total_start_time) / 1_000_000  # Перевод из наносекунд в миллисекунды
+        print(f"Выполнение оператора заняло {total_elapsed_ms} миллисекунд.")
         return {'FINISHED'}
 
 def register():
     bpy.utils.register_class(GPUCloth_LoadDLL)
+    bpy.utils.register_class(GPUCloth_UnloadDLL)
+    bpy.utils.register_class(GPUCloth_FreeVRAM)
     bpy.utils.register_class(GPUCloth_PrepareSimulation)
     bpy.utils.register_class(GPUCloth_UpdateSimulation)
+
     bpy.types.Scene.gpu_cloth_springs_built = bpy.props.BoolProperty(name="Cloth Springs Built", default=False)
+
     global g_dll
     global g_obj
     global g_mesh
@@ -809,9 +895,13 @@ def register():
 
 def unregister():
     bpy.utils.unregister_class(GPUCloth_LoadDLL)
+    bpy.utils.unregister_class(GPUCloth_UnloadDLL)
+    bpy.utils.unregister_class(GPUCloth_FreeVRAM)
     bpy.utils.unregister_class(GPUCloth_PrepareSimulation)
     bpy.utils.unregister_class(GPUCloth_UpdateSimulation)
+    
     del bpy.types.Scene.gpu_cloth_springs_built
+
     global g_dll
     global g_obj
     global g_mesh

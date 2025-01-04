@@ -17,15 +17,22 @@
 from ctypes import c_float, c_short, c_char, c_char_p, c_uint, c_uint16, c_uint32, c_int64, c_uint64, c_int, c_void_p, c_ubyte, Structure, POINTER
 
 PHYS_GLOBAL_GRAVITY = 1
+
 DAG_EVAL_VIEWPORT   = 0
 DAG_EVAL_RENDER     = 1
 
+CLOTH_COLLSETTINGS_FLAG_ENABLED = 2
+CLOTH_COLLSETTINGS_FLAG_SELF    = 4
+
+CLOTH_BENDING_LINEAR    = 0
+CLOTH_BENDING_ANGULAR   = 1
+
+CLOTH_SIMSETTINGS_FLAG_INTERNAL_SPRINGS_NORMAL = 512
+
 class MVert(Structure):
     _fields_ = [
-        ("co", c_float*3), 
-        ("no", c_short*3), 
-        ("flag", c_char), 
-        ("bweight", c_char)
+        ("co", c_float*3),
+        ("flag", c_char)
     ]
 
 class Edge(Structure): _fields_ = [ ("v_low", c_uint), ("v_high", c_uint)]
@@ -55,10 +62,10 @@ class MEdge(Structure):
 class MPoly(Structure):
     _fields_ = [
         ("loopstart", c_int), 
-        ("totloop", c_int), 
-        ("mat_nr", c_short), 
-        ("flag", c_char),
-        ("_pad", c_char)
+        ("totloop", c_int) 
+        # ("mat_nr", c_short), 
+        # ("flag", c_char),
+        # ("_pad", c_char)
     ]
 
 class MDeformWeight(Structure):
@@ -127,9 +134,7 @@ class LinkNode(Structure):
 class ModifierData(Structure):
     pass
 
-ID._fields_ = [("name",    c_char*66),
-                ("session_uuid", c_uint),
-                ("int",    c_uint)]
+ID._fields_ = [("name", c_char*66), ("id",c_uint), ("session_uuid", c_uint)]
 
 LinkNode._fields_ = [("next", POINTER(LinkNode)), ("link", c_void_p)]
 
@@ -413,10 +418,10 @@ class PhysicsSettings(Structure):
     _fields_ = [("gravity", c_float*3), ("flag", c_int)]
 
 class RenderData(Structure):
-    _fields_ = [("cfra", c_int),
-                ("subframe", c_float),
-                ("framelen", c_float),
-                ("frs_sec", c_short)
+    _fields_ = [("cfra",        c_int),
+                ("subframe",    c_float),
+                ("framelen",    c_float),
+                ("frs_sec",     c_short)
     ]
 
 class Scene(Structure):
@@ -440,11 +445,11 @@ class CollisionModifierData(Structure):
     ]
 
 Object._fields_ = [("id", ID),
-                ("data", c_void_p),
+                # ("data", c_void_p),
                 ("modifiers", POINTER(CollisionModifierData)),
                 ("obmat", c_float*4*4),
                 ("imat", c_float*4*4),
-                ("particlesystem", ListBase),
+                # ("particlesystem", ListBase),
                 ("pd", POINTER(PartDeflect)),
                 ]
 
