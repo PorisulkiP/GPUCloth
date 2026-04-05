@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-from ctypes import c_float, c_short, c_char, c_char_p, c_uint, c_uint16, c_uint32, c_int64, c_uint64, c_int, c_void_p, c_ubyte, Structure, POINTER
+from ctypes import c_float, c_short, c_char, c_char_p, c_uint, c_uint16, c_uint32, c_int64, c_uint64, c_int, c_void_p, c_ubyte, c_size_t, Structure, POINTER
 
 PHYS_GLOBAL_GRAVITY = 1
 
@@ -28,6 +28,23 @@ CLOTH_BENDING_LINEAR    = 0
 CLOTH_BENDING_ANGULAR   = 1
 
 CLOTH_SIMSETTINGS_FLAG_INTERNAL_SPRINGS_NORMAL = 512
+
+# ---------------------------------------------------------------------------
+#  Типы GPU-солверов ткани
+#  Зеркало C++ enum SolverType в src/engine/source/DNA/cloth_types.cuh
+# ---------------------------------------------------------------------------
+SOLVER_XPBD   = 0   # Extended Position-Based Dynamics (Macklin 2016/2019)
+SOLVER_PD     = 1   # Projective Dynamics с Chebyshev-Jacobi ускорением
+SOLVER_MGPBD  = 2   # Многоуровневый PBD с Algebraic Multigrid (AMG)
+SOLVER_Mil2   = 3   # Non-distance barriers + subspace reuse (Mil²)
+# OGC — солвер самостолкновений, не основной физический солвер.
+# Подключается к любому из вышеперечисленных через SIM_set_self_collision_params.
+
+# ---------------------------------------------------------------------------
+#  Непрозрачный указатель на C++ объект ProxySimHandle
+#  (создаётся через ProxySim_create, освобождается через ProxySim_free)
+# ---------------------------------------------------------------------------
+ProxySimHandle = c_void_p
 
 class MVert(Structure):
     _fields_ = [
