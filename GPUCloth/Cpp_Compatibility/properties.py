@@ -29,6 +29,237 @@ from ..utils import version_compatibility_utils as vcu
 
 
 # ===========================================================================
+#  Материальные пресеты — значения параметров ткани для каждого солвера
+# ===========================================================================
+#
+#  Источники значений:
+#    XPBD  — Macklin & Müller 2016 "XPBD: Position-Based Simulation of
+#             Compliant Constrained Dynamics", Table 1 (compliance → stiffness)
+#    PD    — Bouaziz et al. 2014 "Projective Dynamics", §5 (projection weights);
+#             глобальный solve позволяет бóльшую жёсткость при меньшем числе шагов
+#    MGPBD — Xian et al. 2019 "A Scalable Galerkin Multigrid Method for
+#             Real-time Simulation", §4; AMG-ускорение → меньше подшагов
+#    Mil2  — Li et al. 2020 "Incremental Potential Contact", §3;
+#             barrier-based, диапазон аналогичен XPBD
+#    OGC   — Chen et al. 2025 "Offset Geometric Contact", §3.6;
+#             базовые параметры как у XPBD + OGC-специфичные (radius, friction)
+#
+#  Физические ориентиры (реальные ткани):
+#    Шёлк:  плотность ~1.3 г/см³, толщина ~0.1 мм, очень лёгкий и текучий
+#    Хлопок: ~1.5 г/см³, ~0.3 мм, умеренная драпировка
+#    Деним: ~1.5 г/см³, ~1 мм, жёсткое плотное плетение
+#    Кожа:  ~0.9 г/см³, ~1–2 мм, жёсткая на растяжение, высокий изгиб
+#    Резина: ~1.5 г/см³, ~1–3 мм, упругая, низкий изгиб, высокое трение
+
+MATERIAL_PRESETS = {
+    # ── XPBD (Macklin 2016) ─────────────────────────────────────────────────
+    # Compliance α = 1/(k·Δt²).  Больше stiffness → жёстче.
+    # Требует больше подшагов для жёстких материалов.
+    'XPBD': {
+        'SILK': {
+            'vertex_mass': 0.04, 'quality_step': 10, 'bending_model': 'ANGULAR',
+            'tension': 4.0,  'compression': 2.5,  'shear': 1.5,  'bending_stiffness':0.03,
+            'tension_damp': 0.5, 'compression_damp': 0.5,
+            'shear_damp': 0.5,   'bending_damping': 0.05,
+        },
+        'COTTON': {
+            'vertex_mass': 0.3, 'quality_step': 5, 'bending_model': 'ANGULAR',
+            'tension': 15.0, 'compression': 15.0, 'shear': 5.0,  'bending_stiffness':0.5,
+            'tension_damp': 5.0, 'compression_damp': 5.0,
+            'shear_damp': 5.0,   'bending_damping': 0.5,
+        },
+        'DENIM': {
+            'vertex_mass': 0.5, 'quality_step': 6, 'bending_model': 'ANGULAR',
+            'tension': 40.0, 'compression': 40.0, 'shear': 20.0, 'bending_stiffness':5.0,
+            'tension_damp': 10.0, 'compression_damp': 10.0,
+            'shear_damp': 8.0,    'bending_damping': 2.0,
+        },
+        'LEATHER': {
+            'vertex_mass': 0.8, 'quality_step': 6, 'bending_model': 'ANGULAR',
+            'tension': 80.0, 'compression': 80.0, 'shear': 10.0, 'bending_stiffness':15.0,
+            'tension_damp': 15.0, 'compression_damp': 15.0,
+            'shear_damp': 5.0,    'bending_damping': 5.0,
+        },
+        'RUBBER': {
+            'vertex_mass': 1.2, 'quality_step': 8, 'bending_model': 'LINEAR',
+            'tension': 50.0, 'compression': 50.0, 'shear': 25.0, 'bending_stiffness':1.0,
+            'tension_damp': 15.0, 'compression_damp': 15.0,
+            'shear_damp': 12.0,   'bending_damping': 1.0,
+        },
+    },
+
+    # ── PD (Bouaziz 2014) ───────────────────────────────────────────────────
+    # Глобальный solve → сходимость быстрее → можно выше stiffness при меньшем
+    # числе подшагов.  Веса ≈ 2× XPBD для эквивалентного поведения.
+    'PD': {
+        'SILK': {
+            'vertex_mass': 0.04, 'quality_step': 6, 'bending_model': 'ANGULAR',
+            'tension': 8.0,  'compression': 5.0,  'shear': 3.0,  'bending_stiffness':0.05,
+            'tension_damp': 0.5, 'compression_damp': 0.5,
+            'shear_damp': 0.5,   'bending_damping': 0.05,
+        },
+        'COTTON': {
+            'vertex_mass': 0.3, 'quality_step': 4, 'bending_model': 'ANGULAR',
+            'tension': 30.0, 'compression': 30.0, 'shear': 10.0, 'bending_stiffness':1.0,
+            'tension_damp': 5.0, 'compression_damp': 5.0,
+            'shear_damp': 5.0,   'bending_damping': 0.5,
+        },
+        'DENIM': {
+            'vertex_mass': 0.5, 'quality_step': 4, 'bending_model': 'ANGULAR',
+            'tension': 80.0, 'compression': 80.0, 'shear': 35.0, 'bending_stiffness':10.0,
+            'tension_damp': 10.0, 'compression_damp': 10.0,
+            'shear_damp': 8.0,    'bending_damping': 2.0,
+        },
+        'LEATHER': {
+            'vertex_mass': 0.8, 'quality_step': 4, 'bending_model': 'ANGULAR',
+            'tension': 150.0, 'compression': 150.0, 'shear': 20.0, 'bending_stiffness':25.0,
+            'tension_damp': 15.0, 'compression_damp': 15.0,
+            'shear_damp': 5.0,    'bending_damping': 5.0,
+        },
+        'RUBBER': {
+            'vertex_mass': 1.2, 'quality_step': 5, 'bending_model': 'LINEAR',
+            'tension': 100.0, 'compression': 100.0, 'shear': 50.0, 'bending_stiffness':2.0,
+            'tension_damp': 15.0, 'compression_damp': 15.0,
+            'shear_damp': 12.0,   'bending_damping': 1.0,
+        },
+    },
+
+    # ── MGPBD (Xian 2019) ──────────────────────────────────────────────────
+    # AMG-ускорение → меньше подшагов, лучше для мягких тканей.
+    # Значения ≈ 0.7× XPBD.
+    'MGPBD': {
+        'SILK': {
+            'vertex_mass': 0.04, 'quality_step': 4, 'bending_model': 'ANGULAR',
+            'tension': 3.0,  'compression': 2.0,  'shear': 1.0,  'bending_stiffness':0.02,
+            'tension_damp': 0.5, 'compression_damp': 0.5,
+            'shear_damp': 0.3,   'bending_damping': 0.03,
+        },
+        'COTTON': {
+            'vertex_mass': 0.3, 'quality_step': 3, 'bending_model': 'ANGULAR',
+            'tension': 10.0, 'compression': 10.0, 'shear': 3.0,  'bending_stiffness':0.3,
+            'tension_damp': 3.0, 'compression_damp': 3.0,
+            'shear_damp': 2.0,   'bending_damping': 0.3,
+        },
+        'DENIM': {
+            'vertex_mass': 0.5, 'quality_step': 4, 'bending_model': 'ANGULAR',
+            'tension': 30.0, 'compression': 30.0, 'shear': 12.0, 'bending_stiffness':3.0,
+            'tension_damp': 8.0, 'compression_damp': 8.0,
+            'shear_damp': 6.0,   'bending_damping': 1.5,
+        },
+        'LEATHER': {
+            'vertex_mass': 0.8, 'quality_step': 5, 'bending_model': 'ANGULAR',
+            'tension': 60.0, 'compression': 60.0, 'shear': 8.0,  'bending_stiffness':10.0,
+            'tension_damp': 12.0, 'compression_damp': 12.0,
+            'shear_damp': 4.0,    'bending_damping': 4.0,
+        },
+        'RUBBER': {
+            'vertex_mass': 1.2, 'quality_step': 5, 'bending_model': 'LINEAR',
+            'tension': 40.0, 'compression': 40.0, 'shear': 18.0, 'bending_stiffness':0.5,
+            'tension_damp': 12.0, 'compression_damp': 12.0,
+            'shear_damp': 8.0,    'bending_damping': 0.5,
+        },
+    },
+
+    # ── Mil2 (Li 2020) ─────────────────────────────────────────────────────
+    # Barrier-based, диапазон жёсткости аналогичен XPBD.
+    'Mil2': {
+        'SILK': {
+            'vertex_mass': 0.04, 'quality_step': 10, 'bending_model': 'ANGULAR',
+            'tension': 5.0,  'compression': 3.0,  'shear': 1.5,  'bending_stiffness':0.03,
+            'tension_damp': 0.5, 'compression_damp': 0.5,
+            'shear_damp': 0.5,   'bending_damping': 0.05,
+        },
+        'COTTON': {
+            'vertex_mass': 0.3, 'quality_step': 5, 'bending_model': 'ANGULAR',
+            'tension': 15.0, 'compression': 15.0, 'shear': 5.0,  'bending_stiffness':0.5,
+            'tension_damp': 5.0, 'compression_damp': 5.0,
+            'shear_damp': 5.0,   'bending_damping': 0.5,
+        },
+        'DENIM': {
+            'vertex_mass': 0.5, 'quality_step': 6, 'bending_model': 'ANGULAR',
+            'tension': 40.0, 'compression': 40.0, 'shear': 20.0, 'bending_stiffness':5.0,
+            'tension_damp': 10.0, 'compression_damp': 10.0,
+            'shear_damp': 8.0,    'bending_damping': 2.0,
+        },
+        'LEATHER': {
+            'vertex_mass': 0.8, 'quality_step': 6, 'bending_model': 'ANGULAR',
+            'tension': 80.0, 'compression': 80.0, 'shear': 10.0, 'bending_stiffness':15.0,
+            'tension_damp': 15.0, 'compression_damp': 15.0,
+            'shear_damp': 5.0,    'bending_damping': 5.0,
+        },
+        'RUBBER': {
+            'vertex_mass': 1.2, 'quality_step': 8, 'bending_model': 'LINEAR',
+            'tension': 50.0, 'compression': 50.0, 'shear': 25.0, 'bending_stiffness':1.0,
+            'tension_damp': 15.0, 'compression_damp': 15.0,
+            'shear_damp': 12.0,   'bending_damping': 1.0,
+        },
+    },
+
+    # ── OGC (Chen 2025) ────────────────────────────────────────────────────
+    # Базовые параметры как у XPBD + OGC-специфичные (radius, friction).
+    'OGC': {
+        'SILK': {
+            'vertex_mass': 0.04, 'quality_step': 10, 'bending_model': 'ANGULAR',
+            'tension': 4.0,  'compression': 2.5,  'shear': 1.5,  'bending_stiffness':0.03,
+            'tension_damp': 0.5, 'compression_damp': 0.5,
+            'shear_damp': 0.5,   'bending_damping': 0.05,
+            'use_self_collision': True, 'ogc_radius': 80.0, 'ogc_friction': 0.1,
+        },
+        'COTTON': {
+            'vertex_mass': 0.3, 'quality_step': 5, 'bending_model': 'ANGULAR',
+            'tension': 15.0, 'compression': 15.0, 'shear': 5.0,  'bending_stiffness':0.5,
+            'tension_damp': 5.0, 'compression_damp': 5.0,
+            'shear_damp': 5.0,   'bending_damping': 0.5,
+            'use_self_collision': True, 'ogc_radius': 150.0, 'ogc_friction': 0.3,
+        },
+        'DENIM': {
+            'vertex_mass': 0.5, 'quality_step': 6, 'bending_model': 'ANGULAR',
+            'tension': 40.0, 'compression': 40.0, 'shear': 20.0, 'bending_stiffness':5.0,
+            'tension_damp': 10.0, 'compression_damp': 10.0,
+            'shear_damp': 8.0,    'bending_damping': 2.0,
+            'use_self_collision': True, 'ogc_radius': 200.0, 'ogc_friction': 0.5,
+        },
+        'LEATHER': {
+            'vertex_mass': 0.8, 'quality_step': 6, 'bending_model': 'ANGULAR',
+            'tension': 80.0, 'compression': 80.0, 'shear': 10.0, 'bending_stiffness':15.0,
+            'tension_damp': 15.0, 'compression_damp': 15.0,
+            'shear_damp': 5.0,    'bending_damping': 5.0,
+            'use_self_collision': True, 'ogc_radius': 250.0, 'ogc_friction': 0.6,
+        },
+        'RUBBER': {
+            'vertex_mass': 1.2, 'quality_step': 8, 'bending_model': 'LINEAR',
+            'tension': 50.0, 'compression': 50.0, 'shear': 25.0, 'bending_stiffness':1.0,
+            'tension_damp': 15.0, 'compression_damp': 15.0,
+            'shear_damp': 12.0,   'bending_damping': 1.0,
+            'use_self_collision': True, 'ogc_radius': 300.0, 'ogc_friction': 0.8,
+        },
+    },
+}
+
+
+# ===========================================================================
+#  Коллбэки обновления пресетов
+# ===========================================================================
+
+def _apply_preset(self, context):
+    """Применить выбранный пресет материала для текущего солвера."""
+    preset_name = self.material_preset
+    if preset_name == 'CUSTOM':
+        return
+    data = MATERIAL_PRESETS.get(self.solver_type, {}).get(preset_name)
+    if data is None:
+        return
+    for prop, value in data.items():
+        setattr(self, prop, value)
+
+
+def _on_solver_change(self, context):
+    """При смене солвера — переприменить пресет (значения отличаются)."""
+    if self.material_preset != 'CUSTOM':
+        _apply_preset(self, context)
+
+
+# ===========================================================================
 #  PropertyGroup для объекта — настройки ткани
 # ===========================================================================
 
@@ -89,6 +320,92 @@ class GPUClothObjectSettings(PropertyGroup):
             ('OGC',   "OGC",   "Offset Geometric Contact — самостолкновение"),
         ],
         default='XPBD',
+        update=_on_solver_change,
+    )
+
+    # ── Пресет материала ───────────────────────────────────────────────────
+    material_preset: EnumProperty(
+        name="Материал",
+        description=(
+            "Пресет физических свойств материала. "
+            "Значения подобраны под текущий солвер"
+        ),
+        items=[
+            ('CUSTOM',  "Свой",    "Ручная настройка параметров"),
+            ('SILK',    "Шёлк",    "Лёгкий, текучий, минимальный изгиб"),
+            ('COTTON',  "Хлопок",  "Умеренная драпировка, средняя жёсткость"),
+            ('DENIM',   "Деним",   "Плотная ткань, жёсткий изгиб и сдвиг"),
+            ('LEATHER', "Кожа",    "Тяжёлая, очень жёсткая на растяжение"),
+            ('RUBBER',  "Резина",  "Упругая, тяжёлая, низкий изгиб"),
+        ],
+        default='CUSTOM',
+        update=_apply_preset,
+    )
+
+    # ── Параметры материала (жёсткость) ────────────────────────────────────
+    tension: FloatProperty(
+        name="Растяжение",
+        description="Жёсткость ткани на растяжение (stretch stiffness)",
+        default=15.0,
+        min=0.0,
+        max=500.0,
+    )
+
+    compression: FloatProperty(
+        name="Сжатие",
+        description="Жёсткость ткани на сжатие (compression stiffness)",
+        default=15.0,
+        min=0.0,
+        max=500.0,
+    )
+
+    shear: FloatProperty(
+        name="Сдвиг",
+        description="Жёсткость ткани на сдвиг (shear stiffness)",
+        default=5.0,
+        min=0.0,
+        max=500.0,
+    )
+
+    bending_stiffness: FloatProperty(
+        name="Изгиб",
+        description="Жёсткость изгиба ткани (bending stiffness)",
+        default=0.5,
+        min=0.0,
+        max=100.0,
+    )
+
+    # ── Параметры материала (демпфирование) ────────────────────────────────
+    tension_damp: FloatProperty(
+        name="Демпфирование растяжения",
+        description="Затухание колебаний при растяжении",
+        default=5.0,
+        min=0.0,
+        max=50.0,
+    )
+
+    compression_damp: FloatProperty(
+        name="Демпфирование сжатия",
+        description="Затухание колебаний при сжатии",
+        default=5.0,
+        min=0.0,
+        max=50.0,
+    )
+
+    shear_damp: FloatProperty(
+        name="Демпфирование сдвига",
+        description="Затухание колебаний при сдвиге",
+        default=5.0,
+        min=0.0,
+        max=50.0,
+    )
+
+    bending_damping: FloatProperty(
+        name="Демпфирование изгиба",
+        description="Затухание колебаний изгиба",
+        default=0.5,
+        min=0.0,
+        max=50.0,
     )
 
     # ── Самостолкновения (OGC) ────────────────────────────────────────────

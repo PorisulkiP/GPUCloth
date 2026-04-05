@@ -503,8 +503,8 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
         sim_parms.gravity[2]     = context.scene.gpu_cloth_helper.gravity_z
         sim_parms.mass           = OBJ.GPUCloth.vertex_mass
         sim_parms.structural     = 0
-        sim_parms.shear          = 5.0
-        sim_parms.bending        = 0.5
+        sim_parms.shear          = OBJ.GPUCloth.shear
+        sim_parms.bending        = OBJ.GPUCloth.bending_stiffness
         sim_parms.vgroup_mass    = 0
         sim_parms.stepsPerFrame  = OBJ.GPUCloth.quality_step
         sim_parms.maxgoal        = 1.0
@@ -516,13 +516,13 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
         sim_parms.vgroup_struct  = 0
         sim_parms.vgroup_shear   = 0
         sim_parms.vgroup_shrink  = 0
-        sim_parms.bending_damping= 0.5
+        sim_parms.bending_damping= OBJ.GPUCloth.bending_damping
         sim_parms.voxel_cell_size= 0.1
-        sim_parms.tension        = 15.0
-        sim_parms.compression    = 15.0
-        sim_parms.tension_damp   = 5.0
-        sim_parms.compression_damp = 5.0
-        sim_parms.shear_damp     = 5.0
+        sim_parms.tension        = OBJ.GPUCloth.tension
+        sim_parms.compression    = OBJ.GPUCloth.compression
+        sim_parms.tension_damp   = OBJ.GPUCloth.tension_damp
+        sim_parms.compression_damp = OBJ.GPUCloth.compression_damp
+        sim_parms.shear_damp     = OBJ.GPUCloth.shear_damp
         sim_parms.internal_spring_max_length     = 10
         sim_parms.internal_spring_max_diversion  = 0.7853981633974483  # pi/4
         sim_parms.vgroup_intern  = 0
@@ -1016,6 +1016,200 @@ class GPUCloth_FreeCache(bpy.types.Operator):
 
 
 # ===========================================================================
+#  Хелпер: frame_change_post обработчик для экспорта из кэша
+# ===========================================================================
+#
+#   При экспорте Alembic/USD Blender внутренне вызывает scene.frame_set()
+#   для каждого кадра.  frame_change_post обработчик загружает позиции
+#   из кэша и записывает их в меш, после чего вызывает depsgraph.update()
+#   чтобы экспортёр увидел актуальную геометрию.
+
+def _make_cache_handler(cache_dir_bytes):
+    """Создаёт frame_change_post обработчик для загрузки кэша при экспорте."""
+    _guard = {'active': False}
+
+    def _handler(scene, depsgraph):
+        if _guard['active']:
+            return
+        _guard['active'] = True
+        try:
+            frame = scene.frame_current
+            updated = False
+            for i, cloth_obj in enumerate(g_clothOBJs):
+                if i >= len(g_clmd):
+                    break
+                nV  = len(cloth_obj.data.vertices)
+                pos = (c_float * (nV * 3))()
+                if g_dll.Cache_load_frame_gpu(
+                        frame, g_clmd[i], c_size_t(nV), cache_dir_bytes):
+                    if g_dll.Cache_get_frame_positions(frame, pos, c_size_t(nV)):
+                        flat = np.frombuffer(pos, dtype=np.float32)
+                        cloth_obj.data.vertices.foreach_set("co", flat)
+                        cloth_obj.data.update()
+                        updated = True
+            if updated:
+                for cloth_obj in g_clothOBJs:
+                    cloth_obj.data.update_tag()
+                depsgraph.update()
+        finally:
+            _guard['active'] = False
+
+    return _handler
+
+
+# ===========================================================================
+#  Оператор: экспорт Alembic (.abc)
+# ===========================================================================
+
+class GPUCloth_ExportAlembic(bpy.types.Operator):
+    """Экспорт запечённой симуляции в Alembic (.abc)"""
+    bl_idname  = "gpucloth.export_alembic"
+    bl_label   = "Экспорт Alembic"
+    bl_options = {'REGISTER'}
+
+    filepath: bpy.props.StringProperty(
+        name="Путь",
+        subtype='FILE_PATH',
+    )
+    filename_ext = ".abc"
+    filter_glob: bpy.props.StringProperty(
+        default="*.abc",
+        options={'HIDDEN'},
+    )
+
+    @classmethod
+    def poll(cls, context):
+        return (
+            g_dll is not None
+            and context.scene.gpu_cloth_springs_built
+            and context.scene.gpu_cloth_helper.is_baked
+            and len(g_clothOBJs) > 0
+        )
+
+    def invoke(self, context, event):
+        if not self.filepath:
+            self.filepath = "//gpucloth_export.abc"
+        context.window_manager.fileselect_add(self)
+        return {'RUNNING_MODAL'}
+
+    def execute(self, context):
+        scene_s   = context.scene.gpu_cloth_helper
+        cache_dir = bpy.path.abspath(scene_s.cache_dir).encode('utf-8')
+
+        # Выделяем только объекты ткани для экспорта
+        prev_selection = [o for o in context.scene.objects if o.select_get()]
+        bpy.ops.object.select_all(action='DESELECT')
+        for obj in g_clothOBJs:
+            obj.select_set(True)
+
+        handler = _make_cache_handler(cache_dir)
+        bpy.app.handlers.frame_change_post.append(handler)
+        try:
+            filepath = bpy.path.abspath(self.filepath)
+            if not filepath.lower().endswith('.abc'):
+                filepath += '.abc'
+            bpy.ops.wm.alembic_export(
+                'EXEC_DEFAULT',
+                filepath=filepath,
+                start=scene_s.bake_start,
+                end=scene_s.bake_end,
+                selected=True,
+                visible_objects_only=False,
+                export_hair=False,
+                export_particles=False,
+                as_background_job=False,
+            )
+            self.report({'INFO'}, f"Alembic экспортирован: {filepath}")
+        except Exception as e:
+            self.report({'ERROR'}, f"Ошибка экспорта Alembic: {e}")
+            return {'CANCELLED'}
+        finally:
+            if handler in bpy.app.handlers.frame_change_post:
+                bpy.app.handlers.frame_change_post.remove(handler)
+            # Восстанавливаем выделение
+            bpy.ops.object.select_all(action='DESELECT')
+            for obj in prev_selection:
+                if obj.name in bpy.data.objects:
+                    obj.select_set(True)
+
+        return {'FINISHED'}
+
+
+# ===========================================================================
+#  Оператор: экспорт USD (.usd / .usdc / .usda)
+# ===========================================================================
+
+class GPUCloth_ExportUSD(bpy.types.Operator):
+    """Экспорт запечённой симуляции в Universal Scene Description (.usd)"""
+    bl_idname  = "gpucloth.export_usd"
+    bl_label   = "Экспорт USD"
+    bl_options = {'REGISTER'}
+
+    filepath: bpy.props.StringProperty(
+        name="Путь",
+        subtype='FILE_PATH',
+    )
+    filename_ext = ".usdc"
+    filter_glob: bpy.props.StringProperty(
+        default="*.usd;*.usdc;*.usda",
+        options={'HIDDEN'},
+    )
+
+    @classmethod
+    def poll(cls, context):
+        return (
+            g_dll is not None
+            and context.scene.gpu_cloth_springs_built
+            and context.scene.gpu_cloth_helper.is_baked
+            and len(g_clothOBJs) > 0
+        )
+
+    def invoke(self, context, event):
+        if not self.filepath:
+            self.filepath = "//gpucloth_export.usdc"
+        context.window_manager.fileselect_add(self)
+        return {'RUNNING_MODAL'}
+
+    def execute(self, context):
+        scene_s   = context.scene.gpu_cloth_helper
+        cache_dir = bpy.path.abspath(scene_s.cache_dir).encode('utf-8')
+
+        prev_selection = [o for o in context.scene.objects if o.select_get()]
+        bpy.ops.object.select_all(action='DESELECT')
+        for obj in g_clothOBJs:
+            obj.select_set(True)
+
+        handler = _make_cache_handler(cache_dir)
+        bpy.app.handlers.frame_change_post.append(handler)
+        try:
+            filepath = bpy.path.abspath(self.filepath)
+            valid_ext = ('.usd', '.usdc', '.usda')
+            if not any(filepath.lower().endswith(ext) for ext in valid_ext):
+                filepath += '.usdc'
+            bpy.ops.wm.usd_export(
+                'EXEC_DEFAULT',
+                filepath=filepath,
+                selected_objects_only=True,
+                visible_objects_only=False,
+                export_animation=True,
+                export_hair=False,
+            )
+            self.report({'INFO'}, f"USD экспортирован: {filepath}")
+        except Exception as e:
+            self.report({'ERROR'}, f"Ошибка экспорта USD: {e}")
+            return {'CANCELLED'}
+        finally:
+            if handler in bpy.app.handlers.frame_change_post:
+                bpy.app.handlers.frame_change_post.remove(handler)
+            bpy.ops.object.select_all(action='DESELECT')
+            for obj in prev_selection:
+                if obj.name in bpy.data.objects:
+                    obj.select_set(True)
+
+        return {'FINISHED'}
+
+
+# ===========================================================================
 #  Регистрация
 # ===========================================================================
 
@@ -1027,6 +1221,8 @@ _OPERATOR_CLASSES = [
     GPUCloth_UpdateSimulation,
     GPUCloth_BakeSimulation,
     GPUCloth_FreeCache,
+    GPUCloth_ExportAlembic,
+    GPUCloth_ExportUSD,
 ]
 
 

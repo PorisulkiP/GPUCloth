@@ -110,6 +110,10 @@ class GPUCLOTH_PT_solver(bpy.types.Panel):
         col.prop(s, "solver_type")
         col.separator()
 
+        # ── Пресет материала ─────────────────────────────────────────────────
+        col.prop(s, "material_preset")
+        col.separator()
+
         # Параметры времени/качества
         col.prop(s, "quality_step")
         col.prop(s, "speed_multiplier")
@@ -136,6 +140,51 @@ class GPUCLOTH_PT_solver(bpy.types.Panel):
             col.label(text="Non-distance barriers + subspace reuse", icon='INFO')
         elif solver == 'OGC':
             col.label(text="Offset Geometric Contact (самостолкновение)", icon='INFO')
+
+
+# ===========================================================================
+#  Подпанель: Материал (жёсткость и демпфирование)
+# ===========================================================================
+
+class GPUCLOTH_PT_material(bpy.types.Panel):
+    bl_label       = "Материал"
+    bl_idname      = "GPUCLOTH_PT_material"
+    bl_parent_id   = "GPUCLOTH_PT_main"
+    bl_space_type  = 'PROPERTIES'
+    bl_region_type = 'WINDOW'
+    bl_context     = "physics"
+    bl_options     = {'DEFAULT_CLOSED'}
+
+    @classmethod
+    def poll(cls, context):
+        return (
+            context.object is not None
+            and context.object.type == 'MESH'
+            and hasattr(context.object, 'GPUCloth')
+            and context.object.GPUCloth.is_active
+        )
+
+    def draw(self, context):
+        layout = self.layout
+        s      = context.object.GPUCloth
+
+        # ── Жёсткость ───────────────────────────────────────────────────────
+        col = layout.column(align=True)
+        col.label(text="Жёсткость:")
+        col.prop(s, "tension",           text="Растяжение")
+        col.prop(s, "compression",       text="Сжатие")
+        col.prop(s, "shear",             text="Сдвиг")
+        col.prop(s, "bending_stiffness", text="Изгиб")
+
+        layout.separator()
+
+        # ── Демпфирование ────────────────────────────────────────────────────
+        col = layout.column(align=True)
+        col.label(text="Демпфирование:")
+        col.prop(s, "tension_damp",     text="Растяжение")
+        col.prop(s, "compression_damp", text="Сжатие")
+        col.prop(s, "shear_damp",       text="Сдвиг")
+        col.prop(s, "bending_damping",  text="Изгиб")
 
 
 # ===========================================================================
@@ -252,6 +301,17 @@ class GPUCLOTH_PT_cache(bpy.types.Panel):
                      icon='PLAY' if scene_s.playback_mode else 'PAUSE')
 
             col.separator()
+
+            # ── Экспорт ─────────────────────────────────────────────────────
+            box = col.box()
+            box.label(text="Экспорт симуляции:", icon='EXPORT')
+            row = box.row(align=True)
+            row.operator("gpucloth.export_alembic",
+                         text="Alembic (.abc)", icon='FILE')
+            row.operator("gpucloth.export_usd",
+                         text="USD (.usdc)",    icon='FILE')
+
+            col.separator()
             col.operator("gpucloth.free_cache",
                          text="Очистить кэш", icon='TRASH')
 
@@ -290,6 +350,7 @@ class GPUCLOTH_PT_cache(bpy.types.Panel):
 _PANEL_CLASSES = [
     GPUCLOTH_PT_main,
     GPUCLOTH_PT_solver,
+    GPUCLOTH_PT_material,
     GPUCLOTH_PT_proxy,
     GPUCLOTH_PT_cache,
 ]
