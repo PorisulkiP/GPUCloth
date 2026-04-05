@@ -86,6 +86,7 @@ class GPUClothObjectSettings(PropertyGroup):
             ('PD',    "PD",    "Projective Dynamics с Chebyshev-Jacobi ускорением"),
             ('MGPBD', "MGPBD", "Многоуровневый PBD с Algebraic Multigrid"),
             ('Mil2',  "Mil2",  "Non-distance barriers + Subspace Reuse"),
+            ('OGC',   "OGC",   "Offset Geometric Contact — самостолкновение"),
         ],
         default='XPBD',
     )

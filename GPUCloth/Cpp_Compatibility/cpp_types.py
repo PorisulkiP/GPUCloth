@@ -37,6 +37,7 @@ SOLVER_XPBD   = 0   # Extended Position-Based Dynamics (Macklin 2016/2019)
 SOLVER_PD     = 1   # Projective Dynamics с Chebyshev-Jacobi ускорением
 SOLVER_MGPBD  = 2   # Многоуровневый PBD с Algebraic Multigrid (AMG)
 SOLVER_Mil2   = 3   # Non-distance barriers + subspace reuse (Mil²)
+SOLVER_OGC    = 4   # Offset Geometric Contact — самостолкновение ткани
 # OGC — солвер самостолкновений, не основной физический солвер.
 # Подключается к любому из вышеперечисленных через SIM_set_self_collision_params.
 
