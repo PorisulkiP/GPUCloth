@@ -15,11 +15,11 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import bpy
-from ..utils import version_compatibility_utils as vcu
+from ..utils.version_compatibility_utils import _t
 
 
 # ===========================================================================
-#  Главная панель GPU Cloth
+#  Main panel: GPU Cloth
 #  Properties → Physics → GPU Cloth
 # ===========================================================================
 
@@ -50,38 +50,50 @@ class GPUCLOTH_PT_main(bpy.types.Panel):
         scene  = context.scene
 
         if not hasattr(obj, 'GPUCloth') or not obj.GPUCloth.is_active:
-            layout.label(text="Включите GPUCloth для этого объекта", icon='INFO')
+            layout.label(
+                text=_t("Enable GPUCloth for this object",
+                        "Включите GPUCloth для этого объекта"),
+                icon='INFO')
             return
 
-        # ── DLL управление ───────────────────────────────────────────────────
+        # ── DLL ──────────────────────────────────────────────────────────────
         box = layout.box()
-        box.label(text="Библиотека симуляции", icon='PLUGIN')
+        box.label(text=_t("Simulation Library", "Библиотека симуляции"),
+                  icon='PLUGIN')
         row = box.row(align=True)
-        row.operator("gpucloth.load_dll",   text="Загрузить DLL", icon='IMPORT')
-        row.operator("gpucloth.unload_dll", text="Выгрузить",     icon='X')
+        row.operator("gpucloth.load_dll",
+                     text=_t("Load DLL", "Загрузить DLL"), icon='IMPORT')
+        row.operator("gpucloth.unload_dll",
+                     text=_t("Unload", "Выгрузить"), icon='X')
 
         layout.separator()
 
-        # ── Управление симуляцией ────────────────────────────────────────────
+        # ── Simulation controls ──────────────────────────────────────────────
         col = layout.column(align=True)
         col.operator("gpucloth.prepare_simulation",
-                     text="Подготовить симуляцию", icon='PLAY')
+                     text=_t("Prepare Simulation", "Подготовить симуляцию"),
+                     icon='PLAY')
         col.operator("gpucloth.destroy_simulation_data",
-                     text="Освободить GPU память",  icon='TRASH')
+                     text=_t("Free GPU Memory", "Освободить GPU память"),
+                     icon='TRASH')
 
-        # Статус
         if scene.gpu_cloth_springs_built:
-            layout.label(text="Симуляция готова", icon='CHECKMARK')
+            layout.label(
+                text=_t("Simulation ready", "Симуляция готова"),
+                icon='CHECKMARK')
         else:
-            layout.label(text="Симуляция не инициализирована", icon='ERROR')
+            layout.label(
+                text=_t("Simulation not initialized",
+                        "Симуляция не инициализирована"),
+                icon='ERROR')
 
 
 # ===========================================================================
-#  Подпанель: Солвер
+#  Sub-panel: Solver
 # ===========================================================================
 
 class GPUCLOTH_PT_solver(bpy.types.Panel):
-    bl_label       = "Солвер"
+    bl_label       = "Solver"
     bl_idname      = "GPUCLOTH_PT_solver"
     bl_parent_id   = "GPUCLOTH_PT_main"
     bl_space_type  = 'PROPERTIES'
@@ -99,55 +111,36 @@ class GPUCLOTH_PT_solver(bpy.types.Panel):
         )
 
     def draw(self, context):
-        layout = self.layout
-        obj    = context.object
-        s      = obj.GPUCloth
+        layout  = self.layout
+        s       = context.object.GPUCloth
         scene_s = context.scene.gpu_cloth_helper
 
         col = layout.column()
-
-        # Тип солвера — главный выбор
         col.prop(s, "solver_type")
         col.separator()
 
-        # ── Пресет материала ─────────────────────────────────────────────────
         col.prop(s, "material_preset")
         col.separator()
 
-        # Параметры времени/качества
         col.prop(s, "quality_step")
         col.prop(s, "speed_multiplier")
         col.prop(s, "vertex_mass")
         col.prop(s, "bending_model")
 
         col.separator()
-        col.label(text="Гравитация (м/с²):")
+        col.label(text=_t("Gravity (m/s\u00b2):", "Гравитация (м/с\u00b2):"))
         row = col.row(align=True)
         row.prop(scene_s, "gravity_x", text="X")
         row.prop(scene_s, "gravity_y", text="Y")
         row.prop(scene_s, "gravity_z", text="Z")
 
-        # Краткая справка по солверу
-        col.separator()
-        solver = s.solver_type
-        if solver == 'XPBD':
-            col.label(text="Extended PBD (быстро, устойчиво)", icon='INFO')
-        elif solver == 'PD':
-            col.label(text="Projective Dynamics + Chebyshev", icon='INFO')
-        elif solver == 'MGPBD':
-            col.label(text="Многоуровневый PBD с AMG (мягкая ткань)", icon='INFO')
-        elif solver == 'Mil2':
-            col.label(text="Non-distance barriers + subspace reuse", icon='INFO')
-        elif solver == 'OGC':
-            col.label(text="Offset Geometric Contact (самостолкновение)", icon='INFO')
-
 
 # ===========================================================================
-#  Подпанель: Материал (жёсткость и демпфирование)
+#  Sub-panel: Material (stiffness & damping)
 # ===========================================================================
 
 class GPUCLOTH_PT_material(bpy.types.Panel):
-    bl_label       = "Материал"
+    bl_label       = "Material"
     bl_idname      = "GPUCLOTH_PT_material"
     bl_parent_id   = "GPUCLOTH_PT_main"
     bl_space_type  = 'PROPERTIES'
@@ -168,31 +161,29 @@ class GPUCLOTH_PT_material(bpy.types.Panel):
         layout = self.layout
         s      = context.object.GPUCloth
 
-        # ── Жёсткость ───────────────────────────────────────────────────────
         col = layout.column(align=True)
-        col.label(text="Жёсткость:")
-        col.prop(s, "tension",           text="Растяжение")
-        col.prop(s, "compression",       text="Сжатие")
-        col.prop(s, "shear",             text="Сдвиг")
-        col.prop(s, "bending_stiffness", text="Изгиб")
+        col.label(text=_t("Stiffness:", "Жёсткость:"))
+        col.prop(s, "tension",           text=_t("Tension",     "Растяжение"))
+        col.prop(s, "compression",       text=_t("Compression", "Сжатие"))
+        col.prop(s, "shear",             text=_t("Shear",       "Сдвиг"))
+        col.prop(s, "bending_stiffness", text=_t("Bending",     "Изгиб"))
 
         layout.separator()
 
-        # ── Демпфирование ────────────────────────────────────────────────────
         col = layout.column(align=True)
-        col.label(text="Демпфирование:")
-        col.prop(s, "tension_damp",     text="Растяжение")
-        col.prop(s, "compression_damp", text="Сжатие")
-        col.prop(s, "shear_damp",       text="Сдвиг")
-        col.prop(s, "bending_damping",  text="Изгиб")
+        col.label(text=_t("Damping:", "Демпфирование:"))
+        col.prop(s, "tension_damp",     text=_t("Tension",     "Растяжение"))
+        col.prop(s, "compression_damp", text=_t("Compression", "Сжатие"))
+        col.prop(s, "shear_damp",       text=_t("Shear",       "Сдвиг"))
+        col.prop(s, "bending_damping",  text=_t("Bending",     "Изгиб"))
 
 
 # ===========================================================================
-#  Подпанель: Proxy-res симуляция
+#  Sub-panel: Proxy-res simulation
 # ===========================================================================
 
 class GPUCLOTH_PT_proxy(bpy.types.Panel):
-    bl_label       = "Proxy симуляция"
+    bl_label       = "Proxy Simulation"
     bl_idname      = "GPUCLOTH_PT_proxy"
     bl_parent_id   = "GPUCLOTH_PT_main"
     bl_space_type  = 'PROPERTIES'
@@ -222,21 +213,23 @@ class GPUCLOTH_PT_proxy(bpy.types.Panel):
 
         if s.proxy_object is None:
             col.label(
-                text="Выберите объект с грубой сеткой",
+                text=_t("Select a coarse mesh object",
+                        "Выберите объект с грубой сеткой"),
                 icon='ERROR' if s.use_proxy else 'INFO',
             )
 
         col.separator()
 
-        # Размеры сеток
         box = col.box()
-        box.label(text="Proxy-сетка (грубая):", icon='MESH_GRID')
+        box.label(text=_t("Proxy grid (coarse):", "Proxy-сетка (грубая):"),
+                  icon='MESH_GRID')
         row = box.row(align=True)
         row.prop(s, "proxy_nx", text="NX")
         row.prop(s, "proxy_ny", text="NY")
 
         box = col.box()
-        box.label(text="Hi-res сетка (рендер):", icon='MESH_GRID')
+        box.label(text=_t("Hi-res grid (render):", "Hi-res сетка (рендер):"),
+                  icon='MESH_GRID')
         row = box.row(align=True)
         row.prop(s, "hi_nx", text="NX")
         row.prop(s, "hi_ny", text="NY")
@@ -245,20 +238,13 @@ class GPUCLOTH_PT_proxy(bpy.types.Panel):
         col.prop(s, "num_sheets")
         col.prop(s, "proxy_scene_type")
 
-        # Пояснение архитектуры
-        col.separator()
-        col.label(text="GPU путь:", icon='INFO')
-        col.label(text="scatter → ClothVertex.x")
-        col.label(text="ProxySim_apply → hi-res позиции")
-        col.label(text="cudaMemcpyAsync D2H → foreach_set")
-
 
 # ===========================================================================
-#  Подпанель: Кэш симуляции
+#  Sub-panel: Simulation cache
 # ===========================================================================
 
 class GPUCLOTH_PT_cache(bpy.types.Panel):
-    bl_label       = "Кэш"
+    bl_label       = "Cache"
     bl_idname      = "GPUCLOTH_PT_cache"
     bl_parent_id   = "GPUCLOTH_PT_main"
     bl_space_type  = 'PROPERTIES'
@@ -280,31 +266,32 @@ class GPUCLOTH_PT_cache(bpy.types.Panel):
         scene_s = context.scene.gpu_cloth_helper
 
         col = layout.column()
-
-        # Директория кэша
         col.prop(scene_s, "cache_dir")
 
-        # Диапазон кадров
         row = col.row(align=True)
-        row.prop(scene_s, "bake_start", text="От")
-        row.prop(scene_s, "bake_end",   text="До")
+        row.prop(scene_s, "bake_start",
+                 text=_t("Start", "От"))
+        row.prop(scene_s, "bake_end",
+                 text=_t("End", "До"))
 
         col.separator()
 
         if scene_s.is_baked:
-            # ── Кэш записан ─────────────────────────────────────────────────
-            row = col.row()
-            row.label(text="Статус: запечено", icon='CHECKMARK')
+            col.label(
+                text=_t("Status: baked", "Статус: запечено"),
+                icon='CHECKMARK')
 
             col.prop(scene_s, "playback_mode",
-                     text="Воспроизводить из кэша", toggle=True,
+                     text=_t("Play from Cache", "Воспроизводить из кэша"),
+                     toggle=True,
                      icon='PLAY' if scene_s.playback_mode else 'PAUSE')
 
             col.separator()
 
-            # ── Экспорт ─────────────────────────────────────────────────────
             box = col.box()
-            box.label(text="Экспорт симуляции:", icon='EXPORT')
+            box.label(
+                text=_t("Export Simulation:", "Экспорт симуляции:"),
+                icon='EXPORT')
             row = box.row(align=True)
             row.operator("gpucloth.export_alembic",
                          text="Alembic (.abc)", icon='FILE')
@@ -313,38 +300,26 @@ class GPUCLOTH_PT_cache(bpy.types.Panel):
 
             col.separator()
             col.operator("gpucloth.free_cache",
-                         text="Очистить кэш", icon='TRASH')
-
-            # Архитектура чтения
-            if scene_s.playback_mode:
-                box = col.box()
-                box.label(text="GPU-direct (zero-copy):", icon='INFO')
-                box.label(text="NVMe → D3D12 VRAM")
-                box.label(text="CUDA ext. memory → scatter")
-                box.label(text="D2H → foreach_set")
+                         text=_t("Clear Cache", "Очистить кэш"),
+                         icon='TRASH')
 
         else:
-            # ── Кэш не записан ──────────────────────────────────────────────
-
-            # Прогресс (если запекание идёт)
             if 0 < scene_s.bake_progress < 100:
                 col.prop(scene_s, "bake_progress",
-                         text="Прогресс", slider=True)
-                col.label(text="Нажмите ESC для отмены", icon='INFO')
+                         text=_t("Progress", "Прогресс"), slider=True)
+                col.label(
+                    text=_t("Press ESC to cancel",
+                            "Нажмите ESC для отмены"),
+                    icon='INFO')
             else:
                 col.operator("gpucloth.bake_simulation",
-                             text="Запечь симуляцию", icon='REC')
-
-            # Пояснение архитектуры записи
-            box = col.box()
-            box.label(text="Запись кэша (async):", icon='INFO')
-            box.label(text="SIM_solver → SIM_get_cloth_verts")
-            box.label(text="foreach_set + Cache_write_frame_async")
-            box.label(text="pinned RAM → DMA → NVMe (фон)")
+                             text=_t("Bake Simulation",
+                                     "Запечь симуляцию"),
+                             icon='REC')
 
 
 # ===========================================================================
-#  Регистрация
+#  Registration
 # ===========================================================================
 
 _PANEL_CLASSES = [
