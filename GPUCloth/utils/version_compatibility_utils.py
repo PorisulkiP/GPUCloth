@@ -67,14 +67,31 @@ def is_blender_50():
 def get_addon_directory():
     """
     Возвращает корневую директорию аддона GPUCloth.
-    Используется вместо несуществующего get_script_paths_pref() из FLIP Fluids.
-    Структура: <addon_root>/src/python/utils/version_compatibility_utils.py
+    При установке в Blender структура: <addon>/utils/version_compatibility_utils.py
+    При разработке в репо:            <repo>/src/python/utils/version_compatibility_utils.py
+    Ищет __init__.py с bl_info, поднимаясь от текущего файла вверх.
     """
-    utils_dir  = os.path.dirname(os.path.realpath(__file__))   # .../src/python/utils
-    python_dir = os.path.dirname(utils_dir)                     # .../src/python
-    src_dir    = os.path.dirname(python_dir)                    # .../src
-    addon_dir  = os.path.dirname(src_dir)                       # <addon_root>
-    return addon_dir
+    current = os.path.dirname(os.path.realpath(__file__))
+    searched = []
+    while True:
+        parent = os.path.dirname(current)
+        if parent == current:
+            break
+        init_path = os.path.join(current, "__init__.py")
+        searched.append(init_path)
+        if os.path.isfile(init_path):
+            try:
+                with open(init_path, "r", encoding="utf-8") as f:
+                    if "bl_info" in f.read():
+                        print(f"[GPUCloth] get_addon_directory() -> {current}")
+                        return current
+            except Exception:
+                pass
+        current = parent
+    print(f"[GPUCloth] WARNING: bl_info not found. Searched: {searched}")
+    fallback = os.path.dirname(os.path.realpath(__file__))
+    print(f"[GPUCloth] get_addon_directory() fallback -> {fallback}")
+    return fallback
 
 
 def get_lib_directory():
@@ -98,16 +115,25 @@ def get_dll_path(dll_name="GPUCloth.dll"):
     else:
         lib_filename = dll_name.replace(".dll", ".so")
 
-    # 1. <addon_root>/lib/
-    candidate = os.path.join(get_lib_directory(), lib_filename)
-    if os.path.isfile(candidate):
-        return candidate
+    addon_dir = get_addon_directory()
+    lib_dir   = get_lib_directory()
 
-    # 2. Рядом с директорией аддона (удобно при разработке)
-    candidate = os.path.join(get_addon_directory(), lib_filename)
-    if os.path.isfile(candidate):
-        return candidate
+    candidates = [
+        os.path.join(lib_dir, lib_filename),
+        os.path.join(addon_dir, lib_filename),
+        os.path.join(addon_dir, "..", "build", lib_filename),
+        os.path.join(addon_dir, "src", "build", lib_filename),
+        os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "..", "build", lib_filename),
+    ]
 
+    for candidate in candidates:
+        resolved = os.path.normpath(candidate)
+        print(f"[GPUCloth] get_dll_path() checking: {resolved}")
+        if os.path.isfile(resolved):
+            print(f"[GPUCloth] get_dll_path() FOUND: {resolved}")
+            return resolved
+
+    print(f"[GPUCloth] get_dll_path() NOT FOUND. addon_dir={addon_dir}, lib_dir={lib_dir}")
     return None
 
 
