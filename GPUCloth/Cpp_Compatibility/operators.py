@@ -203,7 +203,7 @@ class GPUCloth_LoadDLL(bpy.types.Operator):
 
             # ── Readback позиций вершин ──────────────────────────────────────
             #
-            #   bool SIM_get_cloth_verts(const ClothModifierData* clmd,
+            #   void SIM_get_cloth_verts(const ClothModifierData* clmd,
             #                            ClothVertex* out_verts, size_t count)
             #   Вместо прямого чтения mesh_ptr.contents.mvert — единственно
             #   корректный способ получить симулированные позиции.
@@ -213,7 +213,7 @@ class GPUCloth_LoadDLL(bpy.types.Operator):
                 POINTER(CType.ClothVertex),
                 c_size_t,
             ]
-            g_dll.SIM_get_cloth_verts.restype = c_bool
+            g_dll.SIM_get_cloth_verts.restype = None
 
             # ── ProxySim API ─────────────────────────────────────────────────
             #
@@ -776,8 +776,7 @@ class GPUCloth_UpdateSimulation(bpy.types.Operator):
         или None при ошибке.
         """
         buf = (CType.ClothVertex * nVerts)()
-        if not g_dll.SIM_get_cloth_verts(clmd_ptr, buf, c_size_t(nVerts)):
-            return None
+        g_dll.SIM_get_cloth_verts(clmd_ptr, buf, c_size_t(nVerts))
         pos = (c_float * (nVerts * 3))()
         for i in range(nVerts):
             pos[i * 3]     = buf[i].x[0]
