@@ -158,9 +158,9 @@ LinkNode._fields_ = [("next", POINTER(LinkNode)), ("link", c_void_p)]
 
 ModifierData._fields_ = [("next", POINTER(ModifierData)),
                 ("prev", POINTER(ModifierData)),
-                ("id", c_uint),
                 ("type", c_int),
                 ("mode", c_int),
+                ("id", c_uint),
                 ("name", c_char*64)]
 
 PointCache._fields_ = [("next", POINTER(PointCache)),
@@ -355,7 +355,6 @@ class ClothSimSettings(Structure):
 
 class ClothCollSettings(Structure):
     _fields_ = [
-            ("collision_list",  POINTER(LinkNode)),
             ("epsilon",         c_float),
             ("self_friction",   c_float),
             ("friction",        c_float),

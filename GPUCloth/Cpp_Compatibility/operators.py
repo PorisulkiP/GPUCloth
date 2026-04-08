@@ -15,6 +15,7 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import bpy
+import os
 import sys
 import subprocess
 import time
@@ -46,10 +47,91 @@ g_clothCollisionOBJs = []     # list[POINTER(CType.Object)] — объекты �
 
 # Proxy-res: один handle на объект ткани (None если proxy не активен)
 g_proxy_handles      = []     # list[c_void_p | None]
+_collision_keepalive  = []     # prevent GC of collision ctypes data
 
 # Защита от GC для ctypes-массивов, переданных в Cache_write_frame_async
 # C++ пишет в фоне — массив должен жить до завершения записи
 _live_arrays         = []     # list[c_float array]
+
+_cache_playback_guard  = {'active': False}
+_initial_positions     = []     # list[np.ndarray] — rest positions per cloth object
+_bake_range            = {'start': 1, 'end': 250}
+
+
+def _store_initial_positions():
+    global _initial_positions
+    _initial_positions.clear()
+    for cloth_obj in g_clothOBJs:
+        nV = len(cloth_obj.data.vertices)
+        pos = np.empty(nV * 3, dtype=np.float32)
+        cloth_obj.data.vertices.foreach_get("co", pos)
+        _initial_positions.append(pos.copy())
+
+
+def _restore_initial_positions():
+    for i, cloth_obj in enumerate(g_clothOBJs):
+        if i < len(_initial_positions):
+            cloth_obj.data.vertices.foreach_set("co", _initial_positions[i])
+            cloth_obj.data.update()
+            cloth_obj.data.update_tag()
+
+
+def _frame_change_handler(scene, depsgraph):
+    if _cache_playback_guard['active']:
+        return
+    scene_s = scene.gpu_cloth_helper
+    if g_dll is None or not g_clothOBJs:
+        return
+    _cache_playback_guard['active'] = True
+    try:
+        frame = scene.frame_current
+
+        if frame < _bake_range['start']:
+            if _initial_positions:
+                _restore_initial_positions()
+                depsgraph.update()
+            return
+
+        if scene_s.is_baked and scene_s.playback_mode:
+            cache_dir = scene_s.cache_dir
+            cache_dir_bytes = bpy.path.abspath(cache_dir).encode('utf-8')
+
+            if not g_dll.Cache_has_frame(frame, cache_dir_bytes):
+                if _initial_positions:
+                    _restore_initial_positions()
+                    depsgraph.update()
+                return
+
+            updated = False
+            for i, cloth_obj in enumerate(g_clothOBJs):
+                if i >= len(g_clmd):
+                    break
+                nV = len(cloth_obj.data.vertices)
+                pos = (c_float * (nV * 3))()
+                if g_dll.Cache_load_frame_gpu(
+                        frame, g_clmd[i], c_size_t(nV), cache_dir_bytes):
+                    if g_dll.Cache_get_frame_positions(frame, pos, c_size_t(nV)):
+                        flat = np.frombuffer(pos, dtype=np.float32)
+                        cloth_obj.data.vertices.foreach_set("co", flat)
+                        cloth_obj.data.update()
+                        updated = True
+                elif g_dll.Cache_prefetch_frame(frame, c_size_t(nV), cache_dir_bytes):
+                    if g_dll.Cache_get_frame_positions(frame, pos, c_size_t(nV)):
+                        flat = np.frombuffer(pos, dtype=np.float32)
+                        cloth_obj.data.vertices.foreach_set("co", flat)
+                        cloth_obj.data.update()
+                        updated = True
+            if updated:
+                for cloth_obj in g_clothOBJs:
+                    cloth_obj.data.update_tag()
+                depsgraph.update()
+        elif not scene_s.is_baked:
+            try:
+                bpy.ops.gpucloth.update_simulation()
+            except RuntimeError:
+                pass
+    finally:
+        _cache_playback_guard['active'] = False
 
 
 # ===========================================================================
@@ -82,6 +164,8 @@ def free_gpu_memory(context=None):
     g_clothOBJs          = []
     g_clothCollisionOBJs = []
     g_proxy_handles      = []
+    _collision_keepalive.clear()
+    _initial_positions.clear()
     _live_arrays.clear()
 
     if context is not None and hasattr(context.scene, 'gpu_cloth_springs_built'):
@@ -158,6 +242,12 @@ class GPUCloth_LoadDLL(bpy.types.Operator):
                 f"Искали в: {lib_dir} , {addon_dir} , {addon_dir}\\build\\ . "
                 f"Скопируйте GPUCloth.dll в {lib_dir}")
             return False
+
+        dll_dir = os.path.dirname(filename)
+        if dll_dir not in os.environ.get("PATH", ""):
+            os.environ["PATH"] = dll_dir + os.pathsep + os.environ.get("PATH", "")
+        if hasattr(os, 'add_dll_directory'):
+            os.add_dll_directory(dll_dir)
 
         try:
             g_dll = cdll.LoadLibrary(filename)
@@ -418,7 +508,6 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
                 mvertType = CType.MVert * len(OBJ.data.vertices)
                 mvert     = mvertType()
                 for i, mv in enumerate(OBJ.data.vertices):
-                    # vcu.element_multiply = matrix_world @ vertex.co
                     v = vcu.element_multiply(OBJ.matrix_world, mv.co)
                     mvert[i].co   = (c_float * 3)(*v)
                     mvert[i].flag = 0
@@ -433,7 +522,6 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
                 tmp_collision.current_v       = cast(mvert, POINTER(CType.MVert))
                 tmp_collision.tri             = cast(mvert_tri, POINTER(CType.MVertTri))
                 tmp_collision.mvert_num       = len(OBJ.data.vertices)
-                # Blender 4.1+: нужен calc_loop_triangles() перед обращением
                 loop_tris = vcu.calc_mesh_loop_triangles(OBJ.data)
                 tmp_collision.tri_num         = len(loop_tris)
                 tmp_collision.time_x          = -1000
@@ -441,6 +529,9 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
                 tmp_collision.is_static       = True
                 tmp_collision.bvhtree         = None
                 new_object.modifiers          = pointer(tmp_collision)
+
+                _collision_keepalive.extend(
+                    [new_object, tmp_collision, mvert, mvert_tri])
 
         return pointer(new_object)
 
@@ -755,6 +846,7 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
         # 9. Возвращаем режим редактирования
         bpy.ops.object.mode_set(mode=mode)
         context.scene.gpu_cloth_springs_built = True
+        _store_initial_positions()
         return {'FINISHED'}
 
 
@@ -972,7 +1064,10 @@ class GPUCloth_BakeSimulation(bpy.types.Operator):
         s = context.scene.gpu_cloth_helper
         s.is_baked      = success
         s.bake_progress = 100 if success else 0
-        # После завершения — _live_arrays больше не нужен
+        if success:
+            s.playback_mode = True
+            _bake_range['start'] = s.bake_start
+            _bake_range['end']   = s.bake_end
         _live_arrays.clear()
         if success:
             self.report({'INFO'}, "Запекание завершено.")
@@ -1244,10 +1339,18 @@ def register():
     g_clothOBJs          = []
     g_clothCollisionOBJs = []
     g_proxy_handles      = []
+    _collision_keepalive.clear()
+    _initial_positions.clear()
     _live_arrays.clear()
+
+    if _frame_change_handler not in bpy.app.handlers.frame_change_post:
+        bpy.app.handlers.frame_change_post.append(_frame_change_handler)
 
 
 def unregister():
+    if _frame_change_handler in bpy.app.handlers.frame_change_post:
+        bpy.app.handlers.frame_change_post.remove(_frame_change_handler)
+
     for cls in reversed(_OPERATOR_CLASSES):
         bpy.utils.unregister_class(cls)
 
@@ -1262,4 +1365,6 @@ def unregister():
     g_clothOBJs          = []
     g_clothCollisionOBJs = []
     g_proxy_handles      = []
+    _collision_keepalive.clear()
+    _initial_positions.clear()
     _live_arrays.clear()
