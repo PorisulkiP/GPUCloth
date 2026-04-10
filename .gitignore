@@ -157,3 +157,20 @@ softBody/
 /src/engine/source/Debug/
 /src/engine/source/Release/
 /src/engine/source/packages/
+
+# Built binaries (the addon dll is shipped from a release pipeline, not git)
+*.dll
+*.exe
+*.lib
+*.exp
+
+# Research / audit / planning docs (not part of the addon)
+/OGC_CUDA_Audit_Report.md
+/REFACTORING_PLAN.md
+
+# Runtime caches and regression baselines
+/gpucloth_cache/
+/tests/baselines/
+
+# Local tooling Code session artifacts
+/src/.local-tooling/
