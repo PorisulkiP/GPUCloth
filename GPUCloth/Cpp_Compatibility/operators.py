@@ -1308,6 +1308,280 @@ class GPUCloth_ExportUSD(bpy.types.Operator):
 
 
 # ===========================================================================
+#  Test scene operators
+# ===========================================================================
+
+import bmesh
+import math
+
+
+def _make_grid_mesh(name, nx, ny, half_size, height, pin_corners=False):
+    """Create a subdivided grid mesh and return (obj, mesh_data)."""
+    mesh_data = bpy.data.meshes.new(name + "_mesh")
+    obj = bpy.data.objects.new(name, mesh_data)
+    bpy.context.collection.objects.link(obj)
+
+    sx = nx + 1
+    sy = ny + 1
+    verts = []
+    for row in range(sy):
+        for col in range(sx):
+            x = -half_size + 2.0 * half_size * col / nx
+            y = -half_size + 2.0 * half_size * row / ny
+            verts.append((x, y, height))
+
+    faces = []
+    for row in range(ny):
+        for col in range(nx):
+            i = row * sx + col
+            faces.append((i, i + 1, i + sx + 1, i + sx))
+
+    mesh_data.from_pydata(verts, [], faces)
+    mesh_data.update()
+
+    if pin_corners:
+        for v in obj.data.vertices:
+            pinned = False
+            if (abs(v.co.x - (-half_size)) < 0.01 and abs(v.co.y - half_size) < 0.01):
+                pinned = True
+            if (abs(v.co.x - half_size) < 0.01 and abs(v.co.y - half_size) < 0.01):
+                pinned = True
+            if pinned:
+                v.co.z += 0.0
+        mesh_data.update()
+
+    return obj, mesh_data
+
+
+def _make_uv_sphere(name, radius, cx, cy, cz, rings=10, sectors=12):
+    """Create a UV sphere collision object and return it."""
+    mesh_data = bpy.data.meshes.new(name + "_mesh")
+    obj = bpy.data.objects.new(name, mesh_data)
+    bpy.context.collection.objects.link(obj)
+
+    bm = bmesh.new()
+    segs_loop = sectors
+    segs_ring = rings
+    import math
+    for i in range(segs_ring + 1):
+        phi = math.pi * i / segs_ring
+        for j in range(segs_loop + 1):
+            theta = 2.0 * math.pi * j / segs_loop
+            x = cx + radius * math.sin(phi) * math.cos(theta)
+            y = cy + radius * math.sin(phi) * math.sin(theta)
+            z = cz + radius * math.cos(phi)
+            bm.verts.new((x, y, z))
+
+    bm.verts.ensure_lookup_table()
+    w = segs_loop + 1
+    for i in range(segs_ring):
+        for j in range(segs_loop):
+            a = i * w + j
+            b = i * w + j + 1
+            c = (i + 1) * w + j + 1
+            d = (i + 1) * w + j
+            bm.faces.new([bm.verts[a], bm.verts[b], bm.verts[c], bm.verts[d]])
+    bm.to_mesh(mesh_data)
+    bm.free()
+    mesh_data.update()
+    return obj
+
+
+def _make_cylinder_floor(name, radius, half_len, cx, cy, cz, floor_z, floor_half):
+    """Create a cylinder + floor collision object."""
+    mesh_data = bpy.data.meshes.new(name + "_mesh")
+    obj = bpy.data.objects.new(name, mesh_data)
+    bpy.context.collection.objects.link(obj)
+
+    verts = []
+    rings = 20
+    stacks = 10
+    for s in range(stacks + 1):
+        y = cy - half_len + 2.0 * half_len * s / stacks
+        for r in range(rings + 1):
+            theta = 2.0 * math.pi * r / rings
+            verts.append((cx + radius * math.cos(theta), y, cz + radius * math.sin(theta)))
+    fh = floor_half
+    verts.append((-fh, -fh, floor_z))
+    verts.append((fh, -fh, floor_z))
+    verts.append((fh, fh, floor_z))
+    verts.append((-fh, fh, floor_z))
+
+    faces = []
+    w = rings + 1
+    for s in range(stacks):
+        for r in range(rings):
+            a = s * w + r
+            b = s * w + r + 1
+            c = (s + 1) * w + r + 1
+            d = (s + 1) * w + r
+            faces.append((a, c, b))
+            faces.append((b, c, d))
+    body_verts = len(verts) - 4
+    f0, f1, f2, f3 = body_verts, body_verts + 1, body_verts + 2, body_verts + 3
+    faces.append((f0, f1, f2))
+    faces.append((f0, f2, f3))
+
+    mesh_data.from_pydata(verts, [], faces)
+    mesh_data.update()
+    return obj
+
+
+def _make_cushion_mesh(name, nx, ny, half_size, init_z, sep, dome_height):
+    """Create a two-sheet cushion mesh."""
+    mesh_data = bpy.data.meshes.new(name + "_mesh")
+    obj = bpy.data.objects.new(name, mesh_data)
+    bpy.context.collection.objects.link(obj)
+
+    sx = nx + 1
+    sy = ny + 1
+    verts = []
+    for sh in range(2):
+        for row in range(sy):
+            for col in range(sx):
+                x = -half_size + 2.0 * half_size * col / nx
+                y = -half_size + 2.0 * half_size * row / ny
+                pu = col / nx
+                pv = row / ny
+                dome = math.sin(math.pi * pu) * math.sin(math.pi * pv) * dome_height
+                z = (init_z - sep * 0.5 - dome) if sh == 0 else (init_z + sep * 0.5 + dome)
+                verts.append((x, y, z))
+
+    faces = []
+    for sh in range(2):
+        base = sh * sx * sy
+        for row in range(ny):
+            for col in range(nx):
+                i = base + row * sx + col
+                faces.append((i, i + 1, i + sx + 1, i + sx))
+
+    mesh_data.from_pydata(verts, [], faces)
+    mesh_data.update()
+    return obj
+
+
+def _setup_cloth(obj, solver='XPBD', material='COTTON'):
+    """Enable GPUCloth on object with given solver and material preset."""
+    obj.GPUCloth.is_active = True
+    obj.GPUCloth.solver_type = solver
+    obj.GPUCloth.material_preset = material
+
+
+class GPUCloth_TestDrapeOnSphere(bpy.types.Operator):
+    """Create DrapeOnSphere test scene: cloth pinned at top, draped over sphere"""
+    bl_idname = "gpucloth.test_drape_on_sphere"
+    bl_label = "Drape On Sphere"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        bpy.ops.object.select_all(action='DESELECT')
+
+        cloth_obj, _ = _make_grid_mesh("DrapeCloth", 64, 64, 3.0, 4.0)
+        sphere_obj = _make_uv_sphere("CollisionSphere", 1.8, 0.0, 0.0, 0.5)
+
+        col_mod = sphere_obj.modifiers.new(name="Collision", type='COLLISION')
+
+        bpy.context.view_layer.objects.active = cloth_obj
+        cloth_obj.select_set(True)
+
+        _setup_cloth(cloth_obj, solver='XPBD', material='COTTON')
+
+        context.scene.gpu_cloth_helper.gravity_z = -9.81
+
+        self.report({'INFO'}, "DrapeOnSphere test scene created")
+        return {'FINISHED'}
+
+
+class GPUCloth_TestTwist(bpy.types.Operator):
+    """Create TwistTest scene: cloth pinned at top corners"""
+    bl_idname = "gpucloth.test_twist"
+    bl_label = "Twist Test"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        bpy.ops.object.select_all(action='DESELECT')
+
+        cloth_obj, _ = _make_grid_mesh("TwistCloth", 64, 64, 3.0, 0.0)
+
+        bpy.context.view_layer.objects.active = cloth_obj
+        cloth_obj.select_set(True)
+
+        _setup_cloth(cloth_obj, solver='XPBD', material='COTTON')
+
+        context.scene.gpu_cloth_helper.gravity_x = 0.0
+        context.scene.gpu_cloth_helper.gravity_y = 0.0
+        context.scene.gpu_cloth_helper.gravity_z = 0.0
+
+        self.report({'INFO'}, "TwistTest scene created")
+        return {'FINISHED'}
+
+
+class GPUCloth_TestMultiLayerDrop(bpy.types.Operator):
+    """Create MultiLayerDrop scene: multiple cloth layers falling on cylinder"""
+    bl_idname = "gpucloth.test_multi_layer_drop"
+    bl_label = "Multi Layer Drop"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        bpy.ops.object.select_all(action='DESELECT')
+
+        cloth_obj, _ = _make_grid_mesh("MultiLayerCloth", 64, 64, 3.0, 4.0)
+        collision_obj = _make_cylinder_floor(
+            "CollisionCylinder",
+            1.5, 4.5, 0.0, 0.0, 0.3, -2.0, 12.0)
+
+        col_mod = collision_obj.modifiers.new(name="Collision", type='COLLISION')
+
+        bpy.context.view_layer.objects.active = cloth_obj
+        cloth_obj.select_set(True)
+
+        _setup_cloth(cloth_obj, solver='OGC', material='COTTON')
+        cloth_obj.GPUCloth.use_self_collision = True
+        cloth_obj.GPUCloth.ogc_radius = 150.0
+        cloth_obj.GPUCloth.ogc_friction = 0.3
+
+        context.scene.gpu_cloth_helper.gravity_z = -9.81
+
+        self.report({'INFO'}, "MultiLayerDrop test scene created")
+        return {'FINISHED'}
+
+
+class GPUCloth_TestCushionDrop(bpy.types.Operator):
+    """Create CushionDrop scene: two-layer cushion falling on floor"""
+    bl_idname = "gpucloth.test_cushion_drop"
+    bl_label = "Cushion Drop"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        bpy.ops.object.select_all(action='DESELECT')
+
+        init_z = -2.0 + 3.0 * 0.25 + 0.02 * 0.5 + 2.0
+        cushion_obj = _make_cushion_mesh(
+            "CushionCloth", 32, 32, 3.0, init_z, 0.02, 3.0 * 0.25)
+
+        floor_mesh = bpy.data.meshes.new("Floor_mesh")
+        floor_obj = bpy.data.objects.new("Floor", floor_mesh)
+        bpy.context.collection.objects.link(floor_obj)
+        fh = 12.0
+        fz = -2.0
+        floor_verts = [(-fh, -fh, fz), (fh, -fh, fz), (fh, fh, fz), (-fh, fh, fz)]
+        floor_faces = [(0, 1, 2, 3)]
+        floor_mesh.from_pydata(floor_verts, [], floor_faces)
+        floor_mesh.update()
+        col_mod = floor_obj.modifiers.new(name="Collision", type='COLLISION')
+
+        bpy.context.view_layer.objects.active = cushion_obj
+        cushion_obj.select_set(True)
+
+        _setup_cloth(cushion_obj, solver='XPBD', material='COTTON')
+
+        context.scene.gpu_cloth_helper.gravity_z = -9.81
+
+        self.report({'INFO'}, "CushionDrop test scene created")
+        return {'FINISHED'}
+
+
+# ===========================================================================
 #  Регистрация
 # ===========================================================================
 
@@ -1321,6 +1595,10 @@ _OPERATOR_CLASSES = [
     GPUCloth_FreeCache,
     GPUCloth_ExportAlembic,
     GPUCloth_ExportUSD,
+    GPUCloth_TestDrapeOnSphere,
+    GPUCloth_TestTwist,
+    GPUCloth_TestMultiLayerDrop,
+    GPUCloth_TestCushionDrop,
 ]
 
 

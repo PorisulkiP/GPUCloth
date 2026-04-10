@@ -29,6 +29,14 @@ from ..utils import version_compatibility_utils as vcu
 from ..utils.version_compatibility_utils import _t
 
 
+def _on_is_active_change(self, context):
+    if self.is_active:
+        from . import operators as ops
+        if ops.g_dll is None:
+            loader = ops.GPUCloth_LoadDLL()
+            loader.load_dll()
+
+
 # ===========================================================================
 #  Материальные пресеты — значения параметров ткани для каждого солвера
 # ===========================================================================
@@ -290,6 +298,7 @@ class GPUClothObjectSettings(PropertyGroup):
         name="Enable GPUCloth",
         description="Simulate this object as GPU cloth",
         default=False,
+        update=_on_is_active_change,
     )
 
     vertex_mass: FloatProperty(

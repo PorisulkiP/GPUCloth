@@ -87,6 +87,21 @@ class GPUCLOTH_PT_main(bpy.types.Panel):
                         "Симуляция не инициализирована"),
                 icon='ERROR')
 
+        # ── Test scenes ────────────────────────────────────────────────────
+        layout.separator()
+        box = layout.box()
+        box.label(text=_t("Test Scenes", "Тестовые сцены"),
+                  icon='EXPERIMENTAL')
+        col = box.column(align=True)
+        col.operator("gpucloth.test_drape_on_sphere",
+                     text=_t("Drape On Sphere", "Драпировка на сфере"))
+        col.operator("gpucloth.test_twist",
+                     text=_t("Twist Test", "Тест скручивания"))
+        col.operator("gpucloth.test_multi_layer_drop",
+                     text=_t("Multi Layer Drop", "Многослойное падение"))
+        col.operator("gpucloth.test_cushion_drop",
+                     text=_t("Cushion Drop", "Падение подушки"))
+
 
 # ===========================================================================
 #  Sub-panel: Solver
