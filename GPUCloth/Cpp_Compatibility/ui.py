@@ -101,6 +101,9 @@ class GPUCLOTH_PT_main(bpy.types.Panel):
                      text=_t("Multi Layer Drop", "Многослойное падение"))
         col.operator("gpucloth.test_cushion_drop",
                      text=_t("Cushion Drop", "Падение подушки"))
+        col.operator("gpucloth.test_ogc_bounds",
+                     text=_t("OGC Bounds Viz", "OGC: визуализация границ"),
+                     icon='SPHERE')
 
 
 # ===========================================================================
@@ -191,6 +194,53 @@ class GPUCLOTH_PT_material(bpy.types.Panel):
         col.prop(s, "compression_damp", text=_t("Compression", "Сжатие"))
         col.prop(s, "shear_damp",       text=_t("Shear",       "Сдвиг"))
         col.prop(s, "bending_damping",  text=_t("Bending",     "Изгиб"))
+
+
+# ===========================================================================
+#  Sub-panel: Self-Collision (OGC)
+# ===========================================================================
+
+class GPUCLOTH_PT_collision(bpy.types.Panel):
+    bl_label       = "Self-Collision (OGC)"
+    bl_idname      = "GPUCLOTH_PT_collision"
+    bl_parent_id   = "GPUCLOTH_PT_main"
+    bl_space_type  = 'PROPERTIES'
+    bl_region_type = 'WINDOW'
+    bl_context     = "physics"
+    bl_options     = {'DEFAULT_CLOSED'}
+
+    @classmethod
+    def poll(cls, context):
+        return (
+            context.object is not None
+            and context.object.type == 'MESH'
+            and hasattr(context.object, 'GPUCloth')
+            and context.object.GPUCloth.is_active
+        )
+
+    def draw_header(self, context):
+        self.layout.prop(context.object.GPUCloth, "use_self_collision", text="")
+
+    def draw(self, context):
+        layout = self.layout
+        s      = context.object.GPUCloth
+        layout.active = s.use_self_collision
+
+        col = layout.column(align=True)
+        col.prop(s, "ogc_radius")
+        col.prop(s, "ogc_kc")
+        col.prop(s, "ogc_friction")
+        col.prop(s, "ogc_gamma_p")
+
+        layout.separator()
+
+        row = layout.row()
+        row.prop(
+            s, "show_ogc_bounds",
+            text=_t("Show Contact Bounds", "Показать границы коллизии"),
+            toggle=True,
+            icon='SPHERE',
+        )
 
 
 # ===========================================================================
@@ -341,6 +391,7 @@ _PANEL_CLASSES = [
     GPUCLOTH_PT_main,
     GPUCLOTH_PT_solver,
     GPUCLOTH_PT_material,
+    GPUCLOTH_PT_collision,
     GPUCLOTH_PT_proxy,
     GPUCLOTH_PT_cache,
 ]

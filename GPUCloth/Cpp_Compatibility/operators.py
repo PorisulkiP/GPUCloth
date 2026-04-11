@@ -15,6 +15,7 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import bpy
+import math
 import os
 import sys
 import subprocess
@@ -1312,7 +1313,6 @@ class GPUCloth_ExportUSD(bpy.types.Operator):
 # ===========================================================================
 
 import bmesh
-import math
 
 
 def _make_grid_mesh(name, nx, ny, half_size, height, pin_corners=False):
@@ -1581,6 +1581,131 @@ class GPUCloth_TestCushionDrop(bpy.types.Operator):
         return {'FINISHED'}
 
 
+class GPUCloth_TestOGCBounds(bpy.types.Operator):
+    """Create OGC Bounds test scene: two cloth sheets with self-collision and contact-bounds visualisation"""
+    bl_idname = "gpucloth.test_ogc_bounds"
+    bl_label  = "OGC Bounds Viz"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        bpy.ops.object.select_all(action='DESELECT')
+
+        # Two horizontal cloth sheets stacked 60 mm apart so they collide
+        upper, _ = _make_grid_mesh("OGCCloth_Upper", 32, 32, 1.5,  0.06)
+        lower, _ = _make_grid_mesh("OGCCloth_Lower", 32, 32, 1.5, -0.06)
+
+        # Activate OGC on the upper sheet, show bounds immediately
+        bpy.context.view_layer.objects.active = upper
+        upper.select_set(True)
+        _setup_cloth(upper, solver='OGC', material='COTTON')
+        upper.GPUCloth.use_self_collision = True
+        upper.GPUCloth.ogc_radius         = 150.0
+        upper.GPUCloth.ogc_friction       = 0.3
+        upper.GPUCloth.show_ogc_bounds    = True
+
+        # Activate OGC on the lower sheet as well
+        lower.select_set(True)
+        bpy.context.view_layer.objects.active = lower
+        _setup_cloth(lower, solver='OGC', material='COTTON')
+        lower.GPUCloth.use_self_collision = True
+        lower.GPUCloth.ogc_radius         = 150.0
+        lower.GPUCloth.ogc_friction       = 0.3
+        lower.GPUCloth.show_ogc_bounds    = True
+
+        context.scene.gpu_cloth_helper.gravity_z = -9.81
+
+        bpy.context.view_layer.objects.active = upper
+        self.report({'INFO'}, "OGC Bounds Viz scene created")
+        return {'FINISHED'}
+
+
+# ===========================================================================
+#  OGC contact-bounds visualiser (SpaceView3D draw callback)
+# ===========================================================================
+
+_ogc_draw_handle = None
+
+
+def _ogc_bounds_draw():
+    """
+    Draw two axis-aligned circles (XY, XZ) of radius=ogc_radius around every
+    cloth vertex to visualise the OGC contact-offset sphere.
+
+    Called by Blender for every viewport redraw; skips silently when no cloth
+    object has show_ogc_bounds=True or self-collision is disabled.
+    """
+    try:
+        import gpu
+        from gpu_extras.batch import batch_for_shader
+    except ImportError:
+        return
+
+    for cloth_obj in g_clothOBJs:
+        if cloth_obj is None:
+            continue
+        s = getattr(cloth_obj, 'GPUCloth', None)
+        if s is None or not s.show_ogc_bounds or not s.use_self_collision:
+            continue
+
+        radius = s.ogc_radius * 0.001  # mm → m
+        mesh   = cloth_obj.data
+        nv     = len(mesh.vertices)
+        if nv == 0:
+            continue
+
+        # Fast bulk position readback (avoids per-vertex Python overhead)
+        co = np.empty(nv * 3, dtype=np.float32)
+        mesh.vertices.foreach_get('co', co)
+        co = co.reshape(nv, 3)  # (nv, 3)
+
+        SEGS = 16
+        a    = np.linspace(0.0, 2.0 * math.pi, SEGS, endpoint=False, dtype=np.float32)
+        ca   = np.cos(a)  # (SEGS,)
+        sa   = np.sin(a)
+
+        i0 = np.arange(SEGS)
+        i1 = (i0 + 1) % SEGS
+
+        # ── XY circle  (cx + r·cos, cy + r·sin, cz) ──────────────────────
+        xy_x = co[:, 0:1]  # (nv,1)
+        xy_y = co[:, 1:2]
+        xy_z = np.repeat(co[:, 2:3], SEGS, axis=1)  # (nv, SEGS)
+
+        p0_xy = np.stack([xy_x + radius * ca[i0],
+                           xy_y + radius * sa[i0],
+                           xy_z], axis=-1)  # (nv, SEGS, 3)
+        p1_xy = np.stack([xy_x + radius * ca[i1],
+                           xy_y + radius * sa[i1],
+                           xy_z], axis=-1)
+
+        # ── XZ circle  (cx + r·cos, cy, cz + r·sin) ──────────────────────
+        xz_x = co[:, 0:1]
+        xz_y = np.repeat(co[:, 1:2], SEGS, axis=1)  # (nv, SEGS)
+        xz_z = co[:, 2:3]
+
+        p0_xz = np.stack([xz_x + radius * ca[i0],
+                           xz_y,
+                           xz_z + radius * sa[i0]], axis=-1)
+        p1_xz = np.stack([xz_x + radius * ca[i1],
+                           xz_y,
+                           xz_z + radius * sa[i1]], axis=-1)
+
+        # Interleave p0/p1 into line-segment pairs: (nv, SEGS, 2, 3)→(N, 3)
+        pts_xy = np.stack([p0_xy, p1_xy], axis=2).reshape(-1, 3)
+        pts_xz = np.stack([p0_xz, p1_xz], axis=2).reshape(-1, 3)
+        pts    = np.concatenate([pts_xy, pts_xz], axis=0)  # (nv*SEGS*4, 3)
+
+        shader = gpu.shader.from_builtin('UNIFORM_COLOR')
+        batch  = batch_for_shader(shader, 'LINES', {"pos": pts})
+
+        gpu.state.blend_set('ALPHA')
+        gpu.state.line_width_set(1.0)
+        shader.bind()
+        shader.uniform_float("color", (0.15, 0.90, 0.35, 0.40))
+        batch.draw(shader)
+        gpu.state.blend_set('NONE')
+
+
 # ===========================================================================
 #  Регистрация
 # ===========================================================================
@@ -1599,6 +1724,7 @@ _OPERATOR_CLASSES = [
     GPUCloth_TestTwist,
     GPUCloth_TestMultiLayerDrop,
     GPUCloth_TestCushionDrop,
+    GPUCloth_TestOGCBounds,
 ]
 
 
@@ -1624,8 +1750,19 @@ def register():
     if _frame_change_handler not in bpy.app.handlers.frame_change_post:
         bpy.app.handlers.frame_change_post.append(_frame_change_handler)
 
+    # OGC contact-bounds visualiser — register once, draw callback checks flag
+    global _ogc_draw_handle
+    if _ogc_draw_handle is None:
+        _ogc_draw_handle = bpy.types.SpaceView3D.draw_handler_add(
+            _ogc_bounds_draw, (), 'WINDOW', 'POST_VIEW')
+
 
 def unregister():
+    global _ogc_draw_handle
+    if _ogc_draw_handle is not None:
+        bpy.types.SpaceView3D.draw_handler_remove(_ogc_draw_handle, 'WINDOW')
+        _ogc_draw_handle = None
+
     if _frame_change_handler in bpy.app.handlers.frame_change_post:
         bpy.app.handlers.frame_change_post.remove(_frame_change_handler)
 

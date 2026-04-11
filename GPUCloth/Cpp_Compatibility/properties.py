@@ -456,6 +456,12 @@ class GPUClothObjectSettings(PropertyGroup):
         max=0.49,
     )
 
+    show_ogc_bounds: BoolProperty(
+        name="Show Contact Bounds",
+        description="Draw OGC contact-radius spheres at each cloth vertex in the 3D viewport (two axis-aligned circles per vertex)",
+        default=False,
+    )
+
     # ── Proxy-res simulation ──────────────────────────────────────────────
     use_proxy: BoolProperty(
         name="Proxy Simulation",
