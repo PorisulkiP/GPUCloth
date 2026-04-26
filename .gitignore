@@ -174,3 +174,16 @@ softBody/
 
 # Local tooling Code session artifacts
 /src/.local-tooling/
+/.local-tooling/
+
+# Research paper PDFs (large binaries, kept locally; .md notes are committed)
+/Исследования/*.pdf
+
+# Optimizer automation transcripts (local-only)
+/optimizer/optimizer/results/automation_logs/
+
+# Audit / scratch tmp dirs
+/tmp/audit/
+/tmp/test_ccd*.py
+/tmp/run_nvcc.py
+/tmp/nvcc_ogc.bat
