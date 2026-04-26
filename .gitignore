@@ -157,6 +157,7 @@ softBody/
 /src/engine/source/Debug/
 /src/engine/source/Release/
 /src/engine/source/packages/
+/tools/nuget.exe
 
 # Built binaries (the addon dll is shipped from a release pipeline, not git)
 *.dll
