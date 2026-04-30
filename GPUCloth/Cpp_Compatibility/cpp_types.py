@@ -251,6 +251,27 @@ class EffectorWeights(Structure):
         self.weight = (c_float * 14)(*([0] * 14))
         self.global_gravity = c_float(0)
 
+MAX_EFFECTORS = 256
+
+class GPUEffector(Structure):
+    _fields_ = [
+        ("type", c_int),
+        ("strength", c_float),
+        ("flow", c_float),
+        ("maxdist", c_float),
+        ("mindist", c_float),
+        ("f_power", c_float),
+        ("f_noise", c_float),
+        ("f_damp", c_float),
+        ("f_size", c_float),
+        ("seed", c_int),
+        ("falloff_type", c_int),
+        ("shape_type", c_int),
+        ("zdir", c_int),
+        ("obmat", c_float * 16),
+        ("imat", c_float * 16),
+    ]
+
 class fmatrix3x3(Structure):
     _fields_ = [
         ("m", c_float * 3 * 3),  # 3x3 matrix

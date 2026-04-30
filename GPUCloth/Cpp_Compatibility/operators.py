@@ -54,6 +54,122 @@ _collision_keepalive  = []     # prevent GC of collision ctypes data
 # C++ пишет в фоне — массив должен жить до завершения записи
 _live_arrays         = []     # list[c_float array]
 
+# Keepalive for effectors ctypes array
+_effectors_keepalive = None
+
+# ─── Effector helpers ──────────────────────────────────────────────────────
+
+def _make_effector_weights(ew):
+    """Convert Blender GPUClothEffectorWeights PropertyGroup to ctypes float[15]."""
+    w = (c_float * 15)()
+    w[0]  = ew.weight_gravity
+    w[1]  = ew.weight_wind
+    w[2]  = ew.weight_vortex
+    w[3]  = ew.weight_magnetic
+    w[4]  = ew.weight_turbulence
+    w[5]  = ew.weight_drag
+    w[6]  = ew.weight_smoke_flow
+    w[7]  = ew.weight_harmonic
+    w[8]  = ew.weight_charge
+    w[9]  = ew.weight_lennard_jones
+    w[10] = ew.weight_texture
+    w[11] = ew.weight_curve_guide
+    w[12] = ew.weight_boid
+    w[13] = ew.weight_fluid
+    w[14] = ew.global_gravity
+    return w
+
+
+def _upload_effectors(operator, context, dll):
+    """
+    Scan Blender scene for objects with force field (FIELD type empties).
+    Build GPUEffector array and upload via SIM_set_effectors.
+    """
+    global _effectors_keepalive
+
+    cloth_settings = None
+    for obj in g_clothOBJs:
+        if hasattr(obj, 'GPUCloth'):
+            cloth_settings = obj.GPUCloth
+            break
+
+    if cloth_settings is None:
+        dll.SIM_set_effectors(None, 0, (c_float * 15)(*([0.0]*15)))
+        return
+
+    effectors = []
+    for obj in context.scene.objects:
+        if not obj or obj.type != 'EMPTY':
+            continue
+        if not obj.field or obj.field.type == 'NONE':
+            continue
+
+        fd = obj.field
+        mw = obj.matrix_world
+        imw = mw.inverted_safe()
+
+        ef = CType.GPUEffector()
+        ef.maxdist = fd.distance_max if fd.use_max_distance else 0.0
+        ef.mindist = fd.distance_min if fd.use_min_distance else 0.0
+        ef.f_power = fd.falloff_power
+        ef.f_noise = fd.noise
+        ef.seed = fd.seed
+        ef.f_size = fd.size
+        ef.f_damp = 0.0  # not directly exposed in Blender field settings
+
+        # Map Blender field type to PFIELD enum
+        _FIELD_TYPE_MAP = {
+            'FORCE': 1,           # PFIELD_FORCE
+            'WIND': 4,            # PFIELD_WIND
+            'VORTEX': 2,          # PFIELD_VORTEX
+            'MAGNET': 3,          # PFIELD_MAGNET
+            'HARMONIC': 7,        # PFIELD_HARMONIC
+            'CHARGE': 8,          # PFIELD_CHARGE
+            'LENNARDJ': 9,        # PFIELD_LENNARDJ
+            'TURBULENCE': 11,     # PFIELD_TURBULENCE
+            'DRAG': 12,           # PFIELD_DRAG
+            'TEXTURE': 6,         # PFIELD_TEXTURE
+            'GUIDE': 5,           # PFIELD_GUIDE
+            'FLUID': 13,          # PFIELD_FLUIDFLOW
+            'BOID': 10,           # PFIELD_BOID
+        }
+        ef.type = _FIELD_TYPE_MAP.get(fd.type, 0)
+        if ef.type == 0:
+            continue  # skip unsupported types
+
+        ef.strength = fd.strength
+        ef.flow = fd.flow
+
+        # falloff type
+        ef.falloff_type = {'SPHERE': 0, 'TUBE': 1, 'CONE': 2}.get(fd.falloff_type, 0)
+        ef.shape_type = {'POINT': 0, 'PLANE': 1, 'SURFACE': 2, 'POINTS': 3, 'LINE': 4}.get(fd.shape, 0)
+        ef.zdir = {'BOTH': 0, 'POSITIVE': 1, 'NEGATIVE': 2}.get(fd.z_direction, 0)
+
+        # world matrix (column-major flat)
+        for col in range(4):
+            for row in range(4):
+                ef.obmat[col * 4 + row] = mw[row][col]
+        # inverse world matrix (column-major flat)
+        for col in range(4):
+            for row in range(4):
+                ef.imat[col * 4 + row] = imw[row][col]
+
+        effectors.append(ef)
+
+    num_effectors = len(effectors)
+    if num_effectors > CType.MAX_EFFECTORS:
+        num_effectors = CType.MAX_EFFECTORS
+        effectors = effectors[:CType.MAX_EFFECTORS]
+
+    # Build ctypes array
+    if num_effectors > 0:
+        eff_array = (CType.GPUEffector * num_effectors)(*effectors)
+        _effectors_keepalive = eff_array
+        weights_arr = _make_effector_weights(cloth_settings.effector_weights)
+        dll.SIM_set_effectors(eff_array, num_effectors, weights_arr)
+    else:
+        dll.SIM_set_effectors(None, 0, (c_float * 15)(*([0.0]*15)))
+
 _cache_playback_guard  = {'active': False}
 _initial_positions     = []     # list[np.ndarray] — rest positions per cloth object
 _bake_range            = {'start': 1, 'end': 250}
@@ -291,6 +407,14 @@ class GPUCloth_LoadDLL(bpy.types.Operator):
 
             g_dll.UpdateScene.argtypes = [POINTER(CType.Scene)]
             g_dll.UpdateScene.restype  = c_bool
+
+            # ── Effector fields ──────────────────────────────────────────
+            g_dll.SIM_set_effectors.argtypes = [
+                POINTER(CType.GPUEffector),
+                c_int,
+                POINTER(c_float),
+            ]
+            g_dll.SIM_set_effectors.restype = c_bool
 
             # ── Readback позиций вершин ──────────────────────────────────────
             #
@@ -817,7 +941,7 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
         # 7. Загружаем сцену на GPU
         self.fill_Scene(context)
 
-        for coll_ptr in g_clothCollisionOBJs:
+            for coll_ptr in g_clothCollisionOBJs:
             try:
                 if not g_dll.AddCollisionObject(coll_ptr):
                     self.report({'ERROR'}, "Ошибка AddCollisionObject")
@@ -825,6 +949,9 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
             except OSError:
                 self.report({'ERROR'}, "OSError в AddCollisionObject")
                 return {'CANCELLED'}
+
+        # 7.5. Scan scene for force field effectors
+        _upload_effectors(self, context, g_dll)
 
         if not g_dll.FillSolverData(g_scene):
             self.report({'ERROR'}, "FillSolverData вернул ошибку")
