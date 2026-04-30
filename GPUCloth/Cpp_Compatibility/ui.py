@@ -781,6 +781,59 @@ class GPUCLOTH_PT_constraint_network(bpy.types.Panel):
 
 
 # ===========================================================================
+#  Sub-panel: Advanced Solver
+# ===========================================================================
+
+class GPUCLOTH_PT_solver_advanced(bpy.types.Panel):
+    bl_label       = "Advanced Solver"
+    bl_idname      = "GPUCLOTH_PT_solver_advanced"
+    bl_parent_id   = "GPUCLOTH_PT_main"
+    bl_space_type  = 'PROPERTIES'
+    bl_region_type = 'WINDOW'
+    bl_context     = "physics"
+    bl_options     = {'DEFAULT_CLOSED'}
+
+    @classmethod
+    def poll(cls, context):
+        return (
+            context.object is not None
+            and context.object.type == 'MESH'
+            and hasattr(context.object, 'GPUCloth')
+            and context.object.GPUCloth.is_active
+        )
+
+    def draw(self, context):
+        layout = self.layout
+        s      = context.object.GPUCloth
+        layout.use_property_split = True
+
+        col = layout.column(align=True)
+        col.prop(s, "solver_iterations")
+        col.prop(s, "solver_omega")
+        col.prop(s, "use_small_steps")
+
+        layout.separator()
+        box = layout.box()
+        box.label(text="Adaptive Convergence (Mil2/PD)")
+        box.prop(s, "use_adaptive")
+        sub = box.column()
+        sub.active = s.use_adaptive
+        sub.prop(s, "solver_max_iterations")
+        sub.prop(s, "solver_convergence_tol")
+
+        layout.separator()
+        box = layout.box()
+        box.label(text="Per-Type Budget (XPBD only)")
+        box.prop(s, "use_per_type_budget")
+        sub = box.column()
+        sub.active = s.use_per_type_budget
+        sub.prop(s, "ptb_stretch")
+        sub.prop(s, "ptb_bending")
+        sub.prop(s, "ptb_shear")
+        sub.prop(s, "ptb_seam")
+
+
+# ===========================================================================
 #  Registration
 # ===========================================================================
 
@@ -789,6 +842,7 @@ _PANEL_CLASSES = [
     GPUCLOTH_PT_solver,
     GPUCLOTH_PT_material,
     GPUCLOTH_PT_physical,
+    GPUCLOTH_PT_solver_advanced,
     GPUCLOTH_PT_internal_springs,
     GPUCLOTH_PT_pressure,
     GPUCLOTH_PT_shape,

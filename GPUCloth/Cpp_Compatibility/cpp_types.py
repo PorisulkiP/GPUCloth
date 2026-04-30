@@ -360,6 +360,20 @@ class ClothSimSettings(Structure):
             ("cn_zipper_stiffness", c_float),
             ("cn_dart_stiffness", c_float),
             ("cn_enable_selfcoll_stitching", c_short),
+            ("solver_substeps", c_short),
+            ("solver_iterations", c_short),
+            ("solver_omega", c_float),
+            ("solver_drag", c_float),
+            ("solver_vel_damp", c_float),
+            ("solver_small_steps", c_short),
+            ("solver_adaptive", c_short),
+            ("solver_max_iterations", c_short),
+            ("solver_convergence_tol", c_float),
+            ("solver_ptb_stretch", c_short),
+            ("solver_ptb_bending", c_short),
+            ("solver_ptb_shear", c_short),
+            ("solver_ptb_seam", c_short),
+            ("solver_use_pt_budget", c_short),
             ("_pad_cn", c_short)
 ]
 

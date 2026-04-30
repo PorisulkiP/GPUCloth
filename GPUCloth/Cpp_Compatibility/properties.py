@@ -647,6 +647,62 @@ class GPUClothObjectSettings(PropertyGroup):
         max=500.0,
     )
 
+    # ── Advanced Solver Config ──────────────────────────────────────────────
+    solver_iterations: IntProperty(
+        name="Iterations",
+        description="XPBD/PD/Mil2 iterations per substep",
+        default=10, min=1, max=200,
+    )
+
+    solver_omega: FloatProperty(
+        name="Chebyshev ω",
+        description="Chebyshev acceleration omega (1.0 = off, 1.5 = default)",
+        default=1.5, min=0.5, max=2.0,
+    )
+
+    use_small_steps: BoolProperty(
+        name="Small Steps",
+        description="XPBD: combine substeps×iterations into single-iteration small steps",
+        default=False,
+    )
+
+    use_adaptive: BoolProperty(
+        name="Adaptive Convergence",
+        description="Early exit when position change < tolerance (Mil2/PD)",
+        default=False,
+    )
+
+    solver_max_iterations: IntProperty(
+        name="Max Iterations",
+        description="Safety cap for adaptive mode",
+        default=100, min=10, max=500,
+    )
+
+    solver_convergence_tol: FloatProperty(
+        name="Convergence Tol",
+        description="L∞ norm of position change (meters) for adaptive early exit",
+        default=0.001, min=0.0001, max=0.1, soft_max=0.01,
+    )
+
+    use_per_type_budget: BoolProperty(
+        name="Per-Type Budget",
+        description="XPBD: separate iteration count per constraint type",
+        default=False,
+    )
+
+    ptb_stretch: IntProperty(
+        name="Stretch Iter", default=10, min=1, max=100,
+    )
+    ptb_bending: IntProperty(
+        name="Bending Iter", default=5, min=1, max=100,
+    )
+    ptb_shear: IntProperty(
+        name="Shear Iter", default=5, min=1, max=100,
+    )
+    ptb_seam: IntProperty(
+        name="Seam Iter", default=20, min=1, max=100,
+    )
+
     vgroup_intern: StringProperty(
         name="Vertex Group",
         description="Vertex group for scaling internal spring stiffness",

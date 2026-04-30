@@ -690,6 +690,20 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
             gs.solver_type, CType.SOLVER_XPBD
         )
 
+        # ── Tuneable solver config ───────────────────────────────────────
+        sim_parms.solver_substeps     = 0
+        sim_parms.solver_iterations   = gs.solver_iterations
+        sim_parms.solver_omega        = gs.solver_omega
+        sim_parms.solver_small_steps  = 1 if gs.use_small_steps else 0
+        sim_parms.solver_adaptive     = 1 if gs.use_adaptive else 0
+        sim_parms.solver_max_iterations = gs.solver_max_iterations
+        sim_parms.solver_convergence_tol = gs.solver_convergence_tol
+        sim_parms.solver_ptb_stretch  = gs.ptb_stretch
+        sim_parms.solver_ptb_bending  = gs.ptb_bending
+        sim_parms.solver_ptb_shear    = gs.ptb_shear
+        sim_parms.solver_ptb_seam     = gs.ptb_seam
+        sim_parms.solver_use_pt_budget = 1 if gs.use_per_type_budget else 0
+
         clmd.sim_parms    = pointer(sim_parms)
         clmd.clothObject  = None
 
