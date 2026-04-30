@@ -589,70 +589,96 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
     def setClothModifierData(self, context, OBJ) -> POINTER(CType.ClothModifierData):
         clmd     = CType.ClothModifierData()
         sim_parms = CType.ClothSimSettings()
+        gs       = OBJ.GPUCloth
+        gs_scene = context.scene.gpu_cloth_helper
 
         # ── Базовые параметры ─────────────────────────────────────────────
         sim_parms.mingoal        = 0
         sim_parms.Cvi            = 1.0
-        sim_parms.Cdis           = 1.0
-        sim_parms.gravity[0]     = context.scene.gpu_cloth_helper.gravity_x
-        sim_parms.gravity[1]     = context.scene.gpu_cloth_helper.gravity_y
-        sim_parms.gravity[2]     = context.scene.gpu_cloth_helper.gravity_z
-        sim_parms.mass           = OBJ.GPUCloth.vertex_mass
-        sim_parms.structural     = 0
-        sim_parms.shear          = OBJ.GPUCloth.shear
-        sim_parms.bending        = OBJ.GPUCloth.bending_stiffness
-        sim_parms.vgroup_mass    = 0
-        sim_parms.stepsPerFrame  = OBJ.GPUCloth.quality_step
-        sim_parms.maxgoal        = 1.0
+        sim_parms.Cdis           = gs.air_viscosity
+        sim_parms.gravity[0]     = gs_scene.gravity_x
+        sim_parms.gravity[1]     = gs_scene.gravity_y
+        sim_parms.gravity[2]     = gs_scene.gravity_z
+        sim_parms.mass           = gs.vertex_mass
+        sim_parms.structural     = gs.structural
+        sim_parms.shear          = gs.shear
+        sim_parms.bending        = gs.bending_stiffness
+        sim_parms.vgroup_mass    = 0  # set via vertex group data injection
+        sim_parms.stepsPerFrame  = gs.quality_step
+        sim_parms.maxgoal        = gs.maxgoal
         sim_parms.velocity_smooth= 0.0
         sim_parms.collider_friction = 0.0
-        sim_parms.shrink_min     = 0.0
-        sim_parms.shrink_max     = 0.0
+        sim_parms.shrink_min     = gs.shrink_min
+        sim_parms.shrink_max     = gs.shrink_max
         sim_parms.vgroup_bend    = 0
         sim_parms.vgroup_struct  = 0
         sim_parms.vgroup_shear   = 0
         sim_parms.vgroup_shrink  = 0
-        sim_parms.bending_damping= OBJ.GPUCloth.bending_damping
+        sim_parms.bending_damping= gs.bending_damping
         sim_parms.voxel_cell_size= 0.1
-        sim_parms.tension        = OBJ.GPUCloth.tension
-        sim_parms.compression    = OBJ.GPUCloth.compression
-        sim_parms.tension_damp   = OBJ.GPUCloth.tension_damp
-        sim_parms.compression_damp = OBJ.GPUCloth.compression_damp
-        sim_parms.shear_damp     = OBJ.GPUCloth.shear_damp
-        sim_parms.internal_spring_max_length     = 10
-        sim_parms.internal_spring_max_diversion  = 0.7853981633974483  # pi/4
+        sim_parms.tension        = gs.tension
+        sim_parms.compression    = gs.compression
+        sim_parms.tension_damp   = gs.tension_damp
+        sim_parms.compression_damp = gs.compression_damp
+        sim_parms.shear_damp     = gs.shear_damp
+        sim_parms.max_tension    = gs.max_tension
+        sim_parms.max_compression = gs.max_compression
+        sim_parms.max_shear      = gs.max_shear
+        sim_parms.max_bend       = gs.max_bend
+        sim_parms.max_struct     = gs.max_struct
+        sim_parms.max_sewing     = gs.max_sewing
+        sim_parms.vel_damping    = gs.vel_damping
+
+        # ── Internal Springs ───────────────────────────────────────────────
+        sim_parms.internal_spring_max_length     = gs.internal_spring_max_length
+        sim_parms.internal_spring_max_diversion  = gs.internal_spring_max_diversion
         sim_parms.vgroup_intern  = 0
-        sim_parms.internal_tension     = 15.0
-        sim_parms.internal_compression = 15.0
-        sim_parms.max_internal_tension     = 15.0
-        sim_parms.max_internal_compression = 15.0
-        sim_parms.eff_force_scale  = 1000.0
-        sim_parms.eff_wind_scale   = 250.0
-        sim_parms.effector_weights = None
+        sim_parms.internal_tension     = gs.internal_tension
+        sim_parms.internal_compression = gs.internal_compression
+        sim_parms.max_internal_tension     = gs.max_internal_tension
+        sim_parms.max_internal_compression = gs.max_internal_compression
+
+        # ── Effector forces ────────────────────────────────────────────────
+        sim_parms.eff_force_scale  = gs.eff_force_scale
+        sim_parms.eff_wind_scale   = gs.eff_wind_scale
+        sim_parms.effector_weights = None  # allocated separately if needed
         sim_parms.reset            = 0
         sim_parms.presets          = 2
         sim_parms.shapekey_rest    = 0
-        sim_parms.fluid_density    = 0.0
-        sim_parms.pressure_factor  = 1.0
-        sim_parms.target_volume    = 0.0
-        sim_parms.uniform_pressure_force = 0.0
-        sim_parms.time_scale       = OBJ.GPUCloth.speed_multiplier
+
+        # ── Pressure ──────────────────────────────────────────────────────
+        sim_parms.fluid_density    = gs.fluid_density
+        sim_parms.pressure_factor  = gs.pressure_factor
+        sim_parms.target_volume    = gs.target_volume
+        sim_parms.uniform_pressure_force = gs.uniform_pressure_force
+
+        # ── Timing ────────────────────────────────────────────────────────
+        sim_parms.time_scale       = gs.speed_multiplier
         sim_parms.timescale        = 1.0
         sim_parms.dt               = 1
         sim_parms.avg_spring_len   = 0.0
-        sim_parms.goalfrict        = 0.0
-        sim_parms.goalspring       = 1.0
-        sim_parms.flags            = CType.CLOTH_SIMSETTINGS_FLAG_INTERNAL_SPRINGS_NORMAL
+        sim_parms.goalfrict        = gs.goalfrict
+        sim_parms.goalspring       = gs.goalspring
+
+        # ── Flags ─────────────────────────────────────────────────────────
+        sim_parms.flags = 0
+        if gs.use_internal_springs:
+            sim_parms.flags |= CType.CLOTH_SIMSETTINGS_FLAG_INTERNAL_SPRINGS
+        if gs.use_internal_springs_normal:
+            sim_parms.flags |= CType.CLOTH_SIMSETTINGS_FLAG_INTERNAL_SPRINGS_NORMAL
+        if gs.use_pressure:
+            sim_parms.flags |= CType.CLOTH_SIMSETTINGS_FLAG_PRESSURE
+        if gs.use_dynamic_mesh:
+            sim_parms.flags |= CType.CLOTH_SIMSETTINGS_FLAG_DYNAMIC_MESH
 
         # Модель изгиба
         sim_parms.bending_model = (
             CType.CLOTH_BENDING_ANGULAR
-            if OBJ.GPUCloth.bending_model == 'ANGULAR'
+            if gs.bending_model == 'ANGULAR'
             else CType.CLOTH_BENDING_LINEAR
         )
 
-        # ── Тип солвера (НОВОЕ) ───────────────────────────────────────────
-        # Маппинг строки EnumProperty → int константа C++
+        # ─�� Тип солвера ───────────────────────────────────────────────────
         _SOLVER_MAP = {
             'XPBD':  CType.SOLVER_XPBD,
             'PD':    CType.SOLVER_PD,
@@ -661,7 +687,7 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
             'OGC':   CType.SOLVER_OGC,
         }
         sim_parms.solver_type = _SOLVER_MAP.get(
-            OBJ.GPUCloth.solver_type, CType.SOLVER_XPBD
+            gs.solver_type, CType.SOLVER_XPBD
         )
 
         clmd.sim_parms    = pointer(sim_parms)
@@ -669,17 +695,17 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
 
         # ── Параметры столкновений ────────────────────────────────────────
         coll_parms = pointer(CType.ClothCollSettings())
-        coll_parms.contents.epsilon       = 0.015
+        coll_parms.contents.epsilon       = gs.epsilon
         coll_parms.contents.self_friction = 5.0
         coll_parms.contents.friction      = 5.0
         coll_parms.contents.damping       = 0.0
-        coll_parms.contents.selfepsilon   = 0.015
+        coll_parms.contents.selfepsilon   = gs.selfepsilon
         coll_parms.contents.loop_count    = 2
-        coll_parms.contents.group         = None
+        coll_parms.contents.group         = None  # TODO: resolve Collection ptr
         coll_parms.contents.vgroup_selfcol = 0
         coll_parms.contents.vgroup_objcol  = 0
-        coll_parms.contents.clamp          = 0.0
-        coll_parms.contents.self_clamp     = 0.0
+        coll_parms.contents.clamp          = gs.clamp
+        coll_parms.contents.self_clamp     = gs.self_clamp
         coll_parms.contents.flags          = CType.CLOTH_COLLSETTINGS_FLAG_ENABLED
         clmd.coll_parms = coll_parms
 

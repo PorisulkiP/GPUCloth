@@ -197,6 +197,360 @@ class GPUCLOTH_PT_material(bpy.types.Panel):
 
 
 # ===========================================================================
+#  Sub-panel: Physical Properties (clamping, advanced damping)
+# ===========================================================================
+
+class GPUCLOTH_PT_physical(bpy.types.Panel):
+    bl_label       = "Physical Properties"
+    bl_idname      = "GPUCLOTH_PT_physical"
+    bl_parent_id   = "GPUCLOTH_PT_main"
+    bl_space_type  = 'PROPERTIES'
+    bl_region_type = 'WINDOW'
+    bl_context     = "physics"
+    bl_options     = {'DEFAULT_CLOSED'}
+
+    @classmethod
+    def poll(cls, context):
+        obj = context.object
+        return obj is not None and obj.type == 'MESH' and hasattr(obj, 'GPUCloth') and obj.GPUCloth.is_active
+
+    def draw(self, context):
+        layout = self.layout
+        s      = context.object.GPUCloth
+
+        col = layout.column(align=True)
+        col.prop(s, "air_viscosity",  text=_t("Air Viscosity",  "Вязкость воздуха"))
+        col.prop(s, "vel_damping",    text=_t("Velocity Damping", "Демпфирование скорости"))
+
+        layout.separator()
+        col = layout.column(align=True)
+        col.label(text=_t("Stiffness Clamping:", "Ограничение жёсткости:"))
+        col.prop(s, "max_tension",    text=_t("Max Tension",     "Макс. растяжение"))
+        col.prop(s, "max_compression",text=_t("Max Compression", "Макс. сжатие"))
+        col.prop(s, "max_shear",      text=_t("Max Shear",       "Макс. сдвиг"))
+        col.prop(s, "max_bend",       text=_t("Max Bending",     "Макс. изгиб"))
+        col.prop(s, "max_struct",     text=_t("Max Structural",  "Макс. структура"))
+        col.prop(s, "max_sewing",     text=_t("Max Sewing",      "Макс. шов"))
+
+        layout.separator()
+        col = layout.column(align=True)
+        col.prop(s, "structural",     text=_t("Structural (Linear)",
+                                              "Структурная жёсткость (Linear)"))
+        col.active = (s.bending_model == 'LINEAR')
+
+
+# ===========================================================================
+#  Sub-panel: Internal Springs
+# ===========================================================================
+
+class GPUCLOTH_PT_internal_springs(bpy.types.Panel):
+    bl_label       = "Internal Springs"
+    bl_idname      = "GPUCLOTH_PT_internal_springs"
+    bl_parent_id   = "GPUCLOTH_PT_main"
+    bl_space_type  = 'PROPERTIES'
+    bl_region_type = 'WINDOW'
+    bl_context     = "physics"
+    bl_options     = {'DEFAULT_CLOSED'}
+
+    @classmethod
+    def poll(cls, context):
+        obj = context.object
+        return obj is not None and obj.type == 'MESH' and hasattr(obj, 'GPUCloth') and obj.GPUCloth.is_active
+
+    def draw_header(self, context):
+        self.layout.prop(context.object.GPUCloth, "use_internal_springs", text="")
+
+    def draw(self, context):
+        layout = self.layout
+        s      = context.object.GPUCloth
+        layout.active = s.use_internal_springs
+
+        col = layout.column(align=True)
+        col.prop(s, "use_internal_springs_normal",
+                 text=_t("Check Surface Normals", "Проверять нормали поверхности"))
+
+        layout.separator()
+        col = layout.column(align=True)
+        col.prop(s, "internal_spring_max_length",
+                 text=_t("Max Spring Length", "Макс. длина пружины"))
+        col.prop(s, "internal_spring_max_diversion",
+                 text=_t("Max Normal Diversion", "Макс. отклонение от нормали"))
+
+        layout.separator()
+        col = layout.column(align=True)
+        col.label(text=_t("Stiffness:", "Жёсткость:"))
+        col.prop(s, "internal_tension",
+                 text=_t("Tension", "Растяжение"))
+        col.prop(s, "internal_compression",
+                 text=_t("Compression", "Сжатие"))
+
+        col.separator()
+        col.prop(s, "max_internal_tension",
+                 text=_t("Max Tension", "Макс. растяжение"))
+        col.prop(s, "max_internal_compression",
+                 text=_t("Max Compression", "Макс. сжатие"))
+
+        layout.separator()
+        col = layout.column()
+        col.prop_search(s, "vgroup_intern", context.object,
+                        "vertex_groups",
+                        text=_t("Vertex Group", "Группа вершин"))
+
+
+# ===========================================================================
+#  Sub-panel: Pressure
+# ===========================================================================
+
+class GPUCLOTH_PT_pressure(bpy.types.Panel):
+    bl_label       = "Pressure"
+    bl_idname      = "GPUCLOTH_PT_pressure"
+    bl_parent_id   = "GPUCLOTH_PT_main"
+    bl_space_type  = 'PROPERTIES'
+    bl_region_type = 'WINDOW'
+    bl_context     = "physics"
+    bl_options     = {'DEFAULT_CLOSED'}
+
+    @classmethod
+    def poll(cls, context):
+        obj = context.object
+        return obj is not None and obj.type == 'MESH' and hasattr(obj, 'GPUCloth') and obj.GPUCloth.is_active
+
+    def draw_header(self, context):
+        self.layout.prop(context.object.GPUCloth, "use_pressure", text="")
+
+    def draw(self, context):
+        layout = self.layout
+        s      = context.object.GPUCloth
+        layout.active = s.use_pressure
+
+        col = layout.column(align=True)
+        col.prop(s, "uniform_pressure_force",
+                 text=_t("Pressure", "Давление"))
+        col.prop(s, "pressure_factor",
+                 text=_t("Factor", "Множитель"))
+        col.prop(s, "target_volume",
+                 text=_t("Target Volume", "Целевой объём"))
+        col.prop(s, "fluid_density",
+                 text=_t("Fluid Density", "Плотность флюида"))
+
+        layout.separator()
+        col = layout.column()
+        col.prop_search(s, "vgroup_pressure", context.object,
+                        "vertex_groups",
+                        text=_t("Vertex Group", "Группа вершин"))
+
+
+# ===========================================================================
+#  Sub-panel: Shape / Pinning
+# ===========================================================================
+
+class GPUCLOTH_PT_shape(bpy.types.Panel):
+    bl_label       = "Shape"
+    bl_idname      = "GPUCLOTH_PT_shape"
+    bl_parent_id   = "GPUCLOTH_PT_main"
+    bl_space_type  = 'PROPERTIES'
+    bl_region_type = 'WINDOW'
+    bl_context     = "physics"
+    bl_options     = {'DEFAULT_CLOSED'}
+
+    @classmethod
+    def poll(cls, context):
+        obj = context.object
+        return obj is not None and obj.type == 'MESH' and hasattr(obj, 'GPUCloth') and obj.GPUCloth.is_active
+
+    def draw(self, context):
+        layout = self.layout
+        s      = context.object.GPUCloth
+
+        col = layout.column(align=True)
+        col.prop_search(s, "vgroup_mass", context.object,
+                        "vertex_groups",
+                        text=_t("Pin Group", "Группа закрепления"))
+
+        if s.vgroup_mass:
+            col.prop(s, "goalspring",
+                     text=_t("Stiffness", "Жёсткость"))
+            col.prop(s, "goalfrict",
+                     text=_t("Friction", "Трение"))
+            col.prop(s, "maxgoal",
+                     text=_t("Max Goal", "Макс. цель"))
+
+        layout.separator()
+        col = layout.column(align=True)
+        col.label(text=_t("Shrinking:", "Сжатие:"))
+        col.prop(s, "shrink_min",
+                 text=_t("Min", "Мин."))
+        col.prop(s, "shrink_max",
+                 text=_t("Max", "Макс."))
+
+        layout.separator()
+        col = layout.column()
+        col.prop(s, "use_dynamic_mesh",
+                 text=_t("Dynamic Mesh", "Динамический меш"),
+                 toggle=True)
+
+        if context.object.data.shape_keys:
+            col.prop_search(s, "shapekey_rest",
+                            context.object.data.shape_keys,
+                            "key_blocks",
+                            text=_t("Rest Shape Key", "Ключ формы покоя"))
+
+
+# ===========================================================================
+#  Sub-panel: Object Collision
+# ===========================================================================
+
+class GPUCLOTH_PT_object_collision(bpy.types.Panel):
+    bl_label       = "Object Collision"
+    bl_idname      = "GPUCLOTH_PT_object_collision"
+    bl_parent_id   = "GPUCLOTH_PT_main"
+    bl_space_type  = 'PROPERTIES'
+    bl_region_type = 'WINDOW'
+    bl_context     = "physics"
+    bl_options     = {'DEFAULT_CLOSED'}
+
+    @classmethod
+    def poll(cls, context):
+        obj = context.object
+        return obj is not None and obj.type == 'MESH' and hasattr(obj, 'GPUCloth') and obj.GPUCloth.is_active
+
+    def draw(self, context):
+        layout = self.layout
+        s      = context.object.GPUCloth
+
+        col = layout.column(align=True)
+        col.label(text=_t("Distance:", "Дистанция:"))
+        col.prop(s, "epsilon",
+                 text=_t("Object", "Объект"))
+        col.prop(s, "selfepsilon",
+                 text=_t("Self", "Самоколлизия"))
+
+        layout.separator()
+        col = layout.column(align=True)
+        col.label(text=_t("Impulse Clamping:", "Ограничение импульса:"))
+        col.prop(s, "clamp",
+                 text=_t("Object", "Объект"))
+        col.prop(s, "self_clamp",
+                 text=_t("Self", "Самоколлизия"))
+
+        layout.separator()
+        col = layout.column()
+        col.prop(s, "collision_collection",
+                 text=_t("Collision Collection", "Коллекция коллизий"))
+
+        col.separator()
+        col.prop_search(s, "vgroup_objcol", context.object,
+                        "vertex_groups",
+                        text=_t("Exclude Objects", "Исключить объекты"))
+        col.prop_search(s, "vgroup_selfcol", context.object,
+                        "vertex_groups",
+                        text=_t("Exclude Self", "Исключить самоколлизию"))
+
+
+# ===========================================================================
+#  Sub-panel: Property Weights (stiffness scaling vertex groups)
+# ===========================================================================
+
+class GPUCLOTH_PT_property_weights(bpy.types.Panel):
+    bl_label       = "Property Weights"
+    bl_idname      = "GPUCLOTH_PT_property_weights"
+    bl_parent_id   = "GPUCLOTH_PT_main"
+    bl_space_type  = 'PROPERTIES'
+    bl_region_type = 'WINDOW'
+    bl_context     = "physics"
+    bl_options     = {'DEFAULT_CLOSED'}
+
+    @classmethod
+    def poll(cls, context):
+        obj = context.object
+        return obj is not None and obj.type == 'MESH' and hasattr(obj, 'GPUCloth') and obj.GPUCloth.is_active
+
+    def draw(self, context):
+        layout = self.layout
+        s      = context.object.GPUCloth
+
+        col = layout.column(align=True)
+        col.label(text=_t("Stiffness Scaling Groups:",
+                          "Группы масштабирования жёсткости:"))
+        col.prop_search(s, "vgroup_struct", context.object,
+                        "vertex_groups",
+                        text=_t("Structural", "Структурная"))
+        col.prop_search(s, "vgroup_shear", context.object,
+                        "vertex_groups",
+                        text=_t("Shear", "Сдвиг"))
+        col.prop_search(s, "vgroup_bend", context.object,
+                        "vertex_groups",
+                        text=_t("Bending", "Изгиб"))
+        col.prop_search(s, "vgroup_shrink", context.object,
+                        "vertex_groups",
+                        text=_t("Shrinking", "Сжатие"))
+
+
+# ===========================================================================
+#  Sub-panel: Field Weights
+# ===========================================================================
+
+class GPUCLOTH_PT_field_weights(bpy.types.Panel):
+    bl_label       = "Field Weights"
+    bl_idname      = "GPUCLOTH_PT_field_weights"
+    bl_parent_id   = "GPUCLOTH_PT_main"
+    bl_space_type  = 'PROPERTIES'
+    bl_region_type = 'WINDOW'
+    bl_context     = "physics"
+    bl_options     = {'DEFAULT_CLOSED'}
+
+    @classmethod
+    def poll(cls, context):
+        obj = context.object
+        return obj is not None and obj.type == 'MESH' and hasattr(obj, 'GPUCloth') and obj.GPUCloth.is_active
+
+    def draw(self, context):
+        layout = self.layout
+        s      = context.object.GPUCloth
+        fw     = s.effector_weights
+
+        col = layout.column(align=True)
+        col.prop(s, "eff_force_scale",
+                 text=_t("Effector Force", "Сила эффектора"))
+        col.prop(s, "eff_wind_scale",
+                 text=_t("Effector Wind", "Сила ветра"))
+
+        layout.separator()
+        col = layout.column(align=True)
+        col.label(text=_t("Field Weights:", "Веса полей:"))
+        col.prop(fw, "global_gravity",
+                 text=_t("Gravity", "Гравитация"))
+        col.prop(fw, "weight_gravity",
+                 text=_t("Gravity", "Гравитация"))
+        col.prop(fw, "weight_wind",
+                 text=_t("Wind", "Ветер"))
+        col.prop(fw, "weight_vortex",
+                 text=_t("Vortex", "Вихрь"))
+        col.prop(fw, "weight_magnetic",
+                 text=_t("Magnetic", "Магнитное"))
+        col.prop(fw, "weight_turbulence",
+                 text=_t("Turbulence", "Турбулентность"))
+        col.prop(fw, "weight_drag",
+                 text=_t("Drag", "Торможение"))
+        col.prop(fw, "weight_smoke_flow",
+                 text=_t("Smoke Flow", "Поток дыма"))
+        col.prop(fw, "weight_harmonic",
+                 text=_t("Harmonic", "Гармоническое"))
+        col.prop(fw, "weight_charge",
+                 text=_t("Charge", "Заряд"))
+        col.prop(fw, "weight_lennard_jones",
+                 text=_t("Lennard-Jones", "Леннард-Джонс"))
+        col.prop(fw, "weight_texture",
+                 text=_t("Texture", "Текстура"))
+        col.prop(fw, "weight_curve_guide",
+                 text=_t("Curve Guide", "Напр. кривой"))
+        col.prop(fw, "weight_boid",
+                 text=_t("Boid", "Боид"))
+        col.prop(fw, "weight_fluid",
+                 text=_t("Fluid", "Флюид"))
+
+
+# ===========================================================================
 #  Sub-panel: Self-Collision (OGC)
 # ===========================================================================
 
@@ -391,6 +745,13 @@ _PANEL_CLASSES = [
     GPUCLOTH_PT_main,
     GPUCLOTH_PT_solver,
     GPUCLOTH_PT_material,
+    GPUCLOTH_PT_physical,
+    GPUCLOTH_PT_internal_springs,
+    GPUCLOTH_PT_pressure,
+    GPUCLOTH_PT_shape,
+    GPUCLOTH_PT_object_collision,
+    GPUCLOTH_PT_property_weights,
+    GPUCLOTH_PT_field_weights,
     GPUCLOTH_PT_collision,
     GPUCLOTH_PT_proxy,
     GPUCLOTH_PT_cache,

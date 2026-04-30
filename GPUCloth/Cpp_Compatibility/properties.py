@@ -462,6 +462,354 @@ class GPUClothObjectSettings(PropertyGroup):
         default=False,
     )
 
+    # ── Physical Properties: Damping & Clamping ────────────────────────────
+    air_viscosity: FloatProperty(
+        name="Air Viscosity",
+        description="Viscosity of the surrounding medium (air damping factor)",
+        default=1.0,
+        min=0.0,
+        max=100.0,
+    )
+
+    structural: FloatProperty(
+        name="Structural Stiffness",
+        description="Structural spring stiffness for Linear Bending model",
+        default=15.0,
+        min=0.0,
+        max=500.0,
+    )
+
+    max_tension: FloatProperty(
+        name="Max Tension",
+        description="Maximum tension stiffness clamping value",
+        default=500.0,
+        min=0.0,
+        max=500.0,
+    )
+
+    max_compression: FloatProperty(
+        name="Max Compression",
+        description="Maximum compression stiffness clamping value",
+        default=500.0,
+        min=0.0,
+        max=500.0,
+    )
+
+    max_shear: FloatProperty(
+        name="Max Shear",
+        description="Maximum shear stiffness clamping value",
+        default=500.0,
+        min=0.0,
+        max=500.0,
+    )
+
+    max_bend: FloatProperty(
+        name="Max Bending",
+        description="Maximum bending stiffness clamping value",
+        default=100.0,
+        min=0.0,
+        max=500.0,
+    )
+
+    max_struct: FloatProperty(
+        name="Max Structural",
+        description="Maximum structural stiffness clamping value",
+        default=500.0,
+        min=0.0,
+        max=500.0,
+    )
+
+    max_sewing: FloatProperty(
+        name="Max Sewing Force",
+        description="Maximum sewing force clamping value",
+        default=500.0,
+        min=0.0,
+        max=500.0,
+    )
+
+    vel_damping: FloatProperty(
+        name="Velocity Damping",
+        description="Damp velocity to speed up convergence to rest pose",
+        default=0.0,
+        min=0.0,
+        max=1.0,
+        subtype='FACTOR',
+    )
+
+    # ── Internal Springs ───────────────────────────────────────────────────
+    use_internal_springs: BoolProperty(
+        name="Internal Springs",
+        description="Create internal springs to resist compression",
+        default=False,
+    )
+
+    use_internal_springs_normal: BoolProperty(
+        name="Check Surface Normals",
+        description="Create internal springs only between points with opposite normals",
+        default=False,
+    )
+
+    internal_spring_max_length: FloatProperty(
+        name="Max Spring Length",
+        description="Maximum length an internal spring can have during creation",
+        default=0.0,
+        min=0.0,
+        max=100.0,
+    )
+
+    internal_spring_max_diversion: FloatProperty(
+        name="Max Normal Diversion",
+        description="Maximum angle diversion from vertex normal during internal spring creation (radians)",
+        default=0.7853981633974483,  # π/4
+        min=0.0,
+        max=3.141592653589793,       # π
+        subtype='ANGLE',
+    )
+
+    internal_tension: FloatProperty(
+        name="Tension",
+        description="Tension stiffness for internal springs",
+        default=15.0,
+        min=0.0,
+        max=500.0,
+    )
+
+    internal_compression: FloatProperty(
+        name="Compression",
+        description="Compression stiffness for internal springs",
+        default=15.0,
+        min=0.0,
+        max=500.0,
+    )
+
+    max_internal_tension: FloatProperty(
+        name="Max Internal Tension",
+        description="Maximum tension stiffness clamping for internal springs",
+        default=500.0,
+        min=0.0,
+        max=500.0,
+    )
+
+    max_internal_compression: FloatProperty(
+        name="Max Internal Compression",
+        description="Maximum compression stiffness clamping for internal springs",
+        default=500.0,
+        min=0.0,
+        max=500.0,
+    )
+
+    vgroup_intern: StringProperty(
+        name="Vertex Group",
+        description="Vertex group for scaling internal spring stiffness",
+        default="",
+    )
+
+    # ── Pressure ───────────────────────────────────────────────────────────
+    use_pressure: BoolProperty(
+        name="Pressure",
+        description="Enable internal pressure simulation",
+        default=False,
+    )
+
+    uniform_pressure_force: FloatProperty(
+        name="Pressure",
+        description="Uniform pressure force constantly applied to the mesh (can be negative)",
+        default=0.0,
+        min=-100.0,
+        max=100.0,
+    )
+
+    target_volume: FloatProperty(
+        name="Target Volume",
+        description="Equilibrium volume the mesh wants to expand to (0 = use rest volume)",
+        default=0.0,
+        min=0.0,
+        max=1000.0,
+    )
+
+    pressure_factor: FloatProperty(
+        name="Factor",
+        description="Pressure scaling factor: pressure = ((V/V0 - 1) + uniform) * factor",
+        default=1.0,
+        min=0.0,
+        max=100.0,
+    )
+
+    fluid_density: FloatProperty(
+        name="Fluid Density",
+        description="Density of the fluid inside/outside for hydrostatic pressure gradient",
+        default=0.0,
+        min=0.0,
+        max=10.0,
+    )
+
+    vgroup_pressure: StringProperty(
+        name="Pressure Vertex Group",
+        description="Vertex group for scaling pressure",
+        default="",
+    )
+
+    # ── Shape / Pinning ────────────────────────────────────────────────────
+    vgroup_mass: StringProperty(
+        name="Pin Group",
+        description="Vertex group for pinning vertices (zero weight = free, full weight = pinned)",
+        default="",
+    )
+
+    goalspring: FloatProperty(
+        name="Pin Stiffness",
+        description="Stiffness of goal springs (pinning force)",
+        default=1.0,
+        min=0.0,
+        max=100.0,
+    )
+
+    goalfrict: FloatProperty(
+        name="Pin Friction",
+        description="Friction/damping applied to pinned vertices",
+        default=0.0,
+        min=0.0,
+        max=50.0,
+    )
+
+    maxgoal: FloatProperty(
+        name="Max Goal Factor",
+        description="Maximum pin goal factor",
+        default=1.0,
+        min=0.0,
+        max=1.0,
+        subtype='FACTOR',
+    )
+
+    shrink_min: FloatProperty(
+        name="Shrink Min",
+        description="Min shrinkage factor: 0=none, 1=shrink to nothing, -1=double edge length",
+        default=0.0,
+        min=-1.0,
+        max=1.0,
+    )
+
+    shrink_max: FloatProperty(
+        name="Shrink Max",
+        description="Max shrinkage factor: 0=none, 1=shrink to nothing, -1=double edge length",
+        default=0.0,
+        min=-1.0,
+        max=1.0,
+    )
+
+    shapekey_rest: StringProperty(
+        name="Rest Shape Key",
+        description="Shape key used as rest configuration for the cloth simulation",
+        default="",
+    )
+
+    use_dynamic_mesh: BoolProperty(
+        name="Dynamic Mesh",
+        description="Allow the base mesh to deform in real-time during simulation",
+        default=False,
+    )
+
+    # ── Object Collision ────────────────────────────────────────────────────
+    epsilon: FloatProperty(
+        name="Distance",
+        description="Minimum distance for object collisions (m)",
+        default=0.015,
+        min=0.001,
+        max=1.0,
+        subtype='DISTANCE',
+    )
+
+    selfepsilon: FloatProperty(
+        name="Self Distance",
+        description="Minimum distance for self-collisions (m)",
+        default=0.015,
+        min=0.001,
+        max=1.0,
+        subtype='DISTANCE',
+    )
+
+    clamp: FloatProperty(
+        name="Object Impulse Clamp",
+        description="Maximum impulse for object collision correction",
+        default=0.0,
+        min=0.0,
+        max=100.0,
+    )
+
+    self_clamp: FloatProperty(
+        name="Self Impulse Clamp",
+        description="Maximum impulse for self-collision correction",
+        default=0.0,
+        min=0.0,
+        max=100.0,
+    )
+
+    collision_collection: PointerProperty(
+        name="Collision Collection",
+        description="Restrict object collisions to objects in this collection",
+        type=bpy.types.Collection,
+    )
+
+    vgroup_objcol: StringProperty(
+        name="Exclude Objects VGroup",
+        description="Vertex group excluding vertices from object collisions (0=excluded, 1=fully collide)",
+        default="",
+    )
+
+    vgroup_selfcol: StringProperty(
+        name="Exclude Self VGroup",
+        description="Vertex group excluding vertices from self-collisions (0=excluded, 1=fully collide)",
+        default="",
+    )
+
+    # ── Property Weights (stiffness scaling groups) ──────────────────────────
+    vgroup_struct: StringProperty(
+        name="Structural Group",
+        description="Vertex group for scaling structural stiffness",
+        default="",
+    )
+
+    vgroup_bend: StringProperty(
+        name="Bending Group",
+        description="Vertex group for scaling bending stiffness",
+        default="",
+    )
+
+    vgroup_shear: StringProperty(
+        name="Shear Group",
+        description="Vertex group for scaling shear stiffness",
+        default="",
+    )
+
+    vgroup_shrink: StringProperty(
+        name="Shrinking Group",
+        description="Vertex group for shrinking cloth",
+        default="",
+    )
+
+    # ── Field Weights ──────────────────────────────────────────────────────
+    effector_weights: PointerProperty(
+        name="Field Weights",
+        description="Per-field-type effector weights for cloth simulation",
+        type=GPUClothEffectorWeights,
+    )
+
+    eff_force_scale: FloatProperty(
+        name="Effector Force",
+        description="Scaling of effector forces",
+        default=1000.0,
+        min=0.0,
+        max=100000.0,
+    )
+
+    eff_wind_scale: FloatProperty(
+        name="Effector Wind",
+        description="Scaling of effector wind forces",
+        default=250.0,
+        min=0.0,
+        max=100000.0,
+    )
+
     # ── Proxy-res simulation ──────────────────────────────────────────────
     use_proxy: BoolProperty(
         name="Proxy Simulation",
@@ -522,6 +870,52 @@ class GPUClothObjectSettings(PropertyGroup):
         min=0,
         max=3,
     )
+
+
+# ===========================================================================
+#  PropertyGroup для весов полей
+# ===========================================================================
+
+class GPUClothEffectorWeights(PropertyGroup):
+    """Per-field-type effector weights (mirrors EffectorWeights.weight[14] + global_gravity)."""
+
+    global_gravity: FloatProperty(
+        name="Global Gravity",
+        description="Override scene gravity for this cloth (0 = use scene, 1 = full scene gravity)",
+        default=1.0,
+        min=0.0,
+        max=1.0,
+        subtype='FACTOR',
+    )
+
+    weight_gravity: FloatProperty(
+        name="Gravity", description="Gravity field weight", default=1.0, min=-10.0, max=10.0)
+    weight_wind: FloatProperty(
+        name="Wind", description="Wind field weight", default=1.0, min=-10.0, max=10.0)
+    weight_vortex: FloatProperty(
+        name="Vortex", description="Vortex field weight", default=1.0, min=-10.0, max=10.0)
+    weight_magnetic: FloatProperty(
+        name="Magnetic", description="Magnetic field weight", default=1.0, min=-10.0, max=10.0)
+    weight_turbulence: FloatProperty(
+        name="Turbulence", description="Turbulence field weight", default=1.0, min=-10.0, max=10.0)
+    weight_drag: FloatProperty(
+        name="Drag", description="Drag field weight", default=1.0, min=-10.0, max=10.0)
+    weight_smoke_flow: FloatProperty(
+        name="Smoke Flow", description="Smoke Flow field weight", default=1.0, min=-10.0, max=10.0)
+    weight_harmonic: FloatProperty(
+        name="Harmonic", description="Harmonic field weight", default=1.0, min=-10.0, max=10.0)
+    weight_charge: FloatProperty(
+        name="Charge", description="Charge field weight", default=1.0, min=-10.0, max=10.0)
+    weight_lennard_jones: FloatProperty(
+        name="Lennard-Jones", description="Lennard-Jones field weight", default=1.0, min=-10.0, max=10.0)
+    weight_texture: FloatProperty(
+        name="Texture", description="Texture field weight", default=1.0, min=-10.0, max=10.0)
+    weight_curve_guide: FloatProperty(
+        name="Curve Guide", description="Curve Guide field weight", default=1.0, min=-10.0, max=10.0)
+    weight_boid: FloatProperty(
+        name="Boid", description="Boid field weight", default=1.0, min=-10.0, max=10.0)
+    weight_fluid: FloatProperty(
+        name="Fluid", description="Fluid field weight", default=1.0, min=-10.0, max=10.0)
 
 
 # ===========================================================================
@@ -603,6 +997,7 @@ class GPUClothSceneSettings(PropertyGroup):
 _PROPERTY_CLASSES = [
     GPUClothObjectSettings,
     GPUClothSceneSettings,
+    GPUClothEffectorWeights,
 ]
 
 
