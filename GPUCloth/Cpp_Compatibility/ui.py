@@ -738,6 +738,49 @@ class GPUCLOTH_PT_cache(bpy.types.Panel):
 
 
 # ===========================================================================
+#  Panel: Constraint Network
+# ===========================================================================
+
+class GPUCLOTH_PT_constraint_network(bpy.types.Panel):
+    bl_label = "Constraint Network"
+    bl_parent_id = "GPUCLOTH_PT_main"
+    bl_space_type = 'PROPERTIES'
+    bl_region_type = 'WINDOW'
+    bl_options = {'DEFAULT_CLOSED'}
+
+    @classmethod
+    def poll(cls, context):
+        return (
+            context.object is not None
+            and context.object.type == 'MESH'
+        )
+
+    def draw_header(self, context):
+        obj = context.object
+        if hasattr(obj, 'GPUCloth'):
+            layout = self.layout
+            layout.prop(obj.GPUCloth, "use_constraint_network", text="")
+
+    def draw(self, context):
+        obj = context.object
+        if not hasattr(obj, 'GPUCloth'):
+            return
+        gs = obj.GPUCloth
+        layout = self.layout
+        layout.active = gs.use_constraint_network
+
+        layout.prop(gs, "cn_phases")
+        layout.prop(gs, "cn_sewing_speed")
+        layout.separator()
+        layout.prop(gs, "cn_seam_stiffness")
+        layout.prop(gs, "cn_button_stiffness")
+        layout.prop(gs, "cn_zipper_stiffness")
+        layout.prop(gs, "cn_dart_stiffness")
+        layout.separator()
+        layout.prop(gs, "cn_enable_selfcoll_stitching")
+
+
+# ===========================================================================
 #  Registration
 # ===========================================================================
 
@@ -754,6 +797,7 @@ _PANEL_CLASSES = [
     GPUCLOTH_PT_field_weights,
     GPUCLOTH_PT_collision,
     GPUCLOTH_PT_proxy,
+    GPUCLOTH_PT_constraint_network,
     GPUCLOTH_PT_cache,
 ]
 

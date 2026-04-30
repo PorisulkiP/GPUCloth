@@ -352,7 +352,15 @@ class ClothSimSettings(Structure):
             ("internal_tension", c_float),
             ("internal_compression", c_float),
             ("max_internal_tension", c_float),
-            ("max_internal_compression", c_float)
+            ("max_internal_compression", c_float),
+            ("cn_phases", c_short),
+            ("cn_sewing_speed", c_float),
+            ("cn_seam_stiffness", c_float),
+            ("cn_button_stiffness", c_float),
+            ("cn_zipper_stiffness", c_float),
+            ("cn_dart_stiffness", c_float),
+            ("cn_enable_selfcoll_stitching", c_short),
+            ("_pad_cn", c_short)
 ]
 
     def __init__(self):

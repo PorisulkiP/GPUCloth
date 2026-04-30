@@ -462,6 +462,55 @@ class GPUClothObjectSettings(PropertyGroup):
         default=False,
     )
 
+    # ── Constraint network ─────────────────────────────────────────────────
+    use_constraint_network: BoolProperty(
+        name="Use Constraint Network",
+        description="Animate sewing seams, zippers, and buttons with phased initialization",
+        default=False,
+    )
+
+    cn_phases: IntProperty(
+        name="Phases",
+        description="Number of activation phases (sewing stages)",
+        default=1, min=1, max=10,
+    )
+
+    cn_sewing_speed: FloatProperty(
+        name="Sewing Speed",
+        description="Frames to fully tighten a seam phase",
+        default=10.0, min=1.0, max=100.0,
+    )
+
+    cn_seam_stiffness: FloatProperty(
+        name="Seam Stiffness",
+        description="Stiffness multiplier for seam constraints",
+        default=1.0, min=0.0, max=5.0, soft_max=2.0,
+    )
+
+    cn_button_stiffness: FloatProperty(
+        name="Button Stiffness",
+        description="Stiffness multiplier for button constraints",
+        default=1.0, min=0.0, max=5.0, soft_max=2.0,
+    )
+
+    cn_zipper_stiffness: FloatProperty(
+        name="Zipper Stiffness",
+        description="Stiffness multiplier for zipper constraints",
+        default=1.0, min=0.0, max=5.0, soft_max=2.0,
+    )
+
+    cn_dart_stiffness: FloatProperty(
+        name="Dart Stiffness",
+        description="Stiffness multiplier for dart constraints",
+        default=1.0, min=0.0, max=5.0, soft_max=2.0,
+    )
+
+    cn_enable_selfcoll_stitching: BoolProperty(
+        name="Self-Collision During Stitching",
+        description="Enable self-collision while seams are being tightened",
+        default=True,
+    )
+
     # ── Physical Properties: Damping & Clamping ────────────────────────────
     air_viscosity: FloatProperty(
         name="Air Viscosity",
