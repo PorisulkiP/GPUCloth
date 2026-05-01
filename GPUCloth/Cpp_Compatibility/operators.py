@@ -762,6 +762,20 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
         sim_parms.max_internal_tension     = gs.max_internal_tension
         sim_parms.max_internal_compression = gs.max_internal_compression
 
+        # ── Anisotropic stiffness ────────────────────────────────────────
+        sim_parms.tension_u       = gs.tension_u
+        sim_parms.tension_v       = gs.tension_v
+        sim_parms.compression_u   = gs.compression_u
+        sim_parms.compression_v   = gs.compression_v
+        sim_parms.bending_u       = gs.bending_u
+        sim_parms.bending_v       = gs.bending_v
+        sim_parms.max_tension_u   = gs.max_tension_u
+        sim_parms.max_tension_v   = gs.max_tension_v
+        sim_parms.max_compression_u = gs.max_compression_u
+        sim_parms.max_compression_v = gs.max_compression_v
+        sim_parms.max_bend_u      = gs.max_bend_u
+        sim_parms.max_bend_v      = gs.max_bend_v
+
         # ── Effector forces ────────────────────────────────────────────────
         sim_parms.eff_force_scale  = gs.eff_force_scale
         sim_parms.eff_wind_scale   = gs.eff_wind_scale
@@ -827,6 +841,21 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
         sim_parms.solver_ptb_shear    = gs.ptb_shear
         sim_parms.solver_ptb_seam     = gs.ptb_seam
         sim_parms.solver_use_pt_budget = 1 if gs.use_per_type_budget else 0
+
+        # ── Anisotropy ────────────────────────────────────────────────────
+        sim_parms.use_anisotropy  = 1 if gs.use_anisotropy else 0
+        sim_parms.tension_u       = gs.tension_u
+        sim_parms.tension_v       = gs.tension_v
+        sim_parms.compression_u   = gs.compression_u
+        sim_parms.compression_v   = gs.compression_v
+        sim_parms.bending_u       = gs.bending_u
+        sim_parms.bending_v       = gs.bending_v
+        sim_parms.max_tension_u   = gs.max_tension_u
+        sim_parms.max_tension_v   = gs.max_tension_v
+        sim_parms.max_compression_u = gs.max_compression_u
+        sim_parms.max_compression_v = gs.max_compression_v
+        sim_parms.max_bend_u      = gs.max_bend_u
+        sim_parms.max_bend_v      = gs.max_bend_v
 
         clmd.sim_parms    = pointer(sim_parms)
         clmd.clothObject  = None

@@ -647,6 +647,73 @@ class GPUClothObjectSettings(PropertyGroup):
         max=500.0,
     )
 
+    # ── Anisotropy (warp/weft directional stiffness) ─────────────────────────
+    use_anisotropy: BoolProperty(
+        name="Anisotropic Stiffness",
+        description="Enable per-direction warp/weft stiffness (overrides isotropic tension/bending)",
+        default=False,
+    )
+    tension_u: FloatProperty(
+        name="Tension U (Warp)",
+        description="Stretch stiffness along warp (U) direction. 0 = use isotropic tension",
+        default=0.0, min=0.0, max=500.0,
+    )
+    tension_v: FloatProperty(
+        name="Tension V (Weft)",
+        description="Stretch stiffness along weft (V) direction. 0 = use isotropic tension",
+        default=0.0, min=0.0, max=500.0,
+    )
+    compression_u: FloatProperty(
+        name="Compression U (Warp)",
+        description="Compression stiffness along warp. 0 = use isotropic compression",
+        default=0.0, min=0.0, max=500.0,
+    )
+    compression_v: FloatProperty(
+        name="Compression V (Weft)",
+        description="Compression stiffness along weft. 0 = use isotropic compression",
+        default=0.0, min=0.0, max=500.0,
+    )
+    bending_u: FloatProperty(
+        name="Bending U (Warp)",
+        description="Bending stiffness along warp. 0 = use isotropic bending",
+        default=0.0, min=0.0, max=500.0,
+    )
+    bending_v: FloatProperty(
+        name="Bending V (Weft)",
+        description="Bending stiffness along weft. 0 = use isotropic bending",
+        default=0.0, min=0.0, max=500.0,
+    )
+    max_tension_u: FloatProperty(
+        name="Max Tension U",
+        description="Maximum tension clamping along warp",
+        default=500.0, min=0.0, max=500.0,
+    )
+    max_tension_v: FloatProperty(
+        name="Max Tension V",
+        description="Maximum tension clamping along weft",
+        default=500.0, min=0.0, max=500.0,
+    )
+    max_compression_u: FloatProperty(
+        name="Max Compression U",
+        description="Maximum compression clamping along warp",
+        default=500.0, min=0.0, max=500.0,
+    )
+    max_compression_v: FloatProperty(
+        name="Max Compression V",
+        description="Maximum compression clamping along weft",
+        default=500.0, min=0.0, max=500.0,
+    )
+    max_bend_u: FloatProperty(
+        name="Max Bend U",
+        description="Maximum bending clamping along warp",
+        default=500.0, min=0.0, max=500.0,
+    )
+    max_bend_v: FloatProperty(
+        name="Max Bend V",
+        description="Maximum bending clamping along weft",
+        default=500.0, min=0.0, max=500.0,
+    )
+
     # ── Advanced Solver Config ──────────────────────────────────────────────
     solver_iterations: IntProperty(
         name="Iterations",

@@ -186,6 +186,16 @@ class GPUCLOTH_PT_material(bpy.types.Panel):
         col.prop(s, "shear",             text=_t("Shear",       "Сдвиг"))
         col.prop(s, "bending_stiffness", text=_t("Bending",     "Изгиб"))
 
+        # ── Anisotropy ─────────────────────────────────────────────────────
+        layout.separator()
+        col = layout.column(align=True)
+        col.prop(s, "use_anisotropy", text=_t("Anisotropic Stiffness", "Анизотропная жёсткость"))
+        if s.use_anisotropy:
+            col.prop(s, "tension_u",    text=_t("Tension U (Warp)", "Растяжение U"))
+            col.prop(s, "tension_v",    text=_t("Tension V (Weft)", "Растяжение V"))
+            col.prop(s, "bending_u",    text=_t("Bending U (Warp)", "Изгиб U"))
+            col.prop(s, "bending_v",    text=_t("Bending V (Weft)", "Изгиб V"))
+
         layout.separator()
 
         col = layout.column(align=True)

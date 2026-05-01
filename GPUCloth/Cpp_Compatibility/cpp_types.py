@@ -374,6 +374,18 @@ class ClothSimSettings(Structure):
             ("internal_compression", c_float),
             ("max_internal_tension", c_float),
             ("max_internal_compression", c_float),
+            ("tension_u",               c_float),
+            ("tension_v",               c_float),
+            ("compression_u",           c_float),
+            ("compression_v",           c_float),
+            ("bending_u",               c_float),
+            ("bending_v",               c_float),
+            ("max_tension_u",           c_float),
+            ("max_tension_v",           c_float),
+            ("max_compression_u",       c_float),
+            ("max_compression_v",       c_float),
+            ("max_bend_u",              c_float),
+            ("max_bend_v",              c_float),
             ("cn_phases", c_short),
             ("cn_sewing_speed", c_float),
             ("cn_seam_stiffness", c_float),
@@ -394,8 +406,9 @@ class ClothSimSettings(Structure):
             ("solver_ptb_bending", c_short),
             ("solver_ptb_shear", c_short),
             ("solver_ptb_seam", c_short),
-            ("solver_use_pt_budget", c_short),
-            ("_pad_cn", c_short)
+            ("solver_use_pt_budget",         c_short),
+            ("use_anisotropy",               c_short),
+            ("_pad_aniso2",                  c_short)
 ]
 
     def __init__(self):
@@ -458,7 +471,9 @@ class ClothVertex(Structure):
         ("spring_count",    c_int), 
         ("shrink_factor",   c_float), 
         ("internal_stiff",  c_float), 
-        ("pressure_factor", c_float)
+        ("pressure_factor", c_float),
+        ("warp_dir",        c_float*3),
+        ("weft_dir",        c_float*3)
     ]
 
 class Cloth(Structure):
