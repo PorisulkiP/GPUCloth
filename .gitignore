@@ -183,6 +183,10 @@ softBody/
 # Optimizer automation transcripts (local-only)
 /optimizer/optimizer/results/automation_logs/
 
+# Profiling / benchmark artifacts
+*.csv
+*.ncu-rep
+
 # Audit / scratch tmp dirs
 /tmp/audit/
 /tmp/test_ccd*.py
