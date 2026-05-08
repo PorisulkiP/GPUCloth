@@ -39,6 +39,7 @@ if sys.gettrace() is not None:
 # ===========================================================================
 
 g_dll                = None   # Загруженная DLL / .so
+g_runtime_initialized = False
 g_scene              = None   # Указатель на CType.Scene
 g_obj                = []     # list[POINTER(CType.Object)]  — объекты ткани
 g_clmd               = []     # list[POINTER(CType.ClothModifierData)]
@@ -173,6 +174,49 @@ def _upload_effectors(operator, context, dll):
 _cache_playback_guard  = {'active': False}
 _initial_positions     = []     # list[np.ndarray] — rest positions per cloth object
 _bake_range            = {'start': 1, 'end': 250}
+
+
+def _bind_optional_runtime_hooks(dll):
+    """Bind runtime lifecycle exports when present in newer DLL builds."""
+    try:
+        dll.SIM_initialize_runtime.argtypes = []
+        dll.SIM_initialize_runtime.restype = c_bool
+    except AttributeError:
+        pass
+
+    try:
+        dll.SIM_shutdown_runtime.argtypes = []
+        dll.SIM_shutdown_runtime.restype = c_bool
+    except AttributeError:
+        pass
+
+
+def _initialize_runtime_if_available():
+    global g_runtime_initialized
+
+    g_runtime_initialized = False
+    if g_dll is None:
+        return True
+    try:
+        if not g_dll.SIM_initialize_runtime():
+            return False
+        g_runtime_initialized = True
+    except AttributeError:
+        pass
+    return True
+
+
+def _shutdown_runtime_if_initialized():
+    global g_runtime_initialized
+
+    if g_dll is None or not g_runtime_initialized:
+        return
+    try:
+        g_dll.SIM_shutdown_runtime()
+    except AttributeError:
+        pass
+    finally:
+        g_runtime_initialized = False
 
 
 def _store_initial_positions():
@@ -517,6 +561,11 @@ class GPUCloth_LoadDLL(bpy.types.Operator):
             g_dll.Cache_has_frame.argtypes = [c_int, c_char_p]
             g_dll.Cache_has_frame.restype  = c_bool
 
+            _bind_optional_runtime_hooks(g_dll)
+            if not _initialize_runtime_if_available():
+                self.report({'ERROR'}, "SIM_initialize_runtime() failed.")
+                g_dll = None
+
         except OSError as e:
             self.report({'ERROR'}, f"Не удалось загрузить DLL: {e}")
             g_dll = None
@@ -552,6 +601,7 @@ class GPUCloth_UnloadDLL(bpy.types.Operator):
             self.report({'WARNING'}, "DLL не загружена.")
             return {'CANCELLED'}
         try:
+            _shutdown_runtime_if_initialized()
             # Windows: FreeLibrary через kernel32
             handle = c_void_p(g_dll._handle)
             result = windll.kernel32.FreeLibrary(handle)
@@ -1929,9 +1979,10 @@ def register():
         bpy.utils.register_class(cls)
 
     # Сбрасываем глобальное состояние при регистрации
-    global g_dll, g_scene, g_obj, g_mesh, g_clmd
+    global g_dll, g_runtime_initialized, g_scene, g_obj, g_mesh, g_clmd
     global g_clothOBJs, g_clothCollisionOBJs, g_proxy_handles
     g_dll                = None
+    g_runtime_initialized = False
     g_scene              = None
     g_obj                = []
     g_clmd               = []
@@ -1966,9 +2017,11 @@ def unregister():
         bpy.utils.unregister_class(cls)
 
     # Очищаем состояние
-    global g_dll, g_scene, g_obj, g_mesh, g_clmd
+    global g_dll, g_runtime_initialized, g_scene, g_obj, g_mesh, g_clmd
     global g_clothOBJs, g_clothCollisionOBJs, g_proxy_handles
+    _shutdown_runtime_if_initialized()
     g_dll                = None
+    g_runtime_initialized = False
     g_scene              = None
     g_obj                = []
     g_clmd               = []
