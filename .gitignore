@@ -141,6 +141,7 @@ x64/
 .vcxproj
 .filters
 .user
+*.user
 .sln
 
 # Pay version #
@@ -186,6 +187,9 @@ softBody/
 # Profiling / benchmark artifacts
 *.csv
 *.ncu-rep
+*.nsys-rep
+*.sqlite
+*.top_kernels.json
 
 # Audit / scratch tmp dirs
 /tmp/audit/
