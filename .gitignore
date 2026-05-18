@@ -185,6 +185,7 @@ softBody/
 /optimizer/optimizer/results/automation_logs/
 
 # Profiling / benchmark artifacts
+*_full_schema_21f/
 *.csv
 *.ncu-rep
 *.nsys-rep
