@@ -48,6 +48,7 @@ CLOTH_SETTINGS_MAP = {
     "goal_spring": "goalspring",
     "goal_friction": "goalfrict",
     "goal_max": "maxgoal",
+    "vertex_group_mass": "vgroup_mass",
 }
 
 

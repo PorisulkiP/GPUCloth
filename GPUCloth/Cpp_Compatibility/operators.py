@@ -29,6 +29,10 @@ from ctypes import (
 
 from . import cpp_types as CType
 from .proxy_binding import ProxyBindingError, validate_proxy_binding
+from .vertex_channels import (
+    VertexChannelError, apply_float_channel, binary_pin_weights,
+    evaluated_local_positions,
+)
 from ..utils import version_compatibility_utils as vcu
 
 debug = False
@@ -61,6 +65,23 @@ def native_frame_timescale(scene, speed_multiplier):
     if fps <= 0.0:
         return 0.0
     return float(speed_multiplier) * float(scene.render.fps_base) / fps
+
+
+def _upload_pin_weights(dll, clmd, settings_owner, simulation_obj):
+    weights = binary_pin_weights(
+        simulation_obj, settings_owner.GPUCloth.vgroup_mass)
+    return apply_float_channel(
+        dll, CType, clmd, CType.GPUCLOTH_FEATURE_PIN_GOAL,
+        CType.GPUCLOTH_VERTEX_PIN_WEIGHT, 1, weights)
+
+
+def _upload_pin_targets(dll, clmd, settings_owner, simulation_obj, depsgraph):
+    if not settings_owner.GPUCloth.vgroup_mass:
+        return CType.GPUCLOTH_ABI_OK
+    positions = evaluated_local_positions(simulation_obj, depsgraph)
+    return apply_float_channel(
+        dll, CType, clmd, CType.GPUCLOTH_FEATURE_ANIMATED_PIN,
+        CType.GPUCLOTH_VERTEX_PIN_TARGET_XYZ, 3, positions)
 
 # Защита от GC для ctypes-массивов, переданных в Cache_write_frame_async
 # C++ пишет в фоне — массив должен жить до завершения записи
@@ -537,6 +558,12 @@ class GPUCloth_LoadDLL(bpy.types.Operator):
             g_dll.SIM_configure_feature.argtypes = [
                 POINTER(CType.GPUClothFeatureConfigHeader)]
             g_dll.SIM_configure_feature.restype = c_uint
+
+            g_dll.SIM_set_cloth_vertex_channel.argtypes = [
+                POINTER(CType.ClothModifierData),
+                POINTER(CType.GPUClothVertexChannelConfig),
+            ]
+            g_dll.SIM_set_cloth_vertex_channel.restype = c_uint
 
             # ── ProxySim API ─────────────────────────────────────────────────
             #
@@ -1122,6 +1149,22 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
             return {'CANCELLED'}
 
         # 7. Загружаем сцену на GPU
+        # Reject unsupported weights and evaluated topology before native cloth
+        # allocation. BuildClothSprings has no rollback owner before AddCloth.
+        try:
+            depsgraph = context.evaluated_depsgraph_get()
+            for cloth_obj, simulation_obj in zip(
+                    g_clothOBJs, g_simulationOBJs):
+                binary_pin_weights(
+                    simulation_obj, cloth_obj.GPUCloth.vgroup_mass)
+                if cloth_obj.GPUCloth.vgroup_mass:
+                    evaluated_local_positions(simulation_obj, depsgraph)
+        except VertexChannelError as exc:
+            self.report({'ERROR'}, f"Pin channel preflight failed: {exc}")
+            free_gpu_memory(context)
+            bpy.ops.object.mode_set(mode=mode)
+            return {'CANCELLED'}
+
         self.fill_Scene(context)
 
         for coll_ptr in g_clothCollisionOBJs:
@@ -1157,6 +1200,19 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
                     return {'CANCELLED'}
             except OSError:
                 self.report({'ERROR'}, "OSError: clothObject is NULL")
+                return {'CANCELLED'}
+
+            try:
+                depsgraph = context.evaluated_depsgraph_get()
+                _upload_pin_weights(
+                    g_dll, g_clmd[i], g_clothOBJs[i], g_simulationOBJs[i])
+                _upload_pin_targets(
+                    g_dll, g_clmd[i], g_clothOBJs[i], g_simulationOBJs[i],
+                    depsgraph)
+            except (OSError, VertexChannelError) as exc:
+                self.report({'ERROR'}, f"Pin channel upload failed: {exc}")
+                free_gpu_memory(context)
+                bpy.ops.object.mode_set(mode=mode)
                 return {'CANCELLED'}
 
             try:
@@ -1312,10 +1368,14 @@ class GPUCloth_UpdateSimulation(bpy.types.Operator):
         total_t0 = time.perf_counter_ns()
 
         try:
+            depsgraph = context.evaluated_depsgraph_get()
             for i in range(len(g_clothOBJs)):
                 cloth_obj = g_clothOBJs[i]
                 simulation_obj = g_simulationOBJs[i]
                 n_sim = len(simulation_obj.data.vertices)
+
+                _upload_pin_targets(
+                    g_dll, g_clmd[i], cloth_obj, simulation_obj, depsgraph)
 
                 # 1. GPU симуляция одного кадра
                 if not g_dll.SIM_solver():
@@ -1362,7 +1422,7 @@ class GPUCloth_UpdateSimulation(bpy.types.Operator):
                     g_dll.Cache_write_frame_async(
                         frame, pos, c_size_t(nV), cache_dir)
 
-        except OSError as err:
+        except (OSError, VertexChannelError) as err:
             print(f"GPUCloth_UpdateSimulation OSError: {err}")
             bpy.ops.screen.animation_cancel()
             return {'CANCELLED'}
