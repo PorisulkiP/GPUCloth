@@ -28,6 +28,7 @@ from ctypes import (
 )
 
 from . import cpp_types as CType
+from .proxy_binding import ProxyBindingError, validate_proxy_binding
 from ..utils import version_compatibility_utils as vcu
 
 debug = False
@@ -45,6 +46,7 @@ g_obj                = []     # list[POINTER(CType.Object)]  — объекты 
 g_clmd               = []     # list[POINTER(CType.ClothModifierData)]
 g_mesh               = []     # list[POINTER(CType.Mesh)]
 g_clothOBJs          = []     # list[bpy.types.Object]  — Blender-объекты ткани
+g_simulationOBJs     = []     # render owner -> mesh actually sent to solver
 g_clothCollisionOBJs = []     # list[POINTER(CType.Object)] — объекты столкновения
 _dll_directory_handles = []
 
@@ -317,7 +319,7 @@ def _frame_change_handler(scene, depsgraph):
 def free_gpu_memory(context=None):
     """Освобождает GPU память, сбрасывает все глобальные массивы."""
     global g_dll, g_scene, g_obj, g_mesh, g_clmd
-    global g_clothOBJs, g_clothCollisionOBJs, g_proxy_handles
+    global g_clothOBJs, g_simulationOBJs, g_clothCollisionOBJs, g_proxy_handles
 
     success = True
     if g_dll is not None:
@@ -340,6 +342,7 @@ def free_gpu_memory(context=None):
     g_clmd               = []
     g_mesh               = []
     g_clothOBJs          = []
+    g_simulationOBJs     = []
     g_clothCollisionOBJs = []
     g_proxy_handles      = []
     _collision_keepalive.clear()
@@ -1010,7 +1013,8 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
 
     def execute(self, context):
         global g_dll, g_scene, g_obj, g_mesh, g_clmd
-        global g_clothOBJs, g_clothCollisionOBJs, g_proxy_handles
+        global g_clothOBJs, g_simulationOBJs
+        global g_clothCollisionOBJs, g_proxy_handles
 
         # 1. Загружаем DLL если нужно
         if g_dll is None:
@@ -1038,12 +1042,32 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
         mode = bpy.context.active_object.mode
         bpy.ops.object.mode_set(mode='OBJECT')
 
-        # 5. Собираем объекты ткани и столкновения
+        # 5. Collect render owners and validate proxy topology before any
+        # native cloth/collision owner is created.
+        active_cloth = [
+            item for item in bpy.context.scene.objects
+            if item is not None
+            and hasattr(item, 'GPUCloth')
+            and item.GPUCloth.is_active
+        ]
+        bindings = []
+        try:
+            for item in active_cloth:
+                bindings.append(validate_proxy_binding(item, item.GPUCloth))
+        except ProxyBindingError as exc:
+            free_gpu_memory(context)
+            bpy.ops.object.mode_set(mode=mode)
+            self.report({'ERROR'}, f"Proxy configuration rejected: {exc}")
+            return {'CANCELLED'}
+
+        g_clothOBJs.extend(active_cloth)
+        g_simulationOBJs.extend(
+            binding["simulation_object"] for binding in bindings)
+
         for item in bpy.context.scene.objects:
             if item is None:
                 continue
-            if hasattr(item, 'GPUCloth') and item.GPUCloth.is_active:
-                g_clothOBJs.append(item)
+            if item in active_cloth:
                 for modifier in item.modifiers:
                     if modifier.type == 'CLOTH':
                         modifier.show_viewport = False
@@ -1058,31 +1082,43 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
                         g_clothCollisionOBJs.append(data_ptr)
 
         # 6. Заполняем Mesh + ClothModifierData + Object для каждой ткани
-        for cloth_obj in g_clothOBJs:
-            if cloth_obj is None or not hasattr(cloth_obj, 'data'):
+        for cloth_obj, simulation_obj in zip(g_clothOBJs, g_simulationOBJs):
+            if (cloth_obj is None or simulation_obj is None
+                    or not hasattr(simulation_obj, 'data')):
+                free_gpu_memory(context)
+                bpy.ops.object.mode_set(mode=mode)
                 return {'CANCELLED'}
 
-            data_ptr = self.setMesh(context, cloth_obj.data)
+            data_ptr = self.setMesh(context, simulation_obj.data)
             if not data_ptr:
                 self.report({'ERROR'}, "NULL от setMesh")
+                free_gpu_memory(context)
+                bpy.ops.object.mode_set(mode=mode)
                 return {'CANCELLED'}
             g_mesh.append(data_ptr)
 
             data_ptr = self.setClothModifierData(context, cloth_obj)
             if not data_ptr:
                 self.report({'ERROR'}, "NULL от setClothModifierData")
+                free_gpu_memory(context)
+                bpy.ops.object.mode_set(mode=mode)
                 return {'CANCELLED'}
             g_clmd.append(data_ptr)
 
-            data_ptr = self.fill_Object(cloth_obj)
+            data_ptr = self.fill_Object(simulation_obj)
             if not data_ptr:
                 self.report({'ERROR'}, "NULL от fill_Object (cloth)")
+                free_gpu_memory(context)
+                bpy.ops.object.mode_set(mode=mode)
                 return {'CANCELLED'}
             g_obj.append(data_ptr)
 
-        if len(g_clothOBJs) != len(g_clmd):
+        if not (len(g_clothOBJs) == len(g_simulationOBJs) == len(g_clmd)):
             self.report({'ERROR'},
-                f"Несоответствие объектов: clothOBJs={len(g_clothOBJs)}, clmd={len(g_clmd)}")
+                f"Несоответствие объектов: clothOBJs={len(g_clothOBJs)}, "
+                f"simulationOBJs={len(g_simulationOBJs)}, clmd={len(g_clmd)}")
+            free_gpu_memory(context)
+            bpy.ops.object.mode_set(mode=mode)
             return {'CANCELLED'}
 
         # 7. Загружаем сцену на GPU
@@ -1131,7 +1167,7 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
                 self.report({'ERROR'}, "OSError в AddCloth")
                 return {'CANCELLED'}
 
-        # 8. Инициализируем Proxy-res для объектов с use_proxy=True (НОВОЕ)
+        # 8. Create one upsample owner per render/simulation binding.
         g_proxy_handles.clear()
         for cloth_obj in g_clothOBJs:
             s = cloth_obj.GPUCloth
@@ -1153,8 +1189,11 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
                 )
                 g_proxy_handles.append(handle)
                 if handle is None:
-                    self.report({'WARNING'},
+                    self.report({'ERROR'},
                         f"ProxySim_create вернул NULL для {cloth_obj.name}")
+                    free_gpu_memory(context)
+                    bpy.ops.object.mode_set(mode=mode)
+                    return {'CANCELLED'}
             else:
                 g_proxy_handles.append(None)
 
@@ -1203,7 +1242,7 @@ class GPUCloth_UpdateSimulation(bpy.types.Operator):
         blender_obj.data.update()
 
     def validate_objects(self):
-        for obj in g_clothOBJs:
+        for obj in [*g_clothOBJs, *g_simulationOBJs]:
             if obj is None or obj.name not in bpy.data.objects:
                 self.report({'ERROR'}, f"Объект {obj} не существует в сцене.")
                 return False
@@ -1215,7 +1254,8 @@ class GPUCloth_UpdateSimulation(bpy.types.Operator):
     # ── Execute ──────────────────────────────────────────────────────────────
 
     def execute(self, context):
-        global g_dll, g_obj, g_mesh, g_clmd, g_clothOBJs
+        global g_dll, g_obj, g_mesh, g_clmd
+        global g_clothOBJs, g_simulationOBJs
 
         if g_dll is None or context.scene.frame_current < 2:
             return {'FINISHED'}
@@ -1260,9 +1300,11 @@ class GPUCloth_UpdateSimulation(bpy.types.Operator):
         #   Cache_write_frame_async() ← возвращает немедленно, пишет в фоне
         #
 
-        if not (len(g_clothOBJs) == len(g_clmd) == len(g_obj) == len(g_mesh)):
+        if not (len(g_clothOBJs) == len(g_simulationOBJs)
+                == len(g_clmd) == len(g_obj) == len(g_mesh)):
             self.report({'ERROR'},
                 f"Несоответствие размеров: clothOBJs={len(g_clothOBJs)}, "
+                f"simulationOBJs={len(g_simulationOBJs)}, "
                 f"clmd={len(g_clmd)}, obj={len(g_obj)}, mesh={len(g_mesh)}")
             bpy.ops.screen.animation_cancel()
             return {'CANCELLED'}
@@ -1272,7 +1314,8 @@ class GPUCloth_UpdateSimulation(bpy.types.Operator):
         try:
             for i in range(len(g_clothOBJs)):
                 cloth_obj = g_clothOBJs[i]
-                nV        = len(cloth_obj.data.vertices)
+                simulation_obj = g_simulationOBJs[i]
+                n_sim = len(simulation_obj.data.vertices)
 
                 # 1. GPU симуляция одного кадра
                 if not g_dll.SIM_solver():
@@ -1281,8 +1324,8 @@ class GPUCloth_UpdateSimulation(bpy.types.Operator):
                     return {'CANCELLED'}
 
                 # 2. Readback позиций (D2H через SIM_get_cloth_verts)
-                pos = self._get_positions(g_clmd[i], nV)
-                if pos is None:
+                simulation_pos = self._get_positions(g_clmd[i], n_sim)
+                if simulation_pos is None:
                     self.report({'ERROR'}, "SIM_get_cloth_verts вернул ошибку")
                     bpy.ops.screen.animation_cancel()
                     return {'CANCELLED'}
@@ -1293,13 +1336,19 @@ class GPUCloth_UpdateSimulation(bpy.types.Operator):
                           if i < len(g_proxy_handles) else None)
                 if handle is not None:
                     nP = g_dll.ProxySim_proxy_count(handle)
-                    proxy_pos = (c_float * (nP * 3))()
-                    # Позиции proxy-меша берутся из _get_positions proxy clmd
-                    # (предполагается, что proxy симулируется отдельным AddCloth)
-                    out_hi = (c_float * (g_dll.ProxySim_hi_count(handle) * 3))()
-                    g_dll.ProxySim_apply(handle, proxy_pos, out_hi)
+                    if nP != n_sim:
+                        self.report({'ERROR'},
+                            f"ProxySim count changed: handle={nP}, mesh={n_sim}")
+                        bpy.ops.screen.animation_cancel()
+                        return {'CANCELLED'}
+                    self._apply_positions(simulation_obj, simulation_pos, nP)
+                    nV = g_dll.ProxySim_hi_count(handle)
+                    out_hi = (c_float * (nV * 3))()
+                    g_dll.ProxySim_apply(handle, simulation_pos, out_hi)
                     pos = out_hi
-                    nV  = g_dll.ProxySim_hi_count(handle)
+                else:
+                    pos = simulation_pos
+                    nV = n_sim
 
                 # 4. Обновляем меш в Blender (foreach_set, Blender 4.x safe)
                 self._apply_positions(cloth_obj, pos, nV)
@@ -2116,7 +2165,8 @@ def register():
 
     # Сбрасываем глобальное состояние при регистрации
     global g_dll, g_runtime_initialized, g_scene, g_obj, g_mesh, g_clmd
-    global g_clothOBJs, g_clothCollisionOBJs, g_proxy_handles
+    global g_clothOBJs, g_simulationOBJs
+    global g_clothCollisionOBJs, g_proxy_handles
     g_dll                = None
     g_runtime_initialized = False
     g_scene              = None
@@ -2124,6 +2174,7 @@ def register():
     g_clmd               = []
     g_mesh               = []
     g_clothOBJs          = []
+    g_simulationOBJs     = []
     g_clothCollisionOBJs = []
     g_proxy_handles      = []
     _collision_keepalive.clear()
@@ -2154,7 +2205,8 @@ def unregister():
 
     # Очищаем состояние
     global g_dll, g_runtime_initialized, g_scene, g_obj, g_mesh, g_clmd
-    global g_clothOBJs, g_clothCollisionOBJs, g_proxy_handles
+    global g_clothOBJs, g_simulationOBJs
+    global g_clothCollisionOBJs, g_proxy_handles
     free_gpu_memory()
     _shutdown_runtime_if_initialized()
     g_dll                = None
@@ -2165,6 +2217,7 @@ def unregister():
     g_clmd               = []
     g_mesh               = []
     g_clothOBJs          = []
+    g_simulationOBJs     = []
     g_clothCollisionOBJs = []
     g_proxy_handles      = []
     _collision_keepalive.clear()

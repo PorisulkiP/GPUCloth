@@ -20,6 +20,7 @@ if "bpy" in locals():
 
     reloadable_modules = [
         'cloth_settings_bridge',
+        'proxy_binding',
         'properties',
         'operators',
         'ui',
@@ -29,6 +30,7 @@ if "bpy" in locals():
             importlib.reload(locals()[module_name])
 
 from . import cloth_settings_bridge
+from . import proxy_binding
 from . import properties
 from . import operators
 from . import ui

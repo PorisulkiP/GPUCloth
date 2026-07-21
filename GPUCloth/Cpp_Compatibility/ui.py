@@ -18,6 +18,7 @@ import bpy
 from ..utils.version_compatibility_utils import _t
 from . import cloth_settings_bridge
 from . import operators
+from .proxy_binding import ProxyBindingError, validate_proxy_binding
 
 
 # ===========================================================================
@@ -663,6 +664,21 @@ class GPUCLOTH_PT_proxy(bpy.types.Panel):
                         "Выберите объект с грубой сеткой"),
                 icon='ERROR' if s.use_proxy else 'INFO',
             )
+        elif s.use_proxy:
+            try:
+                binding = validate_proxy_binding(context.object, s)
+                col.label(
+                    text=(
+                        f"{binding['simulation_vertex_count']} -> "
+                        f"{binding['render_vertex_count']} vertices"),
+                    icon='CHECKMARK',
+                )
+            except ProxyBindingError:
+                col.label(
+                    text=_t("Grid counts do not match meshes",
+                            "Размеры сетки не совпадают с мешами"),
+                    icon='ERROR',
+                )
 
         col.separator()
 
