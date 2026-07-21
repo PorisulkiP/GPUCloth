@@ -24,7 +24,7 @@ import time
 import numpy as np
 from ctypes import (
     cdll, windll, POINTER, pointer, cast,
-    c_bool, c_float, c_short, c_int, c_void_p, c_size_t, c_char_p,
+    c_bool, c_float, c_short, c_int, c_uint, c_void_p, c_size_t, c_char_p,
 )
 
 from . import cpp_types as CType
@@ -46,10 +46,19 @@ g_clmd               = []     # list[POINTER(CType.ClothModifierData)]
 g_mesh               = []     # list[POINTER(CType.Mesh)]
 g_clothOBJs          = []     # list[bpy.types.Object]  — Blender-объекты ткани
 g_clothCollisionOBJs = []     # list[POINTER(CType.Object)] — объекты столкновения
+_dll_directory_handles = []
 
 # Proxy-res: один handle на объект ткани (None если proxy не активен)
 g_proxy_handles      = []     # list[c_void_p | None]
 _collision_keepalive  = []     # prevent GC of collision ctypes data
+
+
+def native_frame_timescale(scene, speed_multiplier):
+    """Convert Blender's dimensionless speed to native seconds per frame."""
+    fps = float(scene.render.fps)
+    if fps <= 0.0:
+        return 0.0
+    return float(speed_multiplier) * float(scene.render.fps_base) / fps
 
 # Защита от GC для ctypes-массивов, переданных в Cache_write_frame_async
 # C++ пишет в фоне — массив должен жить до завершения записи
@@ -57,6 +66,12 @@ _live_arrays         = []     # list[c_float array]
 
 # Keepalive for effectors ctypes array
 _effectors_keepalive = None
+
+
+def _close_dll_directories():
+    for directory_handle in _dll_directory_handles:
+        directory_handle.close()
+    _dll_directory_handles.clear()
 
 # ─── Effector helpers ──────────────────────────────────────────────────────
 
@@ -304,19 +319,21 @@ def free_gpu_memory(context=None):
     global g_dll, g_scene, g_obj, g_mesh, g_clmd
     global g_clothOBJs, g_clothCollisionOBJs, g_proxy_handles
 
+    success = True
     if g_dll is not None:
         # Освобождаем ProxySim handles перед FreeSolverData
         for handle in g_proxy_handles:
             if handle is not None:
                 try:
                     g_dll.ProxySim_free(handle)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    print(f"free_gpu_memory: ProxySim_free() failed: {exc}")
+                    success = False
         try:
             g_dll.FreeSolverData()
         except Exception as e:
             print(f"free_gpu_memory: FreeSolverData() failed: {e}")
-            return False
+            success = False
 
     g_scene              = None
     g_obj                = []
@@ -332,7 +349,7 @@ def free_gpu_memory(context=None):
     if context is not None and hasattr(context.scene, 'gpu_cloth_springs_built'):
         context.scene.gpu_cloth_springs_built = False
 
-    return True
+    return success
 
 
 # ===========================================================================
@@ -386,7 +403,7 @@ class GPUCloth_LoadDLL(bpy.types.Operator):
     # ── Загрузка библиотеки и привязка функций ───────────────────────────────
 
     def load_dll(self):
-        global g_dll
+        global g_dll, _dll_directory_handles
         if g_dll is not None:
             return True  # уже загружена
 
@@ -408,7 +425,18 @@ class GPUCloth_LoadDLL(bpy.types.Operator):
         if dll_dir not in os.environ.get("PATH", ""):
             os.environ["PATH"] = dll_dir + os.pathsep + os.environ.get("PATH", "")
         if hasattr(os, 'add_dll_directory'):
-            os.add_dll_directory(dll_dir)
+            candidates = [dll_dir]
+            cuda_path = os.environ.get("CUDA_PATH")
+            if cuda_path:
+                candidates.append(os.path.join(cuda_path, "bin"))
+            for path_entry in os.environ.get("PATH", "").split(os.pathsep):
+                if (path_entry and
+                        (os.path.isfile(os.path.join(path_entry, "cublas64_12.dll")) or
+                         os.path.isfile(os.path.join(path_entry, "cusparse64_12.dll")))):
+                    candidates.append(path_entry)
+            for directory in dict.fromkeys(os.path.abspath(path) for path in candidates):
+                if os.path.isdir(directory):
+                    _dll_directory_handles.append(os.add_dll_directory(directory))
 
         try:
             g_dll = cdll.LoadLibrary(filename)
@@ -473,6 +501,39 @@ class GPUCloth_LoadDLL(bpy.types.Operator):
                 c_size_t,
             ]
             g_dll.SIM_get_cloth_verts.restype = None
+
+            g_dll.SIM_sizeof_cloth_vertex.argtypes = []
+            g_dll.SIM_sizeof_cloth_vertex.restype = c_size_t
+
+            g_dll.SIM_offsetof_cloth_vertex_x.argtypes = []
+            g_dll.SIM_offsetof_cloth_vertex_x.restype = c_size_t
+
+            g_dll.SIM_get_product_abi_version.argtypes = [
+                POINTER(CType.GPUClothABIVersion)]
+            g_dll.SIM_get_product_abi_version.restype = c_bool
+
+            g_dll.SIM_get_host_layout.argtypes = [
+                POINTER(CType.GPUClothHostLayout)]
+            g_dll.SIM_get_host_layout.restype = c_bool
+
+            g_dll.SIM_get_descriptor_layout.argtypes = [
+                POINTER(CType.GPUClothDescriptorLayout)]
+            g_dll.SIM_get_descriptor_layout.restype = c_bool
+
+            g_dll.SIM_get_feature_count.argtypes = []
+            g_dll.SIM_get_feature_count.restype = c_size_t
+
+            g_dll.SIM_get_feature_info.argtypes = [
+                c_size_t, POINTER(CType.GPUClothFeatureInfo)]
+            g_dll.SIM_get_feature_info.restype = c_bool
+
+            g_dll.SIM_query_feature.argtypes = [
+                c_uint, POINTER(CType.GPUClothFeatureInfo)]
+            g_dll.SIM_query_feature.restype = c_bool
+
+            g_dll.SIM_configure_feature.argtypes = [
+                POINTER(CType.GPUClothFeatureConfigHeader)]
+            g_dll.SIM_configure_feature.restype = c_uint
 
             # ── ProxySim API ─────────────────────────────────────────────────
             #
@@ -565,13 +626,16 @@ class GPUCloth_LoadDLL(bpy.types.Operator):
             if not _initialize_runtime_if_available():
                 self.report({'ERROR'}, "SIM_initialize_runtime() failed.")
                 g_dll = None
+                _close_dll_directories()
 
         except OSError as e:
             self.report({'ERROR'}, f"Не удалось загрузить DLL: {e}")
             g_dll = None
+            _close_dll_directories()
         except AttributeError as e:
             self.report({'ERROR'}, f"DLL не содержит ожидаемой функции: {e}")
             g_dll = None
+            _close_dll_directories()
 
         return g_dll is not None
 
@@ -596,7 +660,7 @@ class GPUCloth_UnloadDLL(bpy.types.Operator):
         return g_dll is not None
 
     def execute(self, context):
-        global g_dll
+        global g_dll, _dll_directory_handles
         if g_dll is None:
             self.report({'WARNING'}, "DLL не загружена.")
             return {'CANCELLED'}
@@ -614,6 +678,7 @@ class GPUCloth_UnloadDLL(bpy.types.Operator):
             return {'CANCELLED'}
         finally:
             g_dll = None
+            _close_dll_directories()
         return {'FINISHED'}
 
 
@@ -842,7 +907,8 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
 
         # ── Timing ────────────────────────────────────────────────────────
         sim_parms.time_scale       = gs.speed_multiplier
-        sim_parms.timescale        = 1.0
+        sim_parms.timescale        = native_frame_timescale(
+            context.scene, gs.speed_multiplier)
         sim_parms.dt               = 1
         sim_parms.avg_spring_len   = 0.0
         sim_parms.goalfrict        = gs.goalfrict
@@ -914,16 +980,18 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
         coll_parms = pointer(CType.ClothCollSettings())
         coll_parms.contents.epsilon       = gs.epsilon
         coll_parms.contents.self_friction = 5.0
-        coll_parms.contents.friction      = 5.0
-        coll_parms.contents.damping       = 0.0
+        coll_parms.contents.friction      = gs.collision_friction
+        coll_parms.contents.damping       = gs.collision_damping
         coll_parms.contents.selfepsilon   = gs.selfepsilon
-        coll_parms.contents.loop_count    = 2
+        coll_parms.contents.loop_count    = gs.collision_quality
         coll_parms.contents.group         = None  # TODO: resolve Collection ptr
         coll_parms.contents.vgroup_selfcol = 0
         coll_parms.contents.vgroup_objcol  = 0
         coll_parms.contents.clamp          = gs.clamp
         coll_parms.contents.self_clamp     = gs.self_clamp
-        coll_parms.contents.flags          = CType.CLOTH_COLLSETTINGS_FLAG_ENABLED
+        coll_parms.contents.flags = (
+            CType.CLOTH_COLLSETTINGS_FLAG_ENABLED
+            if gs.use_object_collision else 0)
         clmd.coll_parms = coll_parms
 
         # ── Результат солвера ─────────────────────────────────────────────
@@ -1020,7 +1088,7 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
         # 7. Загружаем сцену на GPU
         self.fill_Scene(context)
 
-            for coll_ptr in g_clothCollisionOBJs:
+        for coll_ptr in g_clothCollisionOBJs:
             try:
                 if not g_dll.AddCollisionObject(coll_ptr):
                     self.report({'ERROR'}, "Ошибка AddCollisionObject")
@@ -1956,7 +2024,74 @@ def _ogc_bounds_draw():
 #  Регистрация
 # ===========================================================================
 
+class GPUCloth_SyncCPUSettings(bpy.types.Operator):
+    bl_idname = "gpucloth.sync_cpu_settings"
+    bl_label = "Import CPU Cloth Settings"
+    bl_description = "Import settings already supported by GPUCloth"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        obj = context.object
+        return obj is not None and obj.type == 'MESH' and hasattr(obj, 'GPUCloth')
+
+    def execute(self, context):
+        from . import cloth_settings_bridge
+        result = cloth_settings_bridge.sync_cpu_to_gpu(
+            context.object, context.scene)
+        if result["errors"] or result["unsupported_non_default"]:
+            message = (
+                result["errors"][0] if result["errors"]
+                else "Unsupported non-default setting: "
+                + result["unsupported_non_default"][0])
+            self.report({'ERROR'}, message)
+            return {'CANCELLED'}
+        self.report(
+            {'INFO'},
+            f"Imported {len(result['copied'])}; unsupported {len(result['unsupported'])}")
+        return {'FINISHED'}
+
+
+class GPUCloth_ShowCPUSyncReport(bpy.types.Operator):
+    bl_idname = "gpucloth.show_cpu_sync_report"
+    bl_label = "CPU Cloth Import Report"
+    bl_description = "Show imported and unsupported CPU Cloth settings"
+
+    @classmethod
+    def poll(cls, context):
+        obj = context.object
+        return bool(
+            obj is not None and hasattr(obj, 'GPUCloth')
+            and obj.GPUCloth.cpu_sync_report)
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_props_dialog(self, width=620)
+
+    def draw(self, context):
+        from . import cloth_settings_bridge
+        report = cloth_settings_bridge.load_report(context.object)
+        layout = self.layout
+        layout.label(text=f"Imported: {len(report['copied'])}", icon='CHECKMARK')
+        layout.label(text=f"Unsupported: {len(report['unsupported'])}", icon='QUESTION')
+        if report["unsupported_non_default"]:
+            layout.label(
+                text=f"Blocking: {len(report['unsupported_non_default'])}", icon='ERROR')
+            for name in report["unsupported_non_default"]:
+                layout.label(text=name, icon='ERROR')
+        blocking = set(report["unsupported_non_default"])
+        for name in report["unsupported"]:
+            if name not in blocking:
+                layout.label(text=name)
+        for error in report["errors"]:
+            layout.label(text=error, icon='ERROR')
+
+    def execute(self, context):
+        return {'FINISHED'}
+
+
 _OPERATOR_CLASSES = [
+    GPUCloth_SyncCPUSettings,
+    GPUCloth_ShowCPUSyncReport,
     GPUCloth_FreeVRAM,
     GPUCloth_LoadDLL,
     GPUCloth_UnloadDLL,
@@ -1975,6 +2110,7 @@ _OPERATOR_CLASSES = [
 
 
 def register():
+    _close_dll_directories()
     for cls in _OPERATOR_CLASSES:
         bpy.utils.register_class(cls)
 
@@ -2019,9 +2155,11 @@ def unregister():
     # Очищаем состояние
     global g_dll, g_runtime_initialized, g_scene, g_obj, g_mesh, g_clmd
     global g_clothOBJs, g_clothCollisionOBJs, g_proxy_handles
+    free_gpu_memory()
     _shutdown_runtime_if_initialized()
     g_dll                = None
     g_runtime_initialized = False
+    _close_dll_directories()
     g_scene              = None
     g_obj                = []
     g_clmd               = []

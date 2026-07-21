@@ -16,6 +16,8 @@
 
 import bpy
 from ..utils.version_compatibility_utils import _t
+from . import cloth_settings_bridge
+from . import operators
 
 
 # ===========================================================================
@@ -29,7 +31,6 @@ class GPUCLOTH_PT_main(bpy.types.Panel):
     bl_space_type  = 'PROPERTIES'
     bl_region_type = 'WINDOW'
     bl_context     = "physics"
-    bl_options     = {'DEFAULT_CLOSED'}
 
     @classmethod
     def poll(cls, context):
@@ -38,72 +39,80 @@ class GPUCLOTH_PT_main(bpy.types.Panel):
             and context.object.type == 'MESH'
         )
 
-    def draw_header(self, context):
-        layout = self.layout
-        obj    = context.object
-        if hasattr(obj, 'GPUCloth'):
-            layout.prop(obj.GPUCloth, "is_active", text="")
-
     def draw(self, context):
         layout = self.layout
         obj    = context.object
         scene  = context.scene
 
-        if not hasattr(obj, 'GPUCloth') or not obj.GPUCloth.is_active:
+        if not hasattr(obj, 'GPUCloth'):
             layout.label(
                 text=_t("Enable GPUCloth for this object",
                         "Включите GPUCloth для этого объекта"),
                 icon='INFO')
             return
 
-        # ── DLL ──────────────────────────────────────────────────────────────
-        box = layout.box()
-        box.label(text=_t("Simulation Library", "Библиотека симуляции"),
-                  icon='PLUGIN')
-        row = box.row(align=True)
-        row.operator("gpucloth.load_dll",
-                     text=_t("Load DLL", "Загрузить DLL"), icon='IMPORT')
-        row.operator("gpucloth.unload_dll",
-                     text=_t("Unload", "Выгрузить"), icon='X')
-
-        layout.separator()
-
-        # ── Simulation controls ──────────────────────────────────────────────
-        col = layout.column(align=True)
-        col.operator("gpucloth.prepare_simulation",
-                     text=_t("Prepare Simulation", "Подготовить симуляцию"),
-                     icon='PLAY')
-        col.operator("gpucloth.destroy_simulation_data",
-                     text=_t("Free GPU Memory", "Освободить GPU память"),
-                     icon='TRASH')
-
-        if scene.gpu_cloth_springs_built:
-            layout.label(
-                text=_t("Simulation ready", "Симуляция готова"),
-                icon='CHECKMARK')
-        else:
-            layout.label(
-                text=_t("Simulation not initialized",
-                        "Симуляция не инициализирована"),
+        settings = obj.GPUCloth
+        layout.prop(settings, "execution_backend", expand=True)
+        cpu_modifier = cloth_settings_bridge.find_cpu_cloth_modifier(obj)
+        row = layout.row(align=True)
+        row.enabled = cpu_modifier is not None
+        row.operator("gpucloth.sync_cpu_settings", text="", icon='FILE_REFRESH')
+        if cpu_modifier is None:
+            row.label(
+                text=_t("CPU Cloth not found", "CPU Cloth не найден"),
                 icon='ERROR')
+        elif settings.cpu_sync_errors or settings.cpu_sync_blockers:
+            if settings.cpu_sync_errors:
+                row.label(
+                    text=_t(
+                        f"{settings.cpu_sync_errors} errors",
+                        f"Ошибок: {settings.cpu_sync_errors}"),
+                    icon='ERROR')
+            if settings.cpu_sync_blockers:
+                row.label(
+                    text=_t(
+                        f"{settings.cpu_sync_blockers} blocking",
+                        f"Блокирует: {settings.cpu_sync_blockers}"),
+                    icon='ERROR')
+        else:
+            row.label(
+                text=_t(
+                    f"{settings.cpu_sync_copied} imported",
+                    f"Перенесено: {settings.cpu_sync_copied}"),
+                icon='CHECKMARK')
+            if settings.cpu_sync_unsupported:
+                row.label(
+                    text=_t(
+                        f"{settings.cpu_sync_unsupported} unsupported",
+                        f"Не поддержано: {settings.cpu_sync_unsupported}"),
+                    icon='QUESTION')
+        if settings.cpu_sync_report:
+            row.operator("gpucloth.show_cpu_sync_report", text="", icon='INFO')
 
-        # ── Test scenes ────────────────────────────────────────────────────
+        if settings.execution_backend != 'GPU' or not settings.is_active:
+            return
+
+        prepared = (
+            scene.gpu_cloth_springs_built
+            and obj in operators.g_clothOBJs)
+
         layout.separator()
-        box = layout.box()
-        box.label(text=_t("Test Scenes", "Тестовые сцены"),
-                  icon='EXPERIMENTAL')
-        col = box.column(align=True)
-        col.operator("gpucloth.test_drape_on_sphere",
-                     text=_t("Drape On Sphere", "Драпировка на сфере"))
-        col.operator("gpucloth.test_twist",
-                     text=_t("Twist Test", "Тест скручивания"))
-        col.operator("gpucloth.test_multi_layer_drop",
-                     text=_t("Multi Layer Drop", "Многослойное падение"))
-        col.operator("gpucloth.test_cushion_drop",
-                     text=_t("Cushion Drop", "Падение подушки"))
-        col.operator("gpucloth.test_ogc_bounds",
-                     text=_t("OGC Bounds Viz", "OGC: визуализация границ"),
-                     icon='SPHERE')
+
+        status = layout.row(align=True)
+        status.label(
+            text=_t("Ready", "Готово") if prepared else
+                 _t("Not prepared", "Не подготовлено"),
+            icon='CHECKMARK' if prepared else 'INFO')
+        prepare = status.row(align=True)
+        prepare.enabled = operators.g_dll is not None and not prepared
+        prepare.operator(
+            "gpucloth.prepare_simulation",
+            text=_t("Prepare", "Подготовить"), icon='PLAY')
+        stop = status.row(align=True)
+        stop.enabled = operators.g_dll is not None and prepared
+        stop.operator(
+            "gpucloth.destroy_simulation_data",
+            text=_t("Stop", "Остановить"), icon='CANCEL')
 
 
 # ===========================================================================
@@ -428,23 +437,31 @@ class GPUCLOTH_PT_object_collision(bpy.types.Panel):
         layout = self.layout
         s      = context.object.GPUCloth
 
-        col = layout.column(align=True)
+        layout.prop(s, "use_object_collision", text="")
+        body = layout.column()
+        body.active = s.use_object_collision
+        row = body.row(align=True)
+        row.prop(s, "collision_quality")
+        row.prop(s, "collision_friction")
+        row.prop(s, "collision_damping")
+
+        col = body.column(align=True)
         col.label(text=_t("Distance:", "Дистанция:"))
         col.prop(s, "epsilon",
                  text=_t("Object", "Объект"))
         col.prop(s, "selfepsilon",
                  text=_t("Self", "Самоколлизия"))
 
-        layout.separator()
-        col = layout.column(align=True)
+        body.separator()
+        col = body.column(align=True)
         col.label(text=_t("Impulse Clamping:", "Ограничение импульса:"))
         col.prop(s, "clamp",
                  text=_t("Object", "Объект"))
         col.prop(s, "self_clamp",
                  text=_t("Self", "Самоколлизия"))
 
-        layout.separator()
-        col = layout.column()
+        body.separator()
+        col = body.column()
         col.prop(s, "collision_collection",
                  text=_t("Collision Collection", "Коллекция коллизий"))
 

@@ -30,11 +30,55 @@ from ..utils.version_compatibility_utils import _t
 
 
 def _on_is_active_change(self, context):
+    if self.is_active and self.execution_backend != 'GPU':
+        self.execution_backend = 'GPU'
+        if self.execution_backend != 'GPU':
+            self.is_active = False
+            return
+    elif not self.is_active and self.execution_backend != 'CPU':
+        self.execution_backend = 'CPU'
     if self.is_active:
         from . import operators as ops
         if ops.g_dll is None:
-            loader = ops.GPUCloth_LoadDLL()
-            loader.load_dll()
+            try:
+                load_result = bpy.ops.gpucloth.load_dll()
+            except Exception as exc:
+                load_result = {'CANCELLED'}
+                load_error = f"GPUCloth DLL activation failed: {exc}"
+            else:
+                load_error = "GPUCloth DLL activation failed"
+            if 'FINISHED' not in load_result:
+                from . import cloth_settings_bridge
+                cloth_settings_bridge.record_runtime_error(
+                    self.id_data, load_error)
+                self.is_active = False
+                self.execution_backend = 'CPU'
+                cloth_settings_bridge.apply_modifier_ownership(
+                    self.id_data, 'CPU')
+
+
+_backend_switch_active = False
+
+
+def _on_execution_backend_change(self, context):
+    global _backend_switch_active
+    if _backend_switch_active:
+        return
+    obj = self.id_data
+    if obj is None:
+        return
+    from . import cloth_settings_bridge
+    _backend_switch_active = True
+    try:
+        result = cloth_settings_bridge.select_backend(
+            obj, self.execution_backend, context.scene if context else None)
+        if result is not None and (
+                result["errors"] or result["unsupported_non_default"]):
+            self.execution_backend = 'CPU'
+            cloth_settings_bridge.select_backend(
+                obj, 'CPU', context.scene if context else None)
+    finally:
+        _backend_switch_active = False
 
 
 # ===========================================================================
@@ -287,6 +331,52 @@ def _material_preset_items(self, context):
 
 
 # ===========================================================================
+#  PropertyGroup for field weights
+# ===========================================================================
+
+class GPUClothEffectorWeights(PropertyGroup):
+    """Per-field-type weights mirrored by the native EffectorWeights array."""
+
+    global_gravity: FloatProperty(
+        name="Global Gravity",
+        description="Override scene gravity for this cloth (0 = use scene, 1 = full scene gravity)",
+        default=1.0,
+        min=0.0,
+        max=1.0,
+        subtype='FACTOR',
+    )
+
+    weight_gravity: FloatProperty(
+        name="Gravity", description="Gravity field weight", default=1.0, min=-10.0, max=10.0)
+    weight_wind: FloatProperty(
+        name="Wind", description="Wind field weight", default=1.0, min=-10.0, max=10.0)
+    weight_vortex: FloatProperty(
+        name="Vortex", description="Vortex field weight", default=1.0, min=-10.0, max=10.0)
+    weight_magnetic: FloatProperty(
+        name="Magnetic", description="Magnetic field weight", default=1.0, min=-10.0, max=10.0)
+    weight_turbulence: FloatProperty(
+        name="Turbulence", description="Turbulence field weight", default=1.0, min=-10.0, max=10.0)
+    weight_drag: FloatProperty(
+        name="Drag", description="Drag field weight", default=1.0, min=-10.0, max=10.0)
+    weight_smoke_flow: FloatProperty(
+        name="Smoke Flow", description="Smoke Flow field weight", default=1.0, min=-10.0, max=10.0)
+    weight_harmonic: FloatProperty(
+        name="Harmonic", description="Harmonic field weight", default=1.0, min=-10.0, max=10.0)
+    weight_charge: FloatProperty(
+        name="Charge", description="Charge field weight", default=1.0, min=-10.0, max=10.0)
+    weight_lennard_jones: FloatProperty(
+        name="Lennard-Jones", description="Lennard-Jones field weight", default=1.0, min=-10.0, max=10.0)
+    weight_texture: FloatProperty(
+        name="Texture", description="Texture field weight", default=1.0, min=-10.0, max=10.0)
+    weight_curve_guide: FloatProperty(
+        name="Curve Guide", description="Curve Guide field weight", default=1.0, min=-10.0, max=10.0)
+    weight_boid: FloatProperty(
+        name="Boid", description="Boid field weight", default=1.0, min=-10.0, max=10.0)
+    weight_fluid: FloatProperty(
+        name="Fluid", description="Fluid field weight", default=1.0, min=-10.0, max=10.0)
+
+
+# ===========================================================================
 #  PropertyGroup для объекта — настройки ткани
 # ===========================================================================
 
@@ -300,6 +390,23 @@ class GPUClothObjectSettings(PropertyGroup):
         default=False,
         update=_on_is_active_change,
     )
+
+    execution_backend: EnumProperty(
+        name="Simulation Backend",
+        description="Select CPU Cloth or GPUCloth evaluation",
+        items=(
+            ('CPU', "CPU Cloth", "Use Blender Cloth modifier"),
+            ('GPU', "GPUCloth", "Use GPUCloth with imported CPU Cloth settings"),
+        ),
+        default='CPU',
+        update=_on_execution_backend_change,
+    )
+
+    cpu_sync_copied: IntProperty(default=0, options={'HIDDEN'})
+    cpu_sync_unsupported: IntProperty(default=0, options={'HIDDEN'})
+    cpu_sync_blockers: IntProperty(default=0, options={'HIDDEN'})
+    cpu_sync_errors: IntProperty(default=0, options={'HIDDEN'})
+    cpu_sync_report: StringProperty(default="", options={'HIDDEN'})
 
     vertex_mass: FloatProperty(
         name="Vertex Mass",
@@ -882,6 +989,37 @@ class GPUClothObjectSettings(PropertyGroup):
     )
 
     # ── Object Collision ────────────────────────────────────────────────────
+    use_object_collision: BoolProperty(
+        name="Object Collision",
+        description="Enable collision against Blender collision objects",
+        default=True,
+    )
+
+    collision_friction: FloatProperty(
+        name="Friction",
+        description="Object collision friction",
+        default=5.0,
+        min=0.0,
+        max=80.0,
+    )
+
+    collision_damping: FloatProperty(
+        name="Damping",
+        description="Object collision damping",
+        default=0.0,
+        min=0.0,
+        max=1.0,
+        subtype='FACTOR',
+    )
+
+    collision_quality: IntProperty(
+        name="Collision Quality",
+        description="Collision iterations per simulation step",
+        default=2,
+        min=1,
+        max=80,
+    )
+
     epsilon: FloatProperty(
         name="Distance",
         description="Minimum distance for object collisions (m)",
@@ -1045,52 +1183,6 @@ class GPUClothObjectSettings(PropertyGroup):
 
 
 # ===========================================================================
-#  PropertyGroup для весов полей
-# ===========================================================================
-
-class GPUClothEffectorWeights(PropertyGroup):
-    """Per-field-type effector weights (mirrors EffectorWeights.weight[14] + global_gravity)."""
-
-    global_gravity: FloatProperty(
-        name="Global Gravity",
-        description="Override scene gravity for this cloth (0 = use scene, 1 = full scene gravity)",
-        default=1.0,
-        min=0.0,
-        max=1.0,
-        subtype='FACTOR',
-    )
-
-    weight_gravity: FloatProperty(
-        name="Gravity", description="Gravity field weight", default=1.0, min=-10.0, max=10.0)
-    weight_wind: FloatProperty(
-        name="Wind", description="Wind field weight", default=1.0, min=-10.0, max=10.0)
-    weight_vortex: FloatProperty(
-        name="Vortex", description="Vortex field weight", default=1.0, min=-10.0, max=10.0)
-    weight_magnetic: FloatProperty(
-        name="Magnetic", description="Magnetic field weight", default=1.0, min=-10.0, max=10.0)
-    weight_turbulence: FloatProperty(
-        name="Turbulence", description="Turbulence field weight", default=1.0, min=-10.0, max=10.0)
-    weight_drag: FloatProperty(
-        name="Drag", description="Drag field weight", default=1.0, min=-10.0, max=10.0)
-    weight_smoke_flow: FloatProperty(
-        name="Smoke Flow", description="Smoke Flow field weight", default=1.0, min=-10.0, max=10.0)
-    weight_harmonic: FloatProperty(
-        name="Harmonic", description="Harmonic field weight", default=1.0, min=-10.0, max=10.0)
-    weight_charge: FloatProperty(
-        name="Charge", description="Charge field weight", default=1.0, min=-10.0, max=10.0)
-    weight_lennard_jones: FloatProperty(
-        name="Lennard-Jones", description="Lennard-Jones field weight", default=1.0, min=-10.0, max=10.0)
-    weight_texture: FloatProperty(
-        name="Texture", description="Texture field weight", default=1.0, min=-10.0, max=10.0)
-    weight_curve_guide: FloatProperty(
-        name="Curve Guide", description="Curve Guide field weight", default=1.0, min=-10.0, max=10.0)
-    weight_boid: FloatProperty(
-        name="Boid", description="Boid field weight", default=1.0, min=-10.0, max=10.0)
-    weight_fluid: FloatProperty(
-        name="Fluid", description="Fluid field weight", default=1.0, min=-10.0, max=10.0)
-
-
-# ===========================================================================
 #  PropertyGroup для сцены — гравитация + кэш
 # ===========================================================================
 
@@ -1167,9 +1259,9 @@ class GPUClothSceneSettings(PropertyGroup):
 # ===========================================================================
 
 _PROPERTY_CLASSES = [
+    GPUClothEffectorWeights,
     GPUClothObjectSettings,
     GPUClothSceneSettings,
-    GPUClothEffectorWeights,
 ]
 
 

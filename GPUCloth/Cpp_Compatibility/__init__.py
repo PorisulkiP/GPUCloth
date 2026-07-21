@@ -19,6 +19,7 @@ if "bpy" in locals():
     import importlib
 
     reloadable_modules = [
+        'cloth_settings_bridge',
         'properties',
         'operators',
         'ui',
@@ -27,6 +28,7 @@ if "bpy" in locals():
         if module_name in locals():
             importlib.reload(locals()[module_name])
 
+from . import cloth_settings_bridge
 from . import properties
 from . import operators
 from . import ui
@@ -36,6 +38,7 @@ def register():
     # Порядок важен: PropertyGroup-ы регистрируются ДО операторов,
     # которые читают поля типа OBJ.GPUCloth.*
     properties.register()
+    cloth_settings_bridge.restore_all_cpu_owners()
     operators.register()
     ui.register()
 
@@ -44,6 +47,7 @@ def unregister():
     # Порядок обратный: UI первым (ссылается на операторы),
     # затем операторы (ссылаются на PropertyGroup),
     # затем PropertyGroup-ы.
+    cloth_settings_bridge.restore_all_cpu_owners()
     ui.unregister()
     operators.unregister()
     properties.unregister()

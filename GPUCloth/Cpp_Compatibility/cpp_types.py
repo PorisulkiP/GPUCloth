@@ -272,6 +272,399 @@ class GPUEffector(Structure):
         ("imat", c_float * 16),
     ]
 
+
+GPUCLOTH_FEATURE_MISSING = 0
+GPUCLOTH_FEATURE_PARTIAL = 1
+GPUCLOTH_FEATURE_IMPLEMENTED = 2
+GPUCLOTH_FEATURE_PROVEN = 3
+
+GPUCLOTH_FEATURE_BLENDER_CORE = 1 << 0
+GPUCLOTH_FEATURE_RELEASE_REQUIRED = 1 << 1
+GPUCLOTH_FEATURE_FUTURE_CONFIG = 1 << 2
+GPUCLOTH_FEATURE_EXTENSION = 1 << 3
+
+GPUCLOTH_CONFIG_NONE = 0
+GPUCLOTH_CONFIG_SIMULATION = 1 << 0
+GPUCLOTH_CONFIG_MATERIAL = 1 << 1
+GPUCLOTH_CONFIG_PIN = 1 << 2
+GPUCLOTH_CONFIG_CONSTRAINT = 1 << 3
+GPUCLOTH_CONFIG_PRESSURE = 1 << 4
+GPUCLOTH_CONFIG_COLLISION = 1 << 5
+GPUCLOTH_CONFIG_COLLIDER = 1 << 6
+GPUCLOTH_CONFIG_MESH_STATE = 1 << 7
+GPUCLOTH_CONFIG_EFFECTOR = 1 << 8
+GPUCLOTH_CONFIG_EFFECTOR_WEIGHTS = 1 << 9
+GPUCLOTH_CONFIG_CACHE = 1 << 10
+GPUCLOTH_CONFIG_SEWING = 1 << 11
+GPUCLOTH_CONFIG_VERTEX_CHANNEL = 1 << 12
+GPUCLOTH_CONFIG_COLLISION_FILTER = 1 << 13
+GPUCLOTH_CONFIG_PROXY = 1 << 14
+GPUCLOTH_CONFIG_DIAGNOSTICS = 1 << 15
+
+GPUCLOTH_ABI_UNSUPPORTED = 4
+
+
+class GPUClothABIVersion(Structure):
+    _fields_ = [
+        ("struct_size", c_uint),
+        ("abi_major", c_uint),
+        ("abi_minor", c_uint),
+        ("abi_patch", c_uint),
+        ("feature_schema_version", c_uint),
+        ("feature_count", c_uint),
+        ("reserved", c_uint * 2),
+    ]
+
+
+class GPUClothFeatureInfo(Structure):
+    _fields_ = [
+        ("struct_size", c_uint),
+        ("feature_id", c_uint),
+        ("status", c_uint),
+        ("supported_solver_mask", c_uint),
+        ("proven_solver_mask", c_uint),
+        ("flags", c_uint),
+        ("config_version", c_uint),
+        ("config_kind_mask", c_uint),
+        ("name", c_char * 64),
+        ("detail", c_char * 192),
+    ]
+
+
+class GPUClothHostLayout(Structure):
+    _fields_ = [
+        ("struct_size", c_uint),
+        ("schema_version", c_uint),
+        ("cloth_vertex_size", c_uint),
+        ("cloth_vertex_x_offset", c_uint),
+        ("mesh_size", c_uint),
+        ("mesh_mlooptri_offset", c_uint),
+        ("mesh_runtime_offset", c_uint),
+        ("cloth_modifier_data_size", c_uint),
+        ("cloth_modifier_data_cloth_offset", c_uint),
+        ("cloth_modifier_data_sim_offset", c_uint),
+        ("cloth_modifier_data_coll_offset", c_uint),
+        ("collision_modifier_data_size", c_uint),
+        ("collision_modifier_data_bvh_offset", c_uint),
+        ("object_size", c_uint),
+        ("object_modifiers_offset", c_uint),
+        ("object_pd_offset", c_uint),
+        ("scene_size", c_uint),
+        ("cloth_sim_settings_size", c_uint),
+        ("cloth_coll_settings_size", c_uint),
+        ("mvert_size", c_uint),
+        ("medge_size", c_uint),
+        ("mpoly_size", c_uint),
+        ("mloop_size", c_uint),
+        ("mvert_tri_size", c_uint),
+        ("reserved", c_uint * 2),
+    ]
+
+
+class GPUClothFeatureConfigHeader(Structure):
+    _fields_ = [
+        ("struct_size", c_uint),
+        ("feature_id", c_uint),
+        ("config_version", c_uint),
+        ("flags", c_uint),
+    ]
+
+
+class GPUClothVertexChannelConfig(Structure):
+    _fields_ = [
+        ("header", GPUClothFeatureConfigHeader),
+        ("channel", c_uint),
+        ("element_width", c_uint),
+        ("element_count", c_uint64),
+        ("data_address", c_uint64),
+    ]
+
+
+class GPUClothCollisionFilterConfig(Structure):
+    _fields_ = [
+        ("header", GPUClothFeatureConfigHeader),
+        ("collection_id", c_uint64),
+        ("object_mask_channel", c_uint),
+        ("self_mask_channel", c_uint),
+    ]
+
+
+class GPUClothBufferView(Structure):
+    _fields_ = [
+        ("struct_size", c_uint),
+        ("element_type", c_uint),
+        ("element_count", c_uint64),
+        ("stride_bytes", c_uint64),
+        ("data_address", c_uint64),
+        ("generation", c_uint64),
+    ]
+
+
+class GPUClothNamedValue(Structure):
+    _fields_ = [
+        ("name", c_char * 48),
+        ("value_type", c_uint),
+        ("flags", c_uint),
+        ("value_bits", c_uint64),
+    ]
+
+
+class GPUClothSimulationConfig(Structure):
+    _fields_ = [
+        ("header", GPUClothFeatureConfigHeader),
+        ("solver_mask", c_uint),
+        ("quality_steps", c_uint),
+        ("time_scale", c_float),
+        ("vertex_mass", c_float),
+        ("gravity", c_float * 3),
+        ("air_damping", c_float),
+        ("simulation_flags", c_uint),
+        ("reserved", c_uint * 3),
+    ]
+
+
+class GPUClothMaterialConfig(Structure):
+    _fields_ = [
+        ("header", GPUClothFeatureConfigHeader),
+        ("bending_model", c_uint),
+        ("material_flags", c_uint),
+        ("stiffness", c_float * 4),
+        ("stiffness_max", c_float * 4),
+        ("damping", c_float * 4),
+        ("reserved", c_uint * 2),
+    ]
+
+
+class GPUClothPinConfig(Structure):
+    _fields_ = [
+        ("header", GPUClothFeatureConfigHeader),
+        ("goal_min", c_float),
+        ("goal_max", c_float),
+        ("goal_default", c_float),
+        ("goal_stiffness", c_float),
+        ("goal_damping", c_float),
+        ("pin_stiffness", c_float),
+        ("reserved", c_uint * 2),
+    ]
+
+
+class GPUClothConstraintConfig(Structure):
+    _fields_ = [
+        ("header", GPUClothFeatureConfigHeader),
+        ("constraint_flags", c_uint),
+        ("reserved0", c_uint),
+        ("sewing_force_max", c_float),
+        ("internal_spring_max_length", c_float),
+        ("internal_spring_max_diversion", c_float),
+        ("internal_tension_stiffness", c_float),
+        ("internal_tension_stiffness_max", c_float),
+        ("internal_compression_stiffness", c_float),
+        ("internal_compression_stiffness_max", c_float),
+        ("reserved", c_uint * 3),
+    ]
+
+
+class GPUClothPressureConfig(Structure):
+    _fields_ = [
+        ("header", GPUClothFeatureConfigHeader),
+        ("pressure_flags", c_uint),
+        ("reserved0", c_uint),
+        ("uniform_pressure_force", c_float),
+        ("target_volume", c_float),
+        ("pressure_factor", c_float),
+        ("fluid_density", c_float),
+        ("reserved", c_uint * 2),
+    ]
+
+
+class GPUClothCollisionConfig(Structure):
+    _fields_ = [
+        ("header", GPUClothFeatureConfigHeader),
+        ("collision_flags", c_uint),
+        ("collision_quality", c_uint),
+        ("distance_min", c_float),
+        ("friction", c_float),
+        ("damping", c_float),
+        ("impulse_clamp", c_float),
+        ("self_distance_min", c_float),
+        ("self_friction", c_float),
+        ("self_impulse_clamp", c_float),
+        ("reserved", c_uint * 3),
+    ]
+
+
+class GPUClothColliderConfig(Structure):
+    _fields_ = [
+        ("header", GPUClothFeatureConfigHeader),
+        ("object_id", c_uint64),
+        ("collection_id", c_uint64),
+        ("topology_generation", c_uint64),
+        ("geometry_generation", c_uint64),
+        ("collider_flags", c_uint),
+        ("vertex_count", c_uint),
+        ("triangle_count", c_uint),
+        ("reserved0", c_uint),
+        ("positions_previous", GPUClothBufferView),
+        ("positions_current", GPUClothBufferView),
+        ("positions_next", GPUClothBufferView),
+        ("triangles", GPUClothBufferView),
+        ("thickness_outer", c_float),
+        ("friction", c_float),
+        ("damping", c_float),
+        ("effector_absorption", c_float),
+        ("reserved", c_uint * 4),
+    ]
+
+
+class GPUClothMeshStateConfig(Structure):
+    _fields_ = [
+        ("header", GPUClothFeatureConfigHeader),
+        ("object_id", c_uint64),
+        ("topology_generation", c_uint64),
+        ("geometry_generation", c_uint64),
+        ("rest_generation", c_uint64),
+        ("mesh_flags", c_uint),
+        ("reserved0", c_uint),
+        ("positions_previous", GPUClothBufferView),
+        ("positions_current", GPUClothBufferView),
+        ("rest_positions", GPUClothBufferView),
+        ("normals", GPUClothBufferView),
+        ("triangles", GPUClothBufferView),
+    ]
+
+
+class GPUClothEffectorConfig(Structure):
+    _fields_ = [
+        ("header", GPUClothFeatureConfigHeader),
+        ("object_id", c_uint64),
+        ("collection_id", c_uint64),
+        ("generation", c_uint64),
+        ("effector_flags", c_uint),
+        ("field_type", c_uint),
+        ("shape_type", c_uint),
+        ("falloff_type", c_uint),
+        ("named_value_count", c_uint),
+        ("reserved0", c_uint),
+        ("named_values_address", c_uint64),
+        ("object_matrix", GPUClothBufferView),
+        ("inverse_matrix", GPUClothBufferView),
+        ("reserved", c_uint64 * 1),
+    ]
+
+
+class GPUClothEffectorWeightsConfig(Structure):
+    _fields_ = [
+        ("header", GPUClothFeatureConfigHeader),
+        ("collection_id", c_uint64),
+        ("weight_flags", c_uint),
+        ("weight_count", c_uint),
+        ("weights", c_float * 15),
+        ("reserved", c_uint),
+    ]
+
+
+class GPUClothCacheConfig(Structure):
+    _fields_ = [
+        ("header", GPUClothFeatureConfigHeader),
+        ("storage_mode", c_uint),
+        ("compression_mode", c_uint),
+        ("frame_start", c_int),
+        ("frame_end", c_int),
+        ("frame_step", c_int),
+        ("cache_index", c_uint),
+        ("cache_flags", c_uint),
+        ("reserved0", c_uint),
+        ("cache_id", c_uint64),
+        ("path_utf8_address", c_uint64),
+        ("name_utf8_address", c_uint64),
+        ("reserved", c_uint64 * 3),
+    ]
+
+
+class GPUClothSewingRecord(Structure):
+    _fields_ = [
+        ("seam_id", c_uint64),
+        ("vertex_a", c_uint),
+        ("vertex_b", c_uint),
+        ("stiffness", c_float),
+        ("rest_length", c_float),
+        ("activation", c_float),
+        ("flags", c_uint),
+    ]
+
+
+class GPUClothSewingConfig(Structure):
+    _fields_ = [
+        ("header", GPUClothFeatureConfigHeader),
+        ("records", GPUClothBufferView),
+        ("phase_count", c_uint),
+        ("sewing_flags", c_uint),
+        ("activation_speed", c_float),
+        ("reserved", c_uint * 3),
+    ]
+
+
+class GPUClothProxyConfig(Structure):
+    _fields_ = [
+        ("header", GPUClothFeatureConfigHeader),
+        ("render_object_id", c_uint64),
+        ("proxy_object_id", c_uint64),
+        ("topology_generation", c_uint64),
+        ("render_x_count", c_uint),
+        ("render_y_count", c_uint),
+        ("proxy_x_count", c_uint),
+        ("proxy_y_count", c_uint),
+        ("render_vertex_count", c_uint),
+        ("proxy_vertex_count", c_uint),
+        ("proxy_flags", c_uint),
+        ("reserved0", c_uint),
+        ("render_rest_positions", GPUClothBufferView),
+        ("proxy_rest_positions", GPUClothBufferView),
+        ("reserved", c_uint64 * 1),
+    ]
+
+
+class GPUClothDiagnosticsConfig(Structure):
+    _fields_ = [
+        ("header", GPUClothFeatureConfigHeader),
+        ("diagnostics_flags", c_uint),
+        ("event_capacity", c_uint),
+        ("minimum_severity", c_uint),
+        ("reserved0", c_uint),
+        ("callback_address", c_uint64),
+        ("callback_user_data", c_uint64),
+        ("event_buffer", GPUClothBufferView),
+        ("reserved", c_uint64 * 1),
+    ]
+
+
+class GPUClothDescriptorLayout(Structure):
+    _fields_ = [
+        ("struct_size", c_uint),
+        ("schema_version", c_uint),
+        ("feature_config_header_size", c_uint),
+        ("buffer_view_size", c_uint),
+        ("named_value_size", c_uint),
+        ("simulation_config_size", c_uint),
+        ("material_config_size", c_uint),
+        ("pin_config_size", c_uint),
+        ("constraint_config_size", c_uint),
+        ("pressure_config_size", c_uint),
+        ("collision_config_size", c_uint),
+        ("collider_config_size", c_uint),
+        ("mesh_state_config_size", c_uint),
+        ("effector_config_size", c_uint),
+        ("effector_weights_config_size", c_uint),
+        ("cache_config_size", c_uint),
+        ("sewing_record_size", c_uint),
+        ("sewing_config_size", c_uint),
+        ("vertex_channel_config_size", c_uint),
+        ("collision_filter_config_size", c_uint),
+        ("proxy_config_size", c_uint),
+        ("diagnostics_config_size", c_uint),
+        ("reserved", c_uint * 3),
+    ]
+
 class fmatrix3x3(Structure):
     _fields_ = [
         ("m", c_float * 3 * 3),  # 3x3 matrix
@@ -472,8 +865,7 @@ class ClothVertex(Structure):
         ("shrink_factor",   c_float), 
         ("internal_stiff",  c_float), 
         ("pressure_factor", c_float),
-        ("warp_dir",        c_float*3),
-        ("weft_dir",        c_float*3)
+        ("coll_thickness",  c_float),
     ]
 
 class Cloth(Structure):
@@ -584,7 +976,9 @@ class Mesh(Structure):
         ("totpoly", c_int),
         ("totloop", c_int),
         ("dvert", POINTER(MDeformVert)),
-        ("runtime", c_char*8)
+        ("mlooptri", c_void_p),
+        ("mlooptri_num", c_int),
+        ("runtime", c_void_p),
     ]
 
 class ClothModifierData(Structure):
@@ -592,9 +986,9 @@ class ClothModifierData(Structure):
         # from ModifierData, 'cause struct ClothModifierData : ModifierData
         ("next", POINTER(ModifierData)),
         ("prev", POINTER(ModifierData)),
-        ("id", c_uint),
         ("type", c_int),
         ("mode", c_int),
+        ("id", c_uint),
         ("name", c_char*64),
         # Уже переменные самого класса
         ("modifier", ModifierData),
