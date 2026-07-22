@@ -197,3 +197,8 @@ softBody/
 /tmp/test_ccd*.py
 /tmp/run_nvcc.py
 /tmp/nvcc_ogc.bat
+/tmp/sccache*/
+/tmp/task_range.project.obj.backup*
+/tmp/tools/sccache-v*/
+/tmp/tools/nvcc-sccache.*
+/tmp/tools/sccache_probe*
