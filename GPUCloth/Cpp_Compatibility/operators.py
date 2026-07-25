@@ -25,6 +25,7 @@ import numpy as np
 from ctypes import (
     cdll, windll, POINTER, pointer, cast,
     c_bool, c_float, c_short, c_int, c_uint, c_void_p, c_size_t, c_char_p,
+    sizeof,
 )
 
 from . import cpp_types as CType
@@ -65,6 +66,47 @@ def native_frame_timescale(scene, speed_multiplier):
     if fps <= 0.0:
         return 0.0
     return float(speed_multiplier) * float(scene.render.fps_base) / fps
+
+
+def _configure_simulation_features(dll, clmd, scene, settings):
+    solver_mask = {
+        'XPBD': CType.GPUCLOTH_SOLVER_XPBD,
+        'PD': CType.GPUCLOTH_SOLVER_PD,
+        'Mil2': CType.GPUCLOTH_SOLVER_MIL2,
+    }.get(settings.solver_type)
+    if solver_mask is None:
+        raise RuntimeError(
+            f"typed simulation config does not own solver "
+            f"{settings.solver_type}")
+
+    config = CType.GPUClothSimulationConfig()
+    config.header.struct_size = sizeof(config)
+    config.header.config_version = 1
+    config.solver_mask = solver_mask
+    config.quality_steps = settings.quality_step
+    config.time_scale = native_frame_timescale(
+        scene, settings.speed_multiplier)
+    config.vertex_mass = settings.vertex_mass
+    config.gravity[:] = (
+        scene.gpu_cloth_helper.gravity_x,
+        scene.gpu_cloth_helper.gravity_y,
+        scene.gpu_cloth_helper.gravity_z,
+    )
+    config.air_damping = settings.air_viscosity
+    header = cast(
+        pointer(config), POINTER(CType.GPUClothFeatureConfigHeader))
+    for feature in (
+            CType.GPUCLOTH_FEATURE_TIMESTEP_SPEED,
+            CType.GPUCLOTH_FEATURE_MATERIAL_MASS,
+            CType.GPUCLOTH_FEATURE_GRAVITY_VECTOR,
+            CType.GPUCLOTH_FEATURE_SIMULATION_QUALITY,
+            CType.GPUCLOTH_FEATURE_AIR_DAMPING):
+        config.header.feature_id = feature
+        result = int(dll.SIM_configure_cloth_feature(clmd, header))
+        if result != CType.GPUCLOTH_ABI_OK:
+            raise RuntimeError(
+                f"typed simulation feature {feature} rejected with {result}")
+    return CType.GPUCLOTH_ABI_OK
 
 
 def _upload_pin_weights(dll, clmd, settings_owner, simulation_obj):
@@ -559,6 +601,12 @@ class GPUCloth_LoadDLL(bpy.types.Operator):
                 POINTER(CType.GPUClothFeatureConfigHeader)]
             g_dll.SIM_configure_feature.restype = c_uint
 
+            g_dll.SIM_configure_cloth_feature.argtypes = [
+                POINTER(CType.ClothModifierData),
+                POINTER(CType.GPUClothFeatureConfigHeader),
+            ]
+            g_dll.SIM_configure_cloth_feature.restype = c_uint
+
             g_dll.SIM_set_cloth_vertex_channel.argtypes = [
                 POINTER(CType.ClothModifierData),
                 POINTER(CType.GPUClothVertexChannelConfig),
@@ -863,8 +911,8 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
 
         # ── Базовые параметры ─────────────────────────────────────────────
         sim_parms.mingoal        = 0
-        sim_parms.Cvi            = 1.0
-        sim_parms.Cdis           = gs.air_viscosity
+        sim_parms.Cvi            = gs.air_viscosity
+        sim_parms.Cdis           = 0.0
         sim_parms.gravity[0]     = gs_scene.gravity_x
         sim_parms.gravity[1]     = gs_scene.gravity_y
         sim_parms.gravity[2]     = gs_scene.gravity_z
@@ -1184,6 +1232,15 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
             return {'CANCELLED'}
 
         for i in range(len(g_clothOBJs)):
+            try:
+                _configure_simulation_features(
+                    g_dll, g_clmd[i], context.scene,
+                    g_clothOBJs[i].GPUCloth)
+            except (OSError, RuntimeError) as exc:
+                self.report({'ERROR'}, f"Simulation config failed: {exc}")
+                free_gpu_memory(context)
+                bpy.ops.object.mode_set(mode=mode)
+                return {'CANCELLED'}
             try:
                 if not g_clmd[i].contents.clothObject:
                     if not g_dll.BuildClothSprings(g_clmd[i], g_mesh[i]):
