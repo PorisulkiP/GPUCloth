@@ -109,6 +109,40 @@ def _configure_simulation_features(dll, clmd, scene, settings):
     return CType.GPUCLOTH_ABI_OK
 
 
+def _configure_material_features(dll, clmd, settings):
+    config = CType.GPUClothMaterialConfig()
+    config.header.struct_size = sizeof(config)
+    config.header.config_version = 1
+    config.bending_model = 1 if settings.bending_model == 'ANGULAR' else 0
+    config.stiffness[:] = (
+        settings.tension,
+        settings.compression,
+        settings.shear,
+        settings.bending_stiffness,
+    )
+    config.stiffness_max[:] = (
+        settings.max_tension,
+        settings.max_compression,
+        settings.max_shear,
+        settings.max_bend,
+    )
+    config.damping[:] = (
+        settings.tension_damp,
+        settings.compression_damp,
+        settings.shear_damp,
+        settings.bending_damping,
+    )
+    header = cast(
+        pointer(config), POINTER(CType.GPUClothFeatureConfigHeader))
+    for feature in (CType.GPUCLOTH_FEATURE_STRETCH,):
+        config.header.feature_id = feature
+        result = int(dll.SIM_configure_cloth_feature(clmd, header))
+        if result != CType.GPUCLOTH_ABI_OK:
+            raise RuntimeError(
+                f"typed material feature {feature} rejected with {result}")
+    return CType.GPUCLOTH_ABI_OK
+
+
 def _upload_pin_weights(dll, clmd, settings_owner, simulation_obj):
     weights = binary_pin_weights(
         simulation_obj, settings_owner.GPUCloth.vgroup_mass)
@@ -1236,6 +1270,8 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
                 _configure_simulation_features(
                     g_dll, g_clmd[i], context.scene,
                     g_clothOBJs[i].GPUCloth)
+                _configure_material_features(
+                    g_dll, g_clmd[i], g_clothOBJs[i].GPUCloth)
             except (OSError, RuntimeError) as exc:
                 self.report({'ERROR'}, f"Simulation config failed: {exc}")
                 free_gpu_memory(context)
