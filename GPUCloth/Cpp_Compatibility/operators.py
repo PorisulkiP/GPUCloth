@@ -145,6 +145,27 @@ def _configure_material_features(dll, clmd, settings):
     return CType.GPUCLOTH_ABI_OK
 
 
+def _configure_pressure_features(dll, clmd, settings):
+    if not settings.use_pressure or settings.target_volume <= 0.0:
+        return CType.GPUCLOTH_ABI_OK
+    config = CType.GPUClothPressureConfig()
+    config.header.struct_size = sizeof(config)
+    config.header.feature_id = CType.GPUCLOTH_FEATURE_PRESSURE_VOLUME
+    config.header.config_version = 1
+    config.pressure_flags = CType.GPUCLOTH_PRESSURE_ENABLED
+    config.uniform_pressure_force = settings.uniform_pressure_force
+    config.target_volume = settings.target_volume
+    config.pressure_factor = settings.pressure_factor
+    config.fluid_density = settings.fluid_density
+    header = cast(
+        pointer(config), POINTER(CType.GPUClothFeatureConfigHeader))
+    result = int(dll.SIM_configure_cloth_feature(clmd, header))
+    if result != CType.GPUCLOTH_ABI_OK:
+        raise RuntimeError(
+            f"typed pressure feature rejected with {result}")
+    return CType.GPUCLOTH_ABI_OK
+
+
 def _upload_pin_weights(dll, clmd, settings_owner, simulation_obj):
     weights = binary_pin_weights(
         simulation_obj, settings_owner.GPUCloth.vgroup_mass)
@@ -1273,6 +1294,8 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
                     g_dll, g_clmd[i], context.scene,
                     g_clothOBJs[i].GPUCloth)
                 _configure_material_features(
+                    g_dll, g_clmd[i], g_clothOBJs[i].GPUCloth)
+                _configure_pressure_features(
                     g_dll, g_clmd[i], g_clothOBJs[i].GPUCloth)
             except (OSError, RuntimeError) as exc:
                 self.report({'ERROR'}, f"Simulation config failed: {exc}")
