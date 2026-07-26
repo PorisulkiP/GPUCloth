@@ -217,12 +217,17 @@ def sync_cpu_to_gpu(obj, scene=None):
                 "target": "GPUClothScene.frame_step",
                 "value": 1,
             })
-        if bool(getattr(point_cache, "use_disk_cache", False)):
-            result["copied"].append({
-                "source": "PointCache.use_disk_cache",
-                "target": "GPUClothCache.storage_mode",
-                "value": "DISK",
-            })
+        use_disk_cache = bool(
+            getattr(point_cache, "use_disk_cache", False))
+        rollback.append((
+            scene.gpu_cloth_helper, "use_disk_cache",
+            scene.gpu_cloth_helper.use_disk_cache))
+        scene.gpu_cloth_helper.use_disk_cache = use_disk_cache
+        result["copied"].append({
+            "source": "PointCache.use_disk_cache",
+            "target": "GPUClothCache.storage_mode",
+            "value": "DISK" if use_disk_cache else "MEMORY",
+        })
         cache_index = max(0, int(getattr(point_cache, "index", -1)))
         cache_name = str(getattr(point_cache, "name", "")) or "GPUCloth"
         rollback.extend((

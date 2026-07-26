@@ -113,7 +113,10 @@ def _configure_cache_features(dll, scene):
     config = CType.GPUClothCacheConfig()
     config.header.struct_size = sizeof(config)
     config.header.config_version = 1
-    config.storage_mode = CType.GPUCLOTH_CACHE_STORAGE_DISK
+    config.storage_mode = (
+        CType.GPUCLOTH_CACHE_STORAGE_DISK
+        if helper.use_disk_cache
+        else CType.GPUCLOTH_CACHE_STORAGE_MEMORY)
     config.compression_mode = CType.GPUCLOTH_CACHE_COMPRESSION_NONE
     config.frame_start = int(helper.bake_start)
     config.frame_end = int(helper.bake_end)
@@ -127,8 +130,12 @@ def _configure_cache_features(dll, scene):
     config.name_utf8_address = addressof(name_buffer)
     header = cast(
         pointer(config), POINTER(CType.GPUClothFeatureConfigHeader))
+    storage_feature = (
+        CType.GPUCLOTH_FEATURE_CACHE_DISK
+        if helper.use_disk_cache
+        else CType.GPUCLOTH_FEATURE_CACHE_MEMORY)
     for feature in (
-            CType.GPUCLOTH_FEATURE_CACHE_DISK,
+            storage_feature,
             CType.GPUCLOTH_FEATURE_BAKE_RANGE,
             CType.GPUCLOTH_FEATURE_CALCULATE_TO_FRAME,
             CType.GPUCLOTH_FEATURE_CACHE_STATUS,
@@ -519,7 +526,7 @@ def _cache_source_generation(scene):
     _cache_hash_rna_scalars(
         hasher, "scene", helper,
         excluded={
-            "cache_dir", "cache_index", "cache_name",
+            "cache_dir", "cache_index", "cache_name", "use_disk_cache",
             "bake_start", "bake_end", "bake_progress",
             "is_baked", "is_baking", "is_outdated", "is_frame_skip",
             "cache_info", "cached_frame_count", "playback_mode",

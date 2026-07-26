@@ -1232,9 +1232,15 @@ class GPUClothSceneSettings(PropertyGroup):
         maxlen=255,
     )
 
+    use_disk_cache: BoolProperty(
+        name="Disk Cache",
+        description="Persist frames on disk; disable for session-only memory cache",
+        default=True,
+    )
+
     is_baked: BoolProperty(
         name="Baked",
-        description="True if simulation cache is fully written to disk",
+        description="True if the active simulation cache is complete",
         default=False,
     )
 
