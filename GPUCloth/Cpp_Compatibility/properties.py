@@ -1218,6 +1218,20 @@ class GPUClothSceneSettings(PropertyGroup):
         options=vcu.get_dir_path_property_options(),
     )
 
+    cache_index: IntProperty(
+        name="Cache Index",
+        description="Stable index of the active named point cache",
+        default=0,
+        min=0,
+    )
+
+    cache_name: StringProperty(
+        name="Cache Name",
+        description="Stable name of the active point cache",
+        default="GPUCloth",
+        maxlen=255,
+    )
+
     is_baked: BoolProperty(
         name="Baked",
         description="True if simulation cache is fully written to disk",

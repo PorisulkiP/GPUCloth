@@ -87,6 +87,7 @@ POINT_CACHE_RANGE_MAP = {
 
 POINT_CACHE_RUNTIME_STATUS = (
     "is_baked", "is_baking", "is_outdated", "is_frame_skip", "info",
+    "point_caches",
 )
 
 
@@ -222,17 +223,25 @@ def sync_cpu_to_gpu(obj, scene=None):
                 "target": "GPUClothCache.storage_mode",
                 "value": "DISK",
             })
-        cache_index = int(getattr(point_cache, "index", 0))
-        if cache_index not in (-1, 0):
-            result["errors"].append(
-                f"PointCache.index: {cache_index} is unsupported; "
-                "GPUCloth owns only the active primary cache")
-        else:
-            result["copied"].append({
-                "source": "PointCache.index",
-                "target": "GPUClothCache.cache_index",
-                "value": 0,
-            })
+        cache_index = max(0, int(getattr(point_cache, "index", -1)))
+        cache_name = str(getattr(point_cache, "name", "")) or "GPUCloth"
+        rollback.extend((
+            (scene.gpu_cloth_helper, "cache_index",
+             scene.gpu_cloth_helper.cache_index),
+            (scene.gpu_cloth_helper, "cache_name",
+             scene.gpu_cloth_helper.cache_name),
+        ))
+        scene.gpu_cloth_helper.cache_index = cache_index
+        scene.gpu_cloth_helper.cache_name = cache_name
+        result["copied"].extend(({
+            "source": "PointCache.index",
+            "target": "GPUClothCache.cache_index",
+            "value": cache_index,
+        }, {
+            "source": "PointCache.name",
+            "target": "GPUClothCache.cache_name",
+            "value": cache_name,
+        }))
 
     mapped = {
         "ClothSettings": set(CLOTH_SETTINGS_MAP),
@@ -240,7 +249,7 @@ def sync_cpu_to_gpu(obj, scene=None):
         "EffectorWeights": set(EFFECTOR_WEIGHTS_MAP),
         "PointCache": (
             set(POINT_CACHE_RANGE_MAP) |
-            {"frame_step", "use_disk_cache", "index"}),
+            {"frame_step", "use_disk_cache", "index", "name"}),
     }
     owners = {
         "ClothSettings": settings,

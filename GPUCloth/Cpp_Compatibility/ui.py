@@ -729,6 +729,9 @@ class GPUCLOTH_PT_cache(bpy.types.Panel):
 
         col = layout.column()
         col.prop(scene_s, "cache_dir")
+        row = col.row(align=True)
+        row.prop(scene_s, "cache_index", text="Index")
+        row.prop(scene_s, "cache_name", text="Name")
 
         row = col.row(align=True)
         row.prop(scene_s, "bake_start",

@@ -70,21 +70,46 @@ def native_frame_timescale(scene, speed_multiplier):
     return float(speed_multiplier) * float(scene.render.fps_base) / fps
 
 
-def _stable_cache_id(path_bytes):
+def _stable_cache_id(identity_bytes):
     value = 1469598103934665603
-    for byte in path_bytes:
+    for byte in identity_bytes:
         value ^= byte
         value = (value * 1099511628211) & 0xffffffffffffffff
     return value or 1
 
 
+def _active_cache_path(scene):
+    helper = scene.gpu_cloth_helper
+    root = bpy.path.abspath(helper.cache_dir)
+    cache_index = int(helper.cache_index)
+    cache_name = str(helper.cache_name)
+    if not root or '\0' in root:
+        raise RuntimeError("cache path is empty or contains NUL")
+    if cache_index < 0:
+        raise RuntimeError("cache index must be non-negative")
+    if ('\0' in cache_name or not cache_name or
+            len(cache_name.encode('utf-8')) >= 255):
+        raise RuntimeError("cache name must contain 1..254 UTF-8 bytes")
+    if cache_index == 0 and cache_name == "GPUCloth":
+        return root
+    identity = (
+        cache_index.to_bytes(4, "little") +
+        cache_name.encode('utf-8'))
+    suffix = hashlib.blake2b(
+        identity, digest_size=8, person=b"GPUCache").hexdigest()
+    return os.path.join(root, f"cache_{cache_index:08x}_{suffix}")
+
+
 def _configure_cache_features(dll, scene):
     helper = scene.gpu_cloth_helper
-    path_bytes = bpy.path.abspath(helper.cache_dir).encode('utf-8')
+    path_bytes = _active_cache_path(scene).encode('utf-8')
     if not path_bytes:
         raise RuntimeError("cache path is empty")
+    cache_index = int(helper.cache_index)
+    cache_name = str(helper.cache_name)
+    name_bytes = cache_name.encode('utf-8')
     path_buffer = create_string_buffer(path_bytes)
-    name_buffer = create_string_buffer(b"GPUCloth")
+    name_buffer = create_string_buffer(name_bytes)
     config = CType.GPUClothCacheConfig()
     config.header.struct_size = sizeof(config)
     config.header.config_version = 1
@@ -93,9 +118,11 @@ def _configure_cache_features(dll, scene):
     config.frame_start = int(helper.bake_start)
     config.frame_end = int(helper.bake_end)
     config.frame_step = 1
-    config.cache_index = 0
+    config.cache_index = cache_index
     config.cache_flags = 0
-    config.cache_id = _stable_cache_id(path_bytes)
+    config.cache_id = _stable_cache_id(
+        path_bytes + b'\0' + cache_index.to_bytes(4, 'little') +
+        name_bytes)
     config.path_utf8_address = addressof(path_buffer)
     config.name_utf8_address = addressof(name_buffer)
     header = cast(
@@ -104,7 +131,8 @@ def _configure_cache_features(dll, scene):
             CType.GPUCLOTH_FEATURE_CACHE_DISK,
             CType.GPUCLOTH_FEATURE_BAKE_RANGE,
             CType.GPUCLOTH_FEATURE_CALCULATE_TO_FRAME,
-            CType.GPUCLOTH_FEATURE_CACHE_STATUS):
+            CType.GPUCLOTH_FEATURE_CACHE_STATUS,
+            CType.GPUCLOTH_FEATURE_CACHE_MULTIPLE):
         config.header.feature_id = feature
         result = int(dll.SIM_configure_feature(header))
         if result != CType.GPUCLOTH_ABI_OK:
@@ -491,7 +519,8 @@ def _cache_source_generation(scene):
     _cache_hash_rna_scalars(
         hasher, "scene", helper,
         excluded={
-            "cache_dir", "bake_start", "bake_end", "bake_progress",
+            "cache_dir", "cache_index", "cache_name",
+            "bake_start", "bake_end", "bake_progress",
             "is_baked", "is_baking", "is_outdated", "is_frame_skip",
             "cache_info", "cached_frame_count", "playback_mode",
         })
@@ -681,8 +710,7 @@ def _restore_initial_positions():
 
 
 def _load_cached_frame(scene, depsgraph, frame):
-    cache_dir = bpy.path.abspath(
-        scene.gpu_cloth_helper.cache_dir).encode('utf-8')
+    cache_dir = _active_cache_path(scene).encode('utf-8')
     if not g_dll.Cache_has_frame(frame, cache_dir):
         return False
     updated = False
@@ -1844,7 +1872,7 @@ class GPUCloth_UpdateSimulation(bpy.types.Operator):
             return {'FINISHED'}
 
         scene_s   = context.scene.gpu_cloth_helper
-        cache_dir = bpy.path.abspath(scene_s.cache_dir).encode('utf-8')
+        cache_dir = _active_cache_path(context.scene).encode('utf-8')
         frame     = context.scene.frame_current
 
         # ── РЕЖИМ ВОСПРОИЗВЕДЕНИЯ из кэша ───────────────────────────────────
@@ -2036,7 +2064,7 @@ class GPUCloth_BakeSimulation(bpy.types.Operator):
         except (OSError, RuntimeError) as exc:
             self.report({'ERROR'}, f"Cache config failed: {exc}")
             return False
-        cache_dir = bpy.path.abspath(s.cache_dir).encode('utf-8')
+        cache_dir = _active_cache_path(context.scene).encode('utf-8')
         if not g_dll.Cache_clear_all(cache_dir):
             self.report({'ERROR'}, "Cannot initialize cache transaction")
             return False
@@ -2060,8 +2088,7 @@ class GPUCloth_BakeSimulation(bpy.types.Operator):
         return True
 
     def _step_frame(self, context, frame):
-        cache_dir = bpy.path.abspath(
-            context.scene.gpu_cloth_helper.cache_dir).encode('utf-8')
+        cache_dir = _active_cache_path(context.scene).encode('utf-8')
         _cache_playback_guard['active'] = True
         try:
             context.scene.frame_set(frame)
@@ -2093,7 +2120,7 @@ class GPUCloth_BakeSimulation(bpy.types.Operator):
             _bake_range['end']   = s.bake_end
         else:
             s.playback_mode = False
-            cache_dir = bpy.path.abspath(s.cache_dir).encode('utf-8')
+            cache_dir = _active_cache_path(context.scene).encode('utf-8')
             g_dll.Cache_clear_all(cache_dir)
             try:
                 _cache_status_update(
@@ -2158,7 +2185,7 @@ class GPUCloth_FreeCache(bpy.types.Operator):
 
     def execute(self, context):
         s         = context.scene.gpu_cloth_helper
-        cache_dir = bpy.path.abspath(s.cache_dir).encode('utf-8')
+        cache_dir = _active_cache_path(context.scene).encode('utf-8')
 
         if not g_dll.Cache_clear_all(cache_dir):
             self.report({'ERROR'}, "Не удалось очистить кэш")
@@ -2254,7 +2281,7 @@ class GPUCloth_ExportAlembic(bpy.types.Operator):
 
     def execute(self, context):
         scene_s   = context.scene.gpu_cloth_helper
-        cache_dir = bpy.path.abspath(scene_s.cache_dir).encode('utf-8')
+        cache_dir = _active_cache_path(context.scene).encode('utf-8')
 
         # Выделяем только объекты ткани для экспорта
         prev_selection = [o for o in context.scene.objects if o.select_get()]
@@ -2332,7 +2359,7 @@ class GPUCloth_ExportUSD(bpy.types.Operator):
 
     def execute(self, context):
         scene_s   = context.scene.gpu_cloth_helper
-        cache_dir = bpy.path.abspath(scene_s.cache_dir).encode('utf-8')
+        cache_dir = _active_cache_path(context.scene).encode('utf-8')
 
         prev_selection = [o for o in context.scene.objects if o.select_get()]
         bpy.ops.object.select_all(action='DESELECT')
