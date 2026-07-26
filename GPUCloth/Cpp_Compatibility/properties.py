@@ -1062,7 +1062,7 @@ class GPUClothObjectSettings(PropertyGroup):
 
     vgroup_objcol: StringProperty(
         name="Exclude Objects VGroup",
-        description="Vertex group excluding vertices from object collisions (0=excluded, 1=fully collide)",
+        description="Vertices with any positive group weight are excluded from object collisions",
         default="",
     )
 

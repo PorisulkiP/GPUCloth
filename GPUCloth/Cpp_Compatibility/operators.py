@@ -31,7 +31,8 @@ from ctypes import (
 from . import cpp_types as CType
 from .proxy_binding import ProxyBindingError, validate_proxy_binding
 from .vertex_channels import (
-    VertexChannelError, apply_float_channel, binary_pin_weights,
+    VertexChannelError, apply_float_channel, binary_exclusion_mask,
+    binary_pin_weights,
     evaluated_local_positions, vertex_group_weights,
 )
 from ..utils import version_compatibility_utils as vcu
@@ -201,6 +202,16 @@ def _upload_pressure_weights(
     return apply_float_channel(
         dll, CType, clmd, CType.GPUCLOTH_FEATURE_PRESSURE_VERTEX_GROUP,
         CType.GPUCLOTH_VERTEX_PRESSURE_WEIGHT, 1, weights)
+
+
+def _upload_object_collision_mask(
+        dll, clmd, settings_owner, simulation_obj):
+    mask = binary_exclusion_mask(
+        simulation_obj, settings_owner.GPUCloth.vgroup_objcol,
+        "object collision")
+    return apply_float_channel(
+        dll, CType, clmd, CType.GPUCLOTH_FEATURE_COLLISION_VERTEX_GROUP,
+        CType.GPUCLOTH_VERTEX_OBJECT_COLLISION_MASK, 1, mask)
 
 # Защита от GC для ctypes-массивов, переданных в Cache_write_frame_async
 # C++ пишет в фоне — массив должен жить до завершения записи
@@ -1141,7 +1152,12 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
         coll_parms.contents.loop_count    = gs.collision_quality
         coll_parms.contents.group         = None  # TODO: resolve Collection ptr
         coll_parms.contents.vgroup_selfcol = 0
-        coll_parms.contents.vgroup_objcol  = 0
+        object_collision_group = (
+            gs.id_data.vertex_groups.get(gs.vgroup_objcol)
+            if gs.vgroup_objcol else None)
+        coll_parms.contents.vgroup_objcol = (
+            object_collision_group.index + 1
+            if object_collision_group is not None else 0)
         coll_parms.contents.clamp          = gs.clamp
         coll_parms.contents.self_clamp     = gs.self_clamp
         coll_parms.contents.flags = (
@@ -1282,6 +1298,9 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
                     g_clothOBJs, g_simulationOBJs):
                 binary_pin_weights(
                     simulation_obj, cloth_obj.GPUCloth.vgroup_mass)
+                binary_exclusion_mask(
+                    simulation_obj, cloth_obj.GPUCloth.vgroup_objcol,
+                    "object collision")
                 if cloth_obj.GPUCloth.vgroup_mass:
                     evaluated_local_positions(simulation_obj, depsgraph)
         except VertexChannelError as exc:
@@ -1348,6 +1367,8 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
                     g_dll, g_clmd[i], g_clothOBJs[i], g_simulationOBJs[i],
                     depsgraph)
                 _upload_pressure_weights(
+                    g_dll, g_clmd[i], g_clothOBJs[i], g_simulationOBJs[i])
+                _upload_object_collision_mask(
                     g_dll, g_clmd[i], g_clothOBJs[i], g_simulationOBJs[i])
             except (OSError, VertexChannelError) as exc:
                 self.report({'ERROR'}, f"Vertex channel upload failed: {exc}")
