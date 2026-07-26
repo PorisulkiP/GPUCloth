@@ -146,11 +146,10 @@ def _configure_material_features(dll, clmd, settings):
 
 
 def _configure_pressure_features(dll, clmd, settings):
-    if not settings.use_pressure or settings.target_volume <= 0.0:
+    if not settings.use_pressure:
         return CType.GPUCLOTH_ABI_OK
     config = CType.GPUClothPressureConfig()
     config.header.struct_size = sizeof(config)
-    config.header.feature_id = CType.GPUCLOTH_FEATURE_PRESSURE_VOLUME
     config.header.config_version = 1
     config.pressure_flags = CType.GPUCLOTH_PRESSURE_ENABLED
     config.uniform_pressure_force = settings.uniform_pressure_force
@@ -159,10 +158,15 @@ def _configure_pressure_features(dll, clmd, settings):
     config.fluid_density = settings.fluid_density
     header = cast(
         pointer(config), POINTER(CType.GPUClothFeatureConfigHeader))
-    result = int(dll.SIM_configure_cloth_feature(clmd, header))
-    if result != CType.GPUCLOTH_ABI_OK:
-        raise RuntimeError(
-            f"typed pressure feature rejected with {result}")
+    features = [CType.GPUCLOTH_FEATURE_PRESSURE_UNIFORM]
+    if settings.target_volume > 0.0:
+        features.append(CType.GPUCLOTH_FEATURE_PRESSURE_VOLUME)
+    for feature in features:
+        config.header.feature_id = feature
+        result = int(dll.SIM_configure_cloth_feature(clmd, header))
+        if result != CType.GPUCLOTH_ABI_OK:
+            raise RuntimeError(
+                f"typed pressure feature {feature} rejected with {result}")
     return CType.GPUCLOTH_ABI_OK
 
 
