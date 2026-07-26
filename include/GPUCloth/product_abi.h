@@ -49,6 +49,14 @@ enum GPUClothPressureFlags : uint32_t {
     GPUCLOTH_PRESSURE_ENABLED = 1u << 0,
 };
 
+enum GPUClothCacheStorageMode : uint32_t {
+    GPUCLOTH_CACHE_STORAGE_DISK = 1,
+};
+
+enum GPUClothCacheCompressionMode : uint32_t {
+    GPUCLOTH_CACHE_COMPRESSION_NONE = 0,
+};
+
 enum GPUClothFeatureId : uint32_t {
     GPUCLOTH_FEATURE_BASIC_DYNAMICS = 1,
     GPUCLOTH_FEATURE_TIMESTEP_SPEED,

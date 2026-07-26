@@ -25,7 +25,7 @@ import numpy as np
 from ctypes import (
     addressof, cdll, windll, POINTER, pointer, cast,
     c_bool, c_float, c_short, c_int, c_uint, c_void_p, c_size_t, c_char_p,
-    sizeof,
+    create_string_buffer, sizeof,
 )
 
 from . import cpp_types as CType
@@ -67,6 +67,47 @@ def native_frame_timescale(scene, speed_multiplier):
     if fps <= 0.0:
         return 0.0
     return float(speed_multiplier) * float(scene.render.fps_base) / fps
+
+
+def _stable_cache_id(path_bytes):
+    value = 1469598103934665603
+    for byte in path_bytes:
+        value ^= byte
+        value = (value * 1099511628211) & 0xffffffffffffffff
+    return value or 1
+
+
+def _configure_cache_features(dll, scene):
+    helper = scene.gpu_cloth_helper
+    path_bytes = bpy.path.abspath(helper.cache_dir).encode('utf-8')
+    if not path_bytes:
+        raise RuntimeError("cache path is empty")
+    path_buffer = create_string_buffer(path_bytes)
+    name_buffer = create_string_buffer(b"GPUCloth")
+    config = CType.GPUClothCacheConfig()
+    config.header.struct_size = sizeof(config)
+    config.header.config_version = 1
+    config.storage_mode = CType.GPUCLOTH_CACHE_STORAGE_DISK
+    config.compression_mode = CType.GPUCLOTH_CACHE_COMPRESSION_NONE
+    config.frame_start = int(helper.bake_start)
+    config.frame_end = int(helper.bake_end)
+    config.frame_step = 1
+    config.cache_index = 0
+    config.cache_flags = 0
+    config.cache_id = _stable_cache_id(path_bytes)
+    config.path_utf8_address = addressof(path_buffer)
+    config.name_utf8_address = addressof(name_buffer)
+    header = cast(
+        pointer(config), POINTER(CType.GPUClothFeatureConfigHeader))
+    for feature in (
+            CType.GPUCLOTH_FEATURE_CACHE_DISK,
+            CType.GPUCLOTH_FEATURE_BAKE_RANGE):
+        config.header.feature_id = feature
+        result = int(dll.SIM_configure_feature(header))
+        if result != CType.GPUCLOTH_ABI_OK:
+            raise RuntimeError(
+                f"typed cache feature {feature} rejected with {result}")
+    return CType.GPUCLOTH_ABI_OK
 
 
 def _configure_simulation_features(dll, clmd, scene, settings):
@@ -420,6 +461,13 @@ def _bind_optional_runtime_hooks(dll):
     try:
         dll.SIM_shutdown_runtime.argtypes = []
         dll.SIM_shutdown_runtime.restype = c_bool
+    except AttributeError:
+        pass
+
+    try:
+        dll.SIM_get_cache_feature_config.argtypes = [
+            POINTER(CType.GPUClothCacheConfig)]
+        dll.SIM_get_cache_feature_config.restype = c_uint
     except AttributeError:
         pass
 
@@ -1396,6 +1444,14 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
         # 7.5. Scan scene for force field effectors
         _upload_effectors(self, context, g_dll)
 
+        try:
+            _configure_cache_features(g_dll, context.scene)
+        except (OSError, RuntimeError) as exc:
+            self.report({'ERROR'}, f"Cache config failed: {exc}")
+            free_gpu_memory(context)
+            bpy.ops.object.mode_set(mode=mode)
+            return {'CANCELLED'}
+
         if not g_dll.FillSolverData(g_scene):
             self.report({'ERROR'}, "FillSolverData вернул ошибку")
             return {'CANCELLED'}
@@ -1731,6 +1787,11 @@ class GPUCloth_BakeSimulation(bpy.types.Operator):
         s = context.scene.gpu_cloth_helper
         if s.bake_end < s.bake_start:
             self.report({'ERROR'}, "Bake end precedes bake start")
+            return False
+        try:
+            _configure_cache_features(g_dll, context.scene)
+        except (OSError, RuntimeError) as exc:
+            self.report({'ERROR'}, f"Cache config failed: {exc}")
             return False
         cache_dir = bpy.path.abspath(s.cache_dir).encode('utf-8')
         if not g_dll.Cache_clear_all(cache_dir):
