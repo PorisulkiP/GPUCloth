@@ -158,7 +158,10 @@ def _configure_pressure_features(dll, clmd, settings):
     config.fluid_density = settings.fluid_density
     header = cast(
         pointer(config), POINTER(CType.GPUClothFeatureConfigHeader))
-    features = [CType.GPUCLOTH_FEATURE_PRESSURE_UNIFORM]
+    features = [
+        CType.GPUCLOTH_FEATURE_PRESSURE_UNIFORM,
+        CType.GPUCLOTH_FEATURE_FLUID_DENSITY,
+    ]
     if settings.target_volume > 0.0:
         features.append(CType.GPUCLOTH_FEATURE_PRESSURE_VOLUME)
     for feature in features:
