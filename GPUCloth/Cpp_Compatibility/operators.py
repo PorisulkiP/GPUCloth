@@ -23,7 +23,7 @@ import time
 
 import numpy as np
 from ctypes import (
-    cdll, windll, POINTER, pointer, cast,
+    addressof, cdll, windll, POINTER, pointer, cast,
     c_bool, c_float, c_short, c_int, c_uint, c_void_p, c_size_t, c_char_p,
     sizeof,
 )
@@ -172,6 +172,60 @@ def _configure_pressure_features(dll, clmd, settings):
             raise RuntimeError(
                 f"typed pressure feature {feature} rejected with {result}")
     return CType.GPUCLOTH_ABI_OK
+
+
+def _blender_sewing_edges(settings_owner, simulation_obj):
+    cloth_settings = next(
+        (modifier.settings for modifier in settings_owner.modifiers
+         if modifier.type == 'CLOTH'),
+        None)
+    if (cloth_settings is None or
+            not bool(getattr(cloth_settings, "use_sewing_springs", False))):
+        return []
+
+    loose_edges = [
+        edge for edge in simulation_obj.data.edges if edge.is_loose]
+    if not loose_edges:
+        raise VertexChannelError(
+            "Blender sewing is enabled but the evaluated mesh has no "
+            "loose seam edges")
+    return loose_edges
+
+
+def _upload_sewing(dll, clmd, settings_owner, simulation_obj):
+    loose_edges = _blender_sewing_edges(settings_owner, simulation_obj)
+    if not loose_edges:
+        return CType.GPUCLOTH_ABI_OK
+    record_type = CType.GPUClothSewingRecord * len(loose_edges)
+    records = record_type()
+    for index, edge in enumerate(loose_edges):
+        records[index].seam_id = int(edge.index) + 1
+        records[index].vertex_a = int(edge.vertices[0])
+        records[index].vertex_b = int(edge.vertices[1])
+        records[index].stiffness = 1.0
+        records[index].rest_length = 0.0
+        records[index].activation = 1.0
+        records[index].flags = 0
+
+    config = CType.GPUClothSewingConfig()
+    config.header.struct_size = sizeof(config)
+    config.header.feature_id = CType.GPUCLOTH_FEATURE_SEWING
+    config.header.config_version = 1
+    config.records.struct_size = sizeof(CType.GPUClothBufferView)
+    config.records.element_type = CType.GPUCLOTH_ELEMENT_SEWING_RECORD
+    config.records.element_count = len(records)
+    config.records.stride_bytes = sizeof(CType.GPUClothSewingRecord)
+    config.records.data_address = addressof(records)
+    config.records.generation = 1
+    config.phase_count = 1
+    config.sewing_flags = 0
+    config.activation_speed = 0.0
+    header = cast(
+        pointer(config), POINTER(CType.GPUClothFeatureConfigHeader))
+    result = int(dll.SIM_configure_cloth_feature(clmd, header))
+    if result != CType.GPUCLOTH_ABI_OK:
+        raise RuntimeError(f"typed sewing config rejected with {result}")
+    return result
 
 
 def _upload_pin_weights(dll, clmd, settings_owner, simulation_obj):
@@ -666,6 +720,10 @@ class GPUCloth_LoadDLL(bpy.types.Operator):
                 c_size_t,
             ]
             g_dll.SIM_get_cloth_verts.restype = None
+
+            g_dll.SIM_get_cloth_sewing_count.argtypes = [
+                POINTER(CType.ClothModifierData)]
+            g_dll.SIM_get_cloth_sewing_count.restype = c_size_t
 
             g_dll.SIM_sizeof_cloth_vertex.argtypes = []
             g_dll.SIM_sizeof_cloth_vertex.restype = c_size_t
@@ -1315,6 +1373,7 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
                 vertex_group_weights(
                     simulation_obj, cloth_obj.GPUCloth.vgroup_shrink,
                     "shrink")
+                _blender_sewing_edges(cloth_obj, simulation_obj)
                 if cloth_obj.GPUCloth.vgroup_mass:
                     evaluated_local_positions(simulation_obj, depsgraph)
         except VertexChannelError as exc:
@@ -1375,6 +1434,8 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
 
             try:
                 depsgraph = context.evaluated_depsgraph_get()
+                _upload_sewing(
+                    g_dll, g_clmd[i], g_clothOBJs[i], g_simulationOBJs[i])
                 _upload_pin_weights(
                     g_dll, g_clmd[i], g_clothOBJs[i], g_simulationOBJs[i])
                 _upload_pin_targets(
