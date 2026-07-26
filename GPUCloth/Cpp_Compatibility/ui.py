@@ -728,8 +728,13 @@ class GPUCLOTH_PT_cache(bpy.types.Panel):
         scene_s = context.scene.gpu_cloth_helper
 
         col = layout.column()
-        col.prop(scene_s, "cache_dir")
-        col.prop(scene_s, "use_disk_cache")
+        col.prop(scene_s, "use_external_cache")
+        if scene_s.use_external_cache:
+            col.prop(scene_s, "external_cache_dir")
+            col.prop(scene_s, "use_library_path")
+        else:
+            col.prop(scene_s, "cache_dir")
+            col.prop(scene_s, "use_disk_cache")
         row = col.row(align=True)
         row.prop(scene_s, "cache_index", text="Index")
         row.prop(scene_s, "cache_name", text="Name")

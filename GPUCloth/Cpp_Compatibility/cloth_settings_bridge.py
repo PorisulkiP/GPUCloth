@@ -217,17 +217,53 @@ def sync_cpu_to_gpu(obj, scene=None):
                 "target": "GPUClothScene.frame_step",
                 "value": 1,
             })
-        use_disk_cache = bool(
-            getattr(point_cache, "use_disk_cache", False))
-        rollback.append((
-            scene.gpu_cloth_helper, "use_disk_cache",
-            scene.gpu_cloth_helper.use_disk_cache))
+        helper = scene.gpu_cloth_helper
+        use_disk_cache = bool(getattr(
+            point_cache, "use_disk_cache", False))
+        use_external = bool(getattr(
+            point_cache, "use_external", False))
+        use_library_path = bool(getattr(
+            point_cache, "use_library_path", True))
+        filepath = str(getattr(point_cache, "filepath", ""))
+        external_path = ""
+        if filepath:
+            library = (
+                getattr(obj, "library", None)
+                if use_library_path else None)
+            external_path = bpy.path.abspath(
+                filepath, library=library)
+        if use_external and not external_path:
+            result["errors"].append(
+                "PointCache.filepath: external cache path is empty")
+        rollback.extend((
+            (helper, "use_disk_cache", helper.use_disk_cache),
+            (helper, "use_external_cache", helper.use_external_cache),
+            (helper, "external_cache_dir", helper.external_cache_dir),
+            (helper, "use_library_path", helper.use_library_path),
+        ))
         scene.gpu_cloth_helper.use_disk_cache = use_disk_cache
-        result["copied"].append({
+        helper.use_external_cache = use_external
+        helper.external_cache_dir = external_path
+        helper.use_library_path = use_library_path
+        result["copied"].extend(({
             "source": "PointCache.use_disk_cache",
             "target": "GPUClothCache.storage_mode",
-            "value": "DISK" if use_disk_cache else "MEMORY",
-        })
+            "value": (
+                "EXTERNAL" if use_external
+                else ("DISK" if use_disk_cache else "MEMORY")),
+        }, {
+            "source": "PointCache.use_external",
+            "target": "GPUClothCache.external_read_only",
+            "value": use_external,
+        }, {
+            "source": "PointCache.filepath",
+            "target": "GPUClothCache.external_path",
+            "value": external_path,
+        }, {
+            "source": "PointCache.use_library_path",
+            "target": "GPUClothCache.library_path",
+            "value": use_library_path,
+        }))
         cache_index = max(0, int(getattr(point_cache, "index", -1)))
         cache_name = str(getattr(point_cache, "name", "")) or "GPUCloth"
         rollback.extend((
@@ -254,7 +290,8 @@ def sync_cpu_to_gpu(obj, scene=None):
         "EffectorWeights": set(EFFECTOR_WEIGHTS_MAP),
         "PointCache": (
             set(POINT_CACHE_RANGE_MAP) |
-            {"frame_step", "use_disk_cache", "index", "name"}),
+            {"frame_step", "use_disk_cache", "use_external",
+             "use_library_path", "filepath", "index", "name"}),
     }
     owners = {
         "ClothSettings": settings,
@@ -269,13 +306,8 @@ def sync_cpu_to_gpu(obj, scene=None):
             inactive_effector_setting = (
                 owner_name == "EffectorWeights"
                 and not _scene_has_effectors(scene))
-            inactive_point_cache_setting = (
-                owner_name == "PointCache"
-                and prop_name == "use_library_path"
-                and not bool(getattr(point_cache, "use_external", False)))
             if (_is_non_default(owner, prop_name)
-                    and not inactive_effector_setting
-                    and not inactive_point_cache_setting):
+                    and not inactive_effector_setting):
                 result["unsupported_non_default"].append(qualified_name)
     if point_cache is not None:
         for prop_name in POINT_CACHE_RUNTIME_STATUS:

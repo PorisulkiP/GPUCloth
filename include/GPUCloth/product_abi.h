@@ -52,6 +52,12 @@ enum GPUClothPressureFlags : uint32_t {
 enum GPUClothCacheStorageMode : uint32_t {
     GPUCLOTH_CACHE_STORAGE_DISK = 1,
     GPUCLOTH_CACHE_STORAGE_MEMORY = 2,
+    GPUCLOTH_CACHE_STORAGE_EXTERNAL = 3,
+};
+
+enum GPUClothCacheFlags : uint32_t {
+    GPUCLOTH_CACHE_FLAG_EXTERNAL_READ_ONLY = 1u << 0,
+    GPUCLOTH_CACHE_FLAG_LIBRARY_PATH = 1u << 1,
 };
 
 enum GPUClothCacheCompressionMode : uint32_t {

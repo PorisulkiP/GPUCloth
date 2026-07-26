@@ -1238,6 +1238,26 @@ class GPUClothSceneSettings(PropertyGroup):
         default=True,
     )
 
+    use_external_cache: BoolProperty(
+        name="External Cache",
+        description="Read an existing GPUCloth cache without modifying it",
+        default=False,
+    )
+
+    external_cache_dir: StringProperty(
+        name="External Cache Directory",
+        description="Read-only directory containing GPUCloth cache files",
+        default="",
+        subtype='DIR_PATH',
+        options=vcu.get_dir_path_property_options(),
+    )
+
+    use_library_path: BoolProperty(
+        name="Library Path",
+        description="Resolve a relative external path from the linked library",
+        default=True,
+    )
+
     is_baked: BoolProperty(
         name="Baked",
         description="True if the active simulation cache is complete",

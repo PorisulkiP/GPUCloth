@@ -80,7 +80,9 @@ def _stable_cache_id(identity_bytes):
 
 def _active_cache_path(scene):
     helper = scene.gpu_cloth_helper
-    root = bpy.path.abspath(helper.cache_dir)
+    root = bpy.path.abspath(
+        helper.external_cache_dir
+        if helper.use_external_cache else helper.cache_dir)
     cache_index = int(helper.cache_index)
     cache_name = str(helper.cache_name)
     if not root or '\0' in root:
@@ -113,16 +115,23 @@ def _configure_cache_features(dll, scene):
     config = CType.GPUClothCacheConfig()
     config.header.struct_size = sizeof(config)
     config.header.config_version = 1
-    config.storage_mode = (
-        CType.GPUCLOTH_CACHE_STORAGE_DISK
-        if helper.use_disk_cache
-        else CType.GPUCLOTH_CACHE_STORAGE_MEMORY)
+    if helper.use_external_cache:
+        config.storage_mode = CType.GPUCLOTH_CACHE_STORAGE_EXTERNAL
+    else:
+        config.storage_mode = (
+            CType.GPUCLOTH_CACHE_STORAGE_DISK
+            if helper.use_disk_cache
+            else CType.GPUCLOTH_CACHE_STORAGE_MEMORY)
     config.compression_mode = CType.GPUCLOTH_CACHE_COMPRESSION_NONE
     config.frame_start = int(helper.bake_start)
     config.frame_end = int(helper.bake_end)
     config.frame_step = 1
     config.cache_index = cache_index
-    config.cache_flags = 0
+    config.cache_flags = (
+        CType.GPUCLOTH_CACHE_FLAG_EXTERNAL_READ_ONLY |
+        (CType.GPUCLOTH_CACHE_FLAG_LIBRARY_PATH
+         if helper.use_library_path else 0)
+        if helper.use_external_cache else 0)
     config.cache_id = _stable_cache_id(
         path_bytes + b'\0' + cache_index.to_bytes(4, 'little') +
         name_bytes)
@@ -130,10 +139,13 @@ def _configure_cache_features(dll, scene):
     config.name_utf8_address = addressof(name_buffer)
     header = cast(
         pointer(config), POINTER(CType.GPUClothFeatureConfigHeader))
-    storage_feature = (
-        CType.GPUCLOTH_FEATURE_CACHE_DISK
-        if helper.use_disk_cache
-        else CType.GPUCLOTH_FEATURE_CACHE_MEMORY)
+    if helper.use_external_cache:
+        storage_feature = CType.GPUCLOTH_FEATURE_CACHE_EXTERNAL
+    else:
+        storage_feature = (
+            CType.GPUCLOTH_FEATURE_CACHE_DISK
+            if helper.use_disk_cache
+            else CType.GPUCLOTH_FEATURE_CACHE_MEMORY)
     for feature in (
             storage_feature,
             CType.GPUCLOTH_FEATURE_BAKE_RANGE,
@@ -527,6 +539,8 @@ def _cache_source_generation(scene):
         hasher, "scene", helper,
         excluded={
             "cache_dir", "cache_index", "cache_name", "use_disk_cache",
+            "use_external_cache", "external_cache_dir",
+            "use_library_path",
             "bake_start", "bake_end", "bake_progress",
             "is_baked", "is_baking", "is_outdated", "is_frame_skip",
             "cache_info", "cached_frame_count", "playback_mode",
@@ -2025,6 +2039,7 @@ class GPUCloth_BakeSimulation(bpy.types.Operator):
             g_dll is not None
             and context.scene.gpu_cloth_springs_built
             and not context.scene.gpu_cloth_helper.is_baked
+            and not context.scene.gpu_cloth_helper.use_external_cache
         )
 
     def modal(self, context, event):
@@ -2182,6 +2197,7 @@ class GPUCloth_FreeCache(bpy.types.Operator):
     def poll(cls, context):
         return (
             g_dll is not None
+            and not context.scene.gpu_cloth_helper.use_external_cache
             and (
                 context.scene.gpu_cloth_helper.is_baked
                 or context.scene.gpu_cloth_helper.is_outdated
