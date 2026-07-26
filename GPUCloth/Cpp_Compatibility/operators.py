@@ -204,6 +204,17 @@ def _upload_pressure_weights(
         CType.GPUCLOTH_VERTEX_PRESSURE_WEIGHT, 1, weights)
 
 
+def _upload_shrink_weights(
+        dll, clmd, settings_owner, simulation_obj):
+    weights = vertex_group_weights(
+        simulation_obj, settings_owner.GPUCloth.vgroup_shrink, "shrink")
+    if weights is None:
+        return CType.GPUCLOTH_ABI_OK
+    return apply_float_channel(
+        dll, CType, clmd, CType.GPUCLOTH_FEATURE_SHRINK,
+        CType.GPUCLOTH_VERTEX_SHRINK_WEIGHT, 1, weights)
+
+
 def _upload_object_collision_mask(
         dll, clmd, settings_owner, simulation_obj):
     mask = binary_exclusion_mask(
@@ -1301,10 +1312,13 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
                 binary_exclusion_mask(
                     simulation_obj, cloth_obj.GPUCloth.vgroup_objcol,
                     "object collision")
+                vertex_group_weights(
+                    simulation_obj, cloth_obj.GPUCloth.vgroup_shrink,
+                    "shrink")
                 if cloth_obj.GPUCloth.vgroup_mass:
                     evaluated_local_positions(simulation_obj, depsgraph)
         except VertexChannelError as exc:
-            self.report({'ERROR'}, f"Pin channel preflight failed: {exc}")
+            self.report({'ERROR'}, f"Vertex channel preflight failed: {exc}")
             free_gpu_memory(context)
             bpy.ops.object.mode_set(mode=mode)
             return {'CANCELLED'}
@@ -1367,6 +1381,8 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
                     g_dll, g_clmd[i], g_clothOBJs[i], g_simulationOBJs[i],
                     depsgraph)
                 _upload_pressure_weights(
+                    g_dll, g_clmd[i], g_clothOBJs[i], g_simulationOBJs[i])
+                _upload_shrink_weights(
                     g_dll, g_clmd[i], g_clothOBJs[i], g_simulationOBJs[i])
                 _upload_object_collision_mask(
                     g_dll, g_clmd[i], g_clothOBJs[i], g_simulationOBJs[i])
