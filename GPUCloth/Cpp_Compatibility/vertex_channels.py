@@ -51,6 +51,31 @@ def binary_pin_weights(obj, group_name):
     return weights
 
 
+def vertex_group_weights(obj, group_name, channel_name):
+    vertex_count = len(obj.data.vertices)
+    if not group_name:
+        return None
+    group = obj.vertex_groups.get(group_name)
+    if group is None:
+        raise VertexChannelError(
+            f"{channel_name} vertex group {group_name!r} is absent on "
+            f"{obj.name!r}")
+    weights = [0.0] * vertex_count
+    group_index = group.index
+    for vertex in obj.data.vertices:
+        for membership in vertex.groups:
+            if membership.group != group_index:
+                continue
+            weight = float(membership.weight)
+            if not math.isfinite(weight) or weight < 0.0 or weight > 1.0:
+                raise VertexChannelError(
+                    f"{channel_name} weight at vertex {vertex.index} is "
+                    f"outside [0, 1]")
+            weights[vertex.index] = weight
+            break
+    return weights
+
+
 def evaluated_local_positions(obj, depsgraph):
     evaluated = obj.evaluated_get(depsgraph)
     mesh = evaluated.to_mesh(

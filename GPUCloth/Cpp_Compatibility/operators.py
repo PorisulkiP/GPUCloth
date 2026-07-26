@@ -32,7 +32,7 @@ from . import cpp_types as CType
 from .proxy_binding import ProxyBindingError, validate_proxy_binding
 from .vertex_channels import (
     VertexChannelError, apply_float_channel, binary_pin_weights,
-    evaluated_local_positions,
+    evaluated_local_positions, vertex_group_weights,
 )
 from ..utils import version_compatibility_utils as vcu
 
@@ -188,6 +188,19 @@ def _upload_pin_targets(dll, clmd, settings_owner, simulation_obj, depsgraph):
     return apply_float_channel(
         dll, CType, clmd, CType.GPUCLOTH_FEATURE_ANIMATED_PIN,
         CType.GPUCLOTH_VERTEX_PIN_TARGET_XYZ, 3, positions)
+
+
+def _upload_pressure_weights(
+        dll, clmd, settings_owner, simulation_obj):
+    if not settings_owner.GPUCloth.use_pressure:
+        return CType.GPUCLOTH_ABI_OK
+    weights = vertex_group_weights(
+        simulation_obj, settings_owner.GPUCloth.vgroup_pressure, "pressure")
+    if weights is None:
+        return CType.GPUCLOTH_ABI_OK
+    return apply_float_channel(
+        dll, CType, clmd, CType.GPUCLOTH_FEATURE_PRESSURE_VERTEX_GROUP,
+        CType.GPUCLOTH_VERTEX_PRESSURE_WEIGHT, 1, weights)
 
 # Защита от GC для ctypes-массивов, переданных в Cache_write_frame_async
 # C++ пишет в фоне — массив должен жить до завершения записи
@@ -1334,8 +1347,10 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
                 _upload_pin_targets(
                     g_dll, g_clmd[i], g_clothOBJs[i], g_simulationOBJs[i],
                     depsgraph)
+                _upload_pressure_weights(
+                    g_dll, g_clmd[i], g_clothOBJs[i], g_simulationOBJs[i])
             except (OSError, VertexChannelError) as exc:
-                self.report({'ERROR'}, f"Pin channel upload failed: {exc}")
+                self.report({'ERROR'}, f"Vertex channel upload failed: {exc}")
                 free_gpu_memory(context)
                 bpy.ops.object.mode_set(mode=mode)
                 return {'CANCELLED'}
