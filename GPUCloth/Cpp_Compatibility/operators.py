@@ -286,6 +286,89 @@ def _configure_pressure_features(dll, clmd, settings):
     return CType.GPUCLOTH_ABI_OK
 
 
+def _rest_shape_key_positions(settings_owner, simulation_obj):
+    settings = settings_owner.GPUCloth
+    selector = settings.shapekey_rest
+    if selector is None or selector == "":
+        return None
+    if settings.use_dynamic_mesh:
+        raise VertexChannelError(
+            "rest shape key and dynamic mesh are mutually exclusive")
+
+    shape_keys = getattr(simulation_obj.data, "shape_keys", None)
+    key_blocks = (
+        getattr(shape_keys, "key_blocks", None)
+        if shape_keys is not None else None)
+    if key_blocks is None:
+        raise VertexChannelError(
+            f"rest shape key {selector!r} requires mesh shape keys")
+
+    key_block = None
+    if isinstance(selector, str):
+        key_block = key_blocks.get(selector)
+        if key_block is None:
+            try:
+                index = int(selector, 10)
+            except ValueError:
+                index = None
+            if index is not None and 0 <= index < len(key_blocks):
+                key_block = key_blocks[index]
+    elif isinstance(selector, int) and 0 <= selector < len(key_blocks):
+        key_block = key_blocks[selector]
+    if key_block is None:
+        raise VertexChannelError(
+            f"rest shape key {selector!r} does not exist")
+
+    vertex_count = len(simulation_obj.data.vertices)
+    key_count = len(key_block.data)
+    if key_count != vertex_count:
+        raise VertexChannelError(
+            f"rest shape key {key_block.name!r} has {key_count} points; "
+            f"simulation mesh has {vertex_count} vertices")
+
+    positions = np.empty(vertex_count * 3, dtype=np.float32)
+    key_block.data.foreach_get("co", positions)
+    positions = np.ascontiguousarray(
+        positions.reshape((vertex_count, 3)), dtype=np.float32)
+    if not np.isfinite(positions).all():
+        raise VertexChannelError(
+            f"rest shape key {key_block.name!r} contains non-finite positions")
+    return key_block.name, positions
+
+
+def _upload_rest_shape_key(dll, clmd, prepared_rest_shape):
+    if prepared_rest_shape is None:
+        return CType.GPUCLOTH_ABI_OK
+
+    key_name, positions = prepared_rest_shape
+    generation_hash = hashlib.blake2b(
+        digest_size=8, person=b"GPURest")
+    generation_hash.update(key_name.encode("utf-8"))
+    generation_hash.update(len(positions).to_bytes(8, "little"))
+    generation_hash.update(positions.tobytes(order="C"))
+    generation = int.from_bytes(
+        generation_hash.digest(), "little") or 1
+
+    config = CType.GPUClothMeshStateConfig()
+    config.header.struct_size = sizeof(config)
+    config.header.feature_id = CType.GPUCLOTH_FEATURE_REST_SHAPE_KEY
+    config.header.config_version = 1
+    config.rest_generation = generation
+    config.rest_positions.struct_size = sizeof(CType.GPUClothBufferView)
+    config.rest_positions.element_type = CType.GPUCLOTH_ELEMENT_FLOAT3
+    config.rest_positions.element_count = len(positions)
+    config.rest_positions.stride_bytes = sizeof(c_float) * 3
+    config.rest_positions.data_address = positions.ctypes.data
+    config.rest_positions.generation = generation
+    header = cast(
+        pointer(config), POINTER(CType.GPUClothFeatureConfigHeader))
+    result = int(dll.SIM_configure_cloth_feature(clmd, header))
+    if result != CType.GPUCLOTH_ABI_OK:
+        raise RuntimeError(
+            f"typed rest shape key config rejected with {result}")
+    return result
+
+
 def _blender_sewing_edges(settings_owner, simulation_obj):
     cloth_settings = next(
         (modifier.settings for modifier in settings_owner.modifiers
@@ -1698,6 +1781,7 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
         # allocation. BuildClothSprings has no rollback owner before AddCloth.
         try:
             depsgraph = context.evaluated_depsgraph_get()
+            prepared_rest_shapes = []
             for cloth_obj, simulation_obj in zip(
                     g_clothOBJs, g_simulationOBJs):
                 binary_pin_weights(
@@ -1709,6 +1793,8 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
                     simulation_obj, cloth_obj.GPUCloth.vgroup_shrink,
                     "shrink")
                 _blender_sewing_edges(cloth_obj, simulation_obj)
+                prepared_rest_shapes.append(
+                    _rest_shape_key_positions(cloth_obj, simulation_obj))
                 if cloth_obj.GPUCloth.vgroup_mass:
                     evaluated_local_positions(simulation_obj, depsgraph)
         except VertexChannelError as exc:
@@ -1777,6 +1863,8 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
 
             try:
                 depsgraph = context.evaluated_depsgraph_get()
+                _upload_rest_shape_key(
+                    g_dll, g_clmd[i], prepared_rest_shapes[i])
                 _upload_sewing(
                     g_dll, g_clmd[i], g_clothOBJs[i], g_simulationOBJs[i])
                 _upload_pin_weights(
@@ -1790,8 +1878,8 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
                     g_dll, g_clmd[i], g_clothOBJs[i], g_simulationOBJs[i])
                 _upload_object_collision_mask(
                     g_dll, g_clmd[i], g_clothOBJs[i], g_simulationOBJs[i])
-            except (OSError, VertexChannelError) as exc:
-                self.report({'ERROR'}, f"Vertex channel upload failed: {exc}")
+            except (OSError, RuntimeError, VertexChannelError) as exc:
+                self.report({'ERROR'}, f"Cloth data upload failed: {exc}")
                 free_gpu_memory(context)
                 bpy.ops.object.mode_set(mode=mode)
                 return {'CANCELLED'}
