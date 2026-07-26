@@ -242,10 +242,14 @@ def _configure_material_features(dll, clmd, settings):
     )
     header = cast(
         pointer(config), POINTER(CType.GPUClothFeatureConfigHeader))
-    for feature in (
-            CType.GPUCLOTH_FEATURE_STRETCH,
-            CType.GPUCLOTH_FEATURE_COMPRESSION,
-            CType.GPUCLOTH_FEATURE_SHEAR):
+    features = [
+        CType.GPUCLOTH_FEATURE_STRETCH,
+        CType.GPUCLOTH_FEATURE_COMPRESSION,
+        CType.GPUCLOTH_FEATURE_SHEAR,
+    ]
+    if settings.bending_model == 'LINEAR':
+        features.append(CType.GPUCLOTH_FEATURE_BENDING_LINEAR)
+    for feature in features:
         config.header.feature_id = feature
         result = int(dll.SIM_configure_cloth_feature(clmd, header))
         if result != CType.GPUCLOTH_ABI_OK:
