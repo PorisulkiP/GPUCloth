@@ -101,7 +101,8 @@ def _configure_cache_features(dll, scene):
         pointer(config), POINTER(CType.GPUClothFeatureConfigHeader))
     for feature in (
             CType.GPUCLOTH_FEATURE_CACHE_DISK,
-            CType.GPUCLOTH_FEATURE_BAKE_RANGE):
+            CType.GPUCLOTH_FEATURE_BAKE_RANGE,
+            CType.GPUCLOTH_FEATURE_CALCULATE_TO_FRAME):
         config.header.feature_id = feature
         result = int(dll.SIM_configure_feature(header))
         if result != CType.GPUCLOTH_ABI_OK:
@@ -448,6 +449,7 @@ def _upload_effectors(operator, context, dll):
 _cache_playback_guard  = {'active': False}
 _initial_positions     = []     # list[np.ndarray] — rest positions per cloth object
 _bake_range            = {'start': 1, 'end': 250}
+_simulation_frame_state = {'last_solved': None}
 
 
 def _bind_optional_runtime_hooks(dll):
@@ -518,6 +520,34 @@ def _restore_initial_positions():
             cloth_obj.data.update_tag()
 
 
+def _load_cached_frame(scene, depsgraph, frame):
+    cache_dir = bpy.path.abspath(
+        scene.gpu_cloth_helper.cache_dir).encode('utf-8')
+    if not g_dll.Cache_has_frame(frame, cache_dir):
+        return False
+    updated = False
+    for i, cloth_obj in enumerate(g_clothOBJs):
+        if i >= len(g_clmd):
+            break
+        nV = len(cloth_obj.data.vertices)
+        pos = (c_float * (nV * 3))()
+        loaded = g_dll.Cache_load_frame_gpu(
+            frame, g_clmd[i], c_size_t(nV), cache_dir)
+        if not loaded:
+            loaded = g_dll.Cache_prefetch_frame(
+                frame, c_size_t(nV), cache_dir)
+        if loaded and g_dll.Cache_get_frame_positions(
+                frame, pos, c_size_t(nV)):
+            flat = np.frombuffer(pos, dtype=np.float32)
+            cloth_obj.data.vertices.foreach_set("co", flat)
+            cloth_obj.data.update()
+            cloth_obj.data.update_tag()
+            updated = True
+    if updated:
+        depsgraph.update()
+    return updated
+
+
 def _frame_change_handler(scene, depsgraph):
     if _cache_playback_guard['active']:
         return
@@ -535,43 +565,29 @@ def _frame_change_handler(scene, depsgraph):
             return
 
         if scene_s.is_baked and scene_s.playback_mode:
-            cache_dir = scene_s.cache_dir
-            cache_dir_bytes = bpy.path.abspath(cache_dir).encode('utf-8')
-
-            if not g_dll.Cache_has_frame(frame, cache_dir_bytes):
+            if not _load_cached_frame(scene, depsgraph, frame):
                 if _initial_positions:
                     _restore_initial_positions()
                     depsgraph.update()
-                return
-
-            updated = False
-            for i, cloth_obj in enumerate(g_clothOBJs):
-                if i >= len(g_clmd):
-                    break
-                nV = len(cloth_obj.data.vertices)
-                pos = (c_float * (nV * 3))()
-                if g_dll.Cache_load_frame_gpu(
-                        frame, g_clmd[i], c_size_t(nV), cache_dir_bytes):
-                    if g_dll.Cache_get_frame_positions(frame, pos, c_size_t(nV)):
-                        flat = np.frombuffer(pos, dtype=np.float32)
-                        cloth_obj.data.vertices.foreach_set("co", flat)
-                        cloth_obj.data.update()
-                        updated = True
-                elif g_dll.Cache_prefetch_frame(frame, c_size_t(nV), cache_dir_bytes):
-                    if g_dll.Cache_get_frame_positions(frame, pos, c_size_t(nV)):
-                        flat = np.frombuffer(pos, dtype=np.float32)
-                        cloth_obj.data.vertices.foreach_set("co", flat)
-                        cloth_obj.data.update()
-                        updated = True
-            if updated:
-                for cloth_obj in g_clothOBJs:
-                    cloth_obj.data.update_tag()
-                depsgraph.update()
         elif not scene_s.is_baked:
-            try:
-                bpy.ops.gpucloth.update_simulation()
-            except RuntimeError:
-                pass
+            last_solved = _simulation_frame_state['last_solved']
+            if last_solved is not None and frame <= last_solved:
+                _load_cached_frame(scene, depsgraph, frame)
+                return
+            if frame > scene_s.bake_end:
+                return
+            first = max(
+                2, int(scene_s.bake_start),
+                (last_solved + 1) if last_solved is not None else 2)
+            for solve_frame in range(first, frame + 1):
+                if scene.frame_current != solve_frame:
+                    scene.frame_set(solve_frame)
+                try:
+                    result = bpy.ops.gpucloth.update_simulation()
+                except RuntimeError:
+                    return
+                if 'FINISHED' not in result:
+                    return
     finally:
         _cache_playback_guard['active'] = False
 
@@ -612,6 +628,7 @@ def free_gpu_memory(context=None):
     _collision_keepalive.clear()
     _initial_positions.clear()
     _live_arrays.clear()
+    _simulation_frame_state['last_solved'] = None
 
     if context is not None and hasattr(context.scene, 'gpu_cloth_springs_built'):
         context.scene.gpu_cloth_springs_built = False
@@ -1551,6 +1568,11 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
         bpy.ops.object.mode_set(mode=mode)
         context.scene.gpu_cloth_springs_built = True
         _store_initial_positions()
+        helper = context.scene.gpu_cloth_helper
+        _bake_range['start'] = int(helper.bake_start)
+        _bake_range['end'] = int(helper.bake_end)
+        _simulation_frame_state['last_solved'] = max(
+            1, int(helper.bake_start) - 1)
         return {'FINISHED'}
 
 
@@ -1642,6 +1664,12 @@ class GPUCloth_UpdateSimulation(bpy.types.Operator):
                 )
             return {'FINISHED'}
 
+        last_solved = _simulation_frame_state['last_solved']
+        if last_solved is not None and frame <= last_solved:
+            _load_cached_frame(
+                context.scene, context.evaluated_depsgraph_get(), frame)
+            return {'FINISHED'}
+
         # ── РЕЖИМ ЖИВОЙ СИМУЛЯЦИИ ────────────────────────────────────────────
         #
         #   SIM_solver() [GPU ~N мс]
@@ -1713,14 +1741,19 @@ class GPUCloth_UpdateSimulation(bpy.types.Operator):
                 #    _live_arrays защищает pos от GC пока C++ работает
                 if not scene_s.is_baked:
                     _live_arrays.append(pos)
-                    g_dll.Cache_write_frame_async(
-                        frame, pos, c_size_t(nV), cache_dir)
+                    if not g_dll.Cache_write_frame_async(
+                            frame, pos, c_size_t(nV), cache_dir):
+                        self.report(
+                            {'ERROR'},
+                            f"Cache write rejected at frame {frame}")
+                        return {'CANCELLED'}
 
         except (OSError, VertexChannelError) as err:
             print(f"GPUCloth_UpdateSimulation OSError: {err}")
             bpy.ops.screen.animation_cancel()
             return {'CANCELLED'}
 
+        _simulation_frame_state['last_solved'] = frame
         elapsed_ms = (time.perf_counter_ns() - total_t0) / 1_000_000
         print(f"[GPUCloth] кадр {frame}: {elapsed_ms:.2f} мс")
         return {'FINISHED'}
@@ -1802,6 +1835,8 @@ class GPUCloth_BakeSimulation(bpy.types.Operator):
         s.bake_progress = 0
         _bake_range['start'] = s.bake_start
         _bake_range['end'] = s.bake_end
+        _simulation_frame_state['last_solved'] = max(
+            1, int(s.bake_start) - 1)
         _live_arrays.clear()
         self._frame = s.bake_start
         return True

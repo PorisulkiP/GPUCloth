@@ -80,6 +80,11 @@ EFFECTOR_WEIGHTS_MAP = {
     "boid": "weight_boid",
 }
 
+POINT_CACHE_RANGE_MAP = {
+    "frame_start": "bake_start",
+    "frame_end": "bake_end",
+}
+
 
 def find_cpu_cloth_modifier(obj):
     return next((modifier for modifier in obj.modifiers if modifier.type == "CLOTH"), None)
@@ -190,6 +195,23 @@ def sync_cpu_to_gpu(obj, scene=None):
             settings.effector_weights, gpu.effector_weights,
             EFFECTOR_WEIGHTS_MAP, "EffectorWeights",
             result["copied"], result["errors"], rollback)
+    point_cache = getattr(modifier, "point_cache", None)
+    if scene is not None and point_cache is not None and hasattr(
+            scene, "gpu_cloth_helper"):
+        _copy_group(
+            point_cache, scene.gpu_cloth_helper, POINT_CACHE_RANGE_MAP,
+            "PointCache", result["copied"], result["errors"], rollback)
+        frame_step = int(getattr(point_cache, "frame_step", 1))
+        if frame_step != 1:
+            result["errors"].append(
+                f"PointCache.frame_step: {frame_step} is unsupported; "
+                "GPUCloth calculate-to-frame requires step 1")
+        else:
+            result["copied"].append({
+                "source": "PointCache.frame_step",
+                "target": "GPUClothScene.frame_step",
+                "value": 1,
+            })
 
     mapped = {
         "ClothSettings": set(CLOTH_SETTINGS_MAP),
