@@ -244,6 +244,7 @@ def _configure_material_features(dll, clmd, settings):
         pointer(config), POINTER(CType.GPUClothFeatureConfigHeader))
     for feature in (
             CType.GPUCLOTH_FEATURE_STRETCH,
+            CType.GPUCLOTH_FEATURE_COMPRESSION,
             CType.GPUCLOTH_FEATURE_SHEAR):
         config.header.feature_id = feature
         result = int(dll.SIM_configure_cloth_feature(clmd, header))
