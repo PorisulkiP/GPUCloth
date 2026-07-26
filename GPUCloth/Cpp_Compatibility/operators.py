@@ -1703,16 +1703,22 @@ class GPUCloth_BakeSimulation(bpy.types.Operator):
                 return {'FINISHED'}
 
             # Просчёт кадра (UpdateSimulation пишет кэш async внутри)
-            context.scene.frame_set(self._frame)
-            bpy.ops.gpucloth.update_simulation()
+            if not self._step_frame(context, self._frame):
+                self._finish(context, success=False)
+                self.report(
+                    {'ERROR'},
+                    f"Cache write failed at frame {self._frame}")
+                return {'CANCELLED'}
 
             # Прогресс
             total = max(s.bake_end - s.bake_start + 1, 1)
-            s.bake_progress = int(100 * (self._frame - s.bake_start) / total)
+            s.bake_progress = int(
+                100 * (self._frame - s.bake_start + 1) / total)
             self._frame += 1
 
-            for area in context.screen.areas:
-                area.tag_redraw()
+            if context.screen:
+                for area in context.screen.areas:
+                    area.tag_redraw()
 
         if event.type == 'ESC':
             self._finish(context, success=False)
@@ -1721,8 +1727,42 @@ class GPUCloth_BakeSimulation(bpy.types.Operator):
 
         return {'PASS_THROUGH'}
 
+    def _begin(self, context):
+        s = context.scene.gpu_cloth_helper
+        if s.bake_end < s.bake_start:
+            self.report({'ERROR'}, "Bake end precedes bake start")
+            return False
+        cache_dir = bpy.path.abspath(s.cache_dir).encode('utf-8')
+        if not g_dll.Cache_clear_all(cache_dir):
+            self.report({'ERROR'}, "Cannot initialize cache transaction")
+            return False
+        s.is_baked = False
+        s.playback_mode = False
+        s.bake_progress = 0
+        _bake_range['start'] = s.bake_start
+        _bake_range['end'] = s.bake_end
+        _live_arrays.clear()
+        self._frame = s.bake_start
+        return True
+
+    def _step_frame(self, context, frame):
+        cache_dir = bpy.path.abspath(
+            context.scene.gpu_cloth_helper.cache_dir).encode('utf-8')
+        _cache_playback_guard['active'] = True
+        try:
+            context.scene.frame_set(frame)
+        finally:
+            _cache_playback_guard['active'] = False
+        result = bpy.ops.gpucloth.update_simulation()
+        return (
+            'FINISHED' in result and
+            bool(g_dll.Cache_has_frame(frame, cache_dir))
+        )
+
     def _finish(self, context, success: bool):
-        context.window_manager.event_timer_remove(self._timer)
+        if self._timer is not None:
+            context.window_manager.event_timer_remove(self._timer)
+            self._timer = None
         s = context.scene.gpu_cloth_helper
         s.is_baked      = success
         s.bake_progress = 100 if success else 0
@@ -1730,14 +1770,32 @@ class GPUCloth_BakeSimulation(bpy.types.Operator):
             s.playback_mode = True
             _bake_range['start'] = s.bake_start
             _bake_range['end']   = s.bake_end
+        else:
+            s.playback_mode = False
+            cache_dir = bpy.path.abspath(s.cache_dir).encode('utf-8')
+            g_dll.Cache_clear_all(cache_dir)
         _live_arrays.clear()
         if success:
             self.report({'INFO'}, "Запекание завершено.")
 
-    def invoke(self, context, event):
+    def execute(self, context):
+        if not self._begin(context):
+            return {'CANCELLED'}
         s = context.scene.gpu_cloth_helper
-        self._frame = s.bake_start
-        _live_arrays.clear()
+        total = s.bake_end - s.bake_start + 1
+        for completed, frame in enumerate(
+                range(s.bake_start, s.bake_end + 1), start=1):
+            if not self._step_frame(context, frame):
+                self._finish(context, success=False)
+                self.report({'ERROR'}, f"Cache write failed at frame {frame}")
+                return {'CANCELLED'}
+            s.bake_progress = int(100 * completed / total)
+        self._finish(context, success=True)
+        return {'FINISHED'}
+
+    def invoke(self, context, event):
+        if not self._begin(context):
+            return {'CANCELLED'}
         self._timer = context.window_manager.event_timer_add(
             0.001, window=context.window)
         context.window_manager.modal_handler_add(self)
