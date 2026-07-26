@@ -57,6 +57,32 @@ enum GPUClothCacheCompressionMode : uint32_t {
     GPUCLOTH_CACHE_COMPRESSION_NONE = 0,
 };
 
+enum GPUClothCacheStatusFlags : uint32_t {
+    GPUCLOTH_CACHE_STATUS_CONFIGURED = 1u << 0,
+    GPUCLOTH_CACHE_STATUS_BAKING = 1u << 1,
+    GPUCLOTH_CACHE_STATUS_BAKED = 1u << 2,
+    GPUCLOTH_CACHE_STATUS_OUTDATED = 1u << 3,
+    GPUCLOTH_CACHE_STATUS_FRAME_SKIP = 1u << 4,
+    GPUCLOTH_CACHE_STATUS_ERROR = 1u << 5,
+};
+
+enum GPUClothCacheStatusOperation : uint32_t {
+    GPUCLOTH_CACHE_STATUS_BAKE_BEGIN = 1,
+    GPUCLOTH_CACHE_STATUS_BAKE_COMPLETE,
+    GPUCLOTH_CACHE_STATUS_BAKE_CANCEL,
+    GPUCLOTH_CACHE_STATUS_SOURCE_CHANGED,
+};
+
+enum GPUClothCacheInfoCode : uint32_t {
+    GPUCLOTH_CACHE_INFO_EMPTY = 0,
+    GPUCLOTH_CACHE_INFO_READY,
+    GPUCLOTH_CACHE_INFO_BAKING,
+    GPUCLOTH_CACHE_INFO_BAKED,
+    GPUCLOTH_CACHE_INFO_OUTDATED,
+    GPUCLOTH_CACHE_INFO_FRAME_SKIP,
+    GPUCLOTH_CACHE_INFO_ERROR,
+};
+
 enum GPUClothFeatureId : uint32_t {
     GPUCLOTH_FEATURE_BASIC_DYNAMICS = 1,
     GPUCLOTH_FEATURE_TIMESTEP_SPEED,
@@ -401,6 +427,37 @@ struct GPUClothCacheConfig {
     uint64_t reserved[3];
 };
 
+struct GPUClothCacheStatusUpdate {
+    GPUClothFeatureConfigHeader header;
+    uint32_t operation;
+    int32_t frame;
+    uint32_t error_code;
+    uint32_t reserved0;
+    uint64_t source_generation;
+    uint64_t reserved[2];
+};
+
+struct GPUClothCacheStatus {
+    uint32_t struct_size;
+    uint32_t status_version;
+    uint32_t flags;
+    uint32_t info_code;
+    int32_t frame_start;
+    int32_t frame_end;
+    int32_t frame_step;
+    int32_t last_exact;
+    int32_t last_valid;
+    int32_t outdated_from_frame;
+    uint32_t cached_frame_count;
+    uint32_t missing_frame_count;
+    uint32_t error_code;
+    uint64_t source_generation;
+    uint64_t baked_source_generation;
+    uint64_t status_generation;
+    char info[96];
+    uint64_t reserved[2];
+};
+
 struct GPUClothSewingRecord {
     uint64_t seam_id;
     uint32_t vertex_a;
@@ -467,13 +524,15 @@ struct GPUClothDescriptorLayout {
     uint32_t effector_config_size;
     uint32_t effector_weights_config_size;
     uint32_t cache_config_size;
+    uint32_t cache_status_update_size;
+    uint32_t cache_status_size;
     uint32_t sewing_record_size;
     uint32_t sewing_config_size;
     uint32_t vertex_channel_config_size;
     uint32_t collision_filter_config_size;
     uint32_t proxy_config_size;
     uint32_t diagnostics_config_size;
-    uint32_t reserved[3];
+    uint32_t reserved[1];
 };
 
 static_assert(sizeof(GPUClothABIVersion) == 32, "GPUClothABIVersion ABI drift");
@@ -493,6 +552,8 @@ static_assert(sizeof(GPUClothMeshStateConfig) == 256, "GPUClothMeshStateConfig A
 static_assert(sizeof(GPUClothEffectorConfig) == 160, "GPUClothEffectorConfig ABI drift");
 static_assert(sizeof(GPUClothEffectorWeightsConfig) == 96, "GPUClothEffectorWeightsConfig ABI drift");
 static_assert(sizeof(GPUClothCacheConfig) == 96, "GPUClothCacheConfig ABI drift");
+static_assert(sizeof(GPUClothCacheStatusUpdate) == 56, "GPUClothCacheStatusUpdate ABI drift");
+static_assert(sizeof(GPUClothCacheStatus) == 192, "GPUClothCacheStatus ABI drift");
 static_assert(sizeof(GPUClothSewingRecord) == 32, "GPUClothSewingRecord ABI drift");
 static_assert(sizeof(GPUClothSewingConfig) == 80, "GPUClothSewingConfig ABI drift");
 static_assert(sizeof(GPUClothVertexChannelConfig) == 40, "GPUClothVertexChannelConfig ABI drift");

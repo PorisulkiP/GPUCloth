@@ -15,6 +15,7 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import bpy
+import hashlib
 import math
 import os
 import sys
@@ -102,7 +103,8 @@ def _configure_cache_features(dll, scene):
     for feature in (
             CType.GPUCLOTH_FEATURE_CACHE_DISK,
             CType.GPUCLOTH_FEATURE_BAKE_RANGE,
-            CType.GPUCLOTH_FEATURE_CALCULATE_TO_FRAME):
+            CType.GPUCLOTH_FEATURE_CALCULATE_TO_FRAME,
+            CType.GPUCLOTH_FEATURE_CACHE_STATUS):
         config.header.feature_id = feature
         result = int(dll.SIM_configure_feature(header))
         if result != CType.GPUCLOTH_ABI_OK:
@@ -450,6 +452,164 @@ _cache_playback_guard  = {'active': False}
 _initial_positions     = []     # list[np.ndarray] — rest positions per cloth object
 _bake_range            = {'start': 1, 'end': 250}
 _simulation_frame_state = {'last_solved': None}
+_cache_source_state = {'generation': 0}
+
+
+def _cache_hash_value(hasher, label, value):
+    hasher.update(label.encode('utf-8'))
+    hasher.update(b'\0')
+    if hasattr(value, "to_tuple"):
+        value = value.to_tuple()
+    try:
+        encoded = repr(tuple(value)).encode('utf-8')
+    except TypeError:
+        encoded = repr(value).encode('utf-8')
+    hasher.update(encoded)
+    hasher.update(b'\0')
+
+
+def _cache_hash_rna_scalars(hasher, label, owner, excluded=()):
+    excluded = set(excluded)
+    for prop in sorted(
+            owner.bl_rna.properties, key=lambda item: item.identifier):
+        identifier = prop.identifier
+        if identifier == "rna_type" or identifier in excluded:
+            continue
+        if prop.type not in {'BOOLEAN', 'INT', 'FLOAT', 'ENUM', 'STRING'}:
+            continue
+        try:
+            value = getattr(owner, identifier)
+        except (AttributeError, TypeError):
+            continue
+        _cache_hash_value(hasher, f"{label}.{identifier}", value)
+
+
+def _cache_source_generation(scene):
+    """Stable fingerprint of cache-affecting addon inputs, never solved output."""
+    hasher = hashlib.blake2b(digest_size=8, person=b"GPUCloth")
+    helper = scene.gpu_cloth_helper
+    _cache_hash_rna_scalars(
+        hasher, "scene", helper,
+        excluded={
+            "cache_dir", "bake_start", "bake_end", "bake_progress",
+            "is_baked", "is_baking", "is_outdated", "is_frame_skip",
+            "cache_info", "cached_frame_count", "playback_mode",
+        })
+    _cache_hash_value(hasher, "render.fps", scene.render.fps)
+    _cache_hash_value(hasher, "render.fps_base", scene.render.fps_base)
+
+    cloth_objects = sorted(
+        (obj for obj in scene.objects
+         if obj.type == 'MESH' and hasattr(obj, "GPUCloth")
+         and obj.GPUCloth.is_active),
+        key=lambda obj: obj.name_full)
+    for index, obj in enumerate(cloth_objects):
+        _cache_hash_value(hasher, f"cloth[{index}].name", obj.name_full)
+        _cache_hash_value(
+            hasher, f"cloth[{index}].matrix_world",
+            tuple(tuple(row) for row in obj.matrix_world))
+        _cache_hash_rna_scalars(
+            hasher, f"cloth[{index}].settings", obj.GPUCloth)
+        mesh = obj.data
+        if index < len(_initial_positions):
+            rest = np.asarray(
+                _initial_positions[index], dtype=np.float32).reshape(-1)
+        else:
+            rest = np.empty(len(mesh.vertices) * 3, dtype=np.float32)
+            mesh.vertices.foreach_get("co", rest)
+        hasher.update(f"cloth[{index}].rest".encode('utf-8'))
+        hasher.update(rest.tobytes())
+        _cache_hash_value(
+            hasher, f"cloth[{index}].edges",
+            tuple(tuple(edge.vertices) for edge in mesh.edges))
+        _cache_hash_value(
+            hasher, f"cloth[{index}].polygons",
+            tuple(tuple(poly.vertices) for poly in mesh.polygons))
+        for group_index, group in enumerate(obj.vertex_groups):
+            weights = []
+            for vertex in mesh.vertices:
+                try:
+                    weights.append(float(group.weight(vertex.index)))
+                except RuntimeError:
+                    weights.append(0.0)
+            _cache_hash_value(
+                hasher, f"cloth[{index}].vgroup[{group_index}]",
+                (group.name, tuple(weights)))
+
+    collision_objects = sorted(
+        (obj for obj in scene.objects
+         if obj.type == 'MESH' and any(
+             modifier.type == 'COLLISION' for modifier in obj.modifiers)),
+        key=lambda obj: obj.name_full)
+    for index, obj in enumerate(collision_objects):
+        mesh = obj.data
+        _cache_hash_value(
+            hasher, f"collider[{index}].matrix_world",
+            tuple(tuple(row) for row in obj.matrix_world))
+        coords = np.empty(len(mesh.vertices) * 3, dtype=np.float32)
+        mesh.vertices.foreach_get("co", coords)
+        hasher.update(f"collider[{index}].coords".encode('utf-8'))
+        hasher.update(coords.tobytes())
+        _cache_hash_value(
+            hasher, f"collider[{index}].polygons",
+            tuple(tuple(poly.vertices) for poly in mesh.polygons))
+        for modifier in obj.modifiers:
+            if modifier.type == 'COLLISION':
+                _cache_hash_rna_scalars(
+                    hasher, f"collider[{index}].modifier", modifier)
+
+    value = int.from_bytes(hasher.digest(), "little")
+    return value or 1
+
+
+def _cache_status_update(operation, scene, error_code=0, frame=-1):
+    generation = _cache_source_generation(scene)
+    if (operation == CType.GPUCLOTH_CACHE_STATUS_SOURCE_CHANGED and
+            frame < 0):
+        frame = int(scene.gpu_cloth_helper.bake_start)
+    update = CType.GPUClothCacheStatusUpdate()
+    update.header.struct_size = sizeof(update)
+    update.header.feature_id = CType.GPUCLOTH_FEATURE_CACHE_STATUS
+    update.header.config_version = 1
+    update.operation = operation
+    update.frame = int(frame)
+    update.error_code = int(error_code)
+    update.source_generation = generation
+    result = int(g_dll.SIM_update_cache_status(pointer(update)))
+    if result != CType.GPUCLOTH_ABI_OK:
+        raise RuntimeError(
+            f"typed cache status update {operation} rejected with {result}")
+    _cache_source_state['generation'] = generation
+    return generation
+
+
+def _query_cache_status():
+    status = CType.GPUClothCacheStatus()
+    status.struct_size = sizeof(status)
+    status.status_version = 1
+    result = int(g_dll.SIM_get_cache_status(pointer(status)))
+    if result != CType.GPUCLOTH_ABI_OK:
+        raise RuntimeError(f"typed cache status query rejected with {result}")
+    return status
+
+
+def _sync_cache_status(scene):
+    status = _query_cache_status()
+    helper = scene.gpu_cloth_helper
+    helper.is_baking = bool(
+        status.flags & CType.GPUCLOTH_CACHE_STATUS_BAKING)
+    helper.is_baked = bool(
+        status.flags & CType.GPUCLOTH_CACHE_STATUS_BAKED)
+    helper.is_outdated = bool(
+        status.flags & CType.GPUCLOTH_CACHE_STATUS_OUTDATED)
+    helper.is_frame_skip = bool(
+        status.flags & CType.GPUCLOTH_CACHE_STATUS_FRAME_SKIP)
+    helper.cached_frame_count = int(status.cached_frame_count)
+    helper.cache_info = bytes(status.info).split(b'\0', 1)[0].decode(
+        'utf-8', errors='replace')
+    if helper.is_outdated or helper.is_frame_skip:
+        helper.playback_mode = False
+    return status
 
 
 def _bind_optional_runtime_hooks(dll):
@@ -548,6 +708,33 @@ def _load_cached_frame(scene, depsgraph, frame):
     return updated
 
 
+def _cache_input_change_handler(scene, depsgraph):
+    if (_cache_playback_guard['active'] or g_dll is None or
+            not g_clothOBJs or _cache_source_state['generation'] == 0):
+        return
+    helper = scene.gpu_cloth_helper
+    if helper.cached_frame_count == 0:
+        return
+    relevant = False
+    for update in depsgraph.updates:
+        updated_id = update.id
+        if isinstance(updated_id, (bpy.types.Scene, bpy.types.Object,
+                                   bpy.types.Mesh)):
+            relevant = True
+            break
+    if not relevant:
+        return
+    generation = _cache_source_generation(scene)
+    if generation == _cache_source_state['generation']:
+        return
+    try:
+        _cache_status_update(
+            CType.GPUCLOTH_CACHE_STATUS_SOURCE_CHANGED, scene)
+        _sync_cache_status(scene)
+    except (OSError, RuntimeError):
+        helper.playback_mode = False
+
+
 def _frame_change_handler(scene, depsgraph):
     if _cache_playback_guard['active']:
         return
@@ -629,6 +816,7 @@ def free_gpu_memory(context=None):
     _initial_positions.clear()
     _live_arrays.clear()
     _simulation_frame_state['last_solved'] = None
+    _cache_source_state['generation'] = 0
 
     if context is not None and hasattr(context.scene, 'gpu_cloth_springs_built'):
         context.scene.gpu_cloth_springs_built = False
@@ -822,6 +1010,18 @@ class GPUCloth_LoadDLL(bpy.types.Operator):
             g_dll.SIM_configure_feature.argtypes = [
                 POINTER(CType.GPUClothFeatureConfigHeader)]
             g_dll.SIM_configure_feature.restype = c_uint
+
+            g_dll.SIM_get_cache_feature_config.argtypes = [
+                POINTER(CType.GPUClothCacheConfig)]
+            g_dll.SIM_get_cache_feature_config.restype = c_uint
+
+            g_dll.SIM_update_cache_status.argtypes = [
+                POINTER(CType.GPUClothCacheStatusUpdate)]
+            g_dll.SIM_update_cache_status.restype = c_uint
+
+            g_dll.SIM_get_cache_status.argtypes = [
+                POINTER(CType.GPUClothCacheStatus)]
+            g_dll.SIM_get_cache_status.restype = c_uint
 
             g_dll.SIM_configure_cloth_feature.argtypes = [
                 POINTER(CType.ClothModifierData),
@@ -1573,6 +1773,15 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
         _bake_range['end'] = int(helper.bake_end)
         _simulation_frame_state['last_solved'] = max(
             1, int(helper.bake_start) - 1)
+        try:
+            _cache_status_update(
+                CType.GPUCLOTH_CACHE_STATUS_SOURCE_CHANGED,
+                context.scene)
+            _sync_cache_status(context.scene)
+        except (OSError, RuntimeError) as exc:
+            self.report({'ERROR'}, f"Cache status setup failed: {exc}")
+            free_gpu_memory(context)
+            return {'CANCELLED'}
         return {'FINISHED'}
 
 
@@ -1788,8 +1997,9 @@ class GPUCloth_BakeSimulation(bpy.types.Operator):
 
         if event.type == 'TIMER':
             if self._frame > s.bake_end:
-                self._finish(context, success=True)
-                return {'FINISHED'}
+                return (
+                    {'FINISHED'} if self._finish(context, success=True)
+                    else {'CANCELLED'})
 
             # Просчёт кадра (UpdateSimulation пишет кэш async внутри)
             if not self._step_frame(context, self._frame):
@@ -1830,6 +2040,14 @@ class GPUCloth_BakeSimulation(bpy.types.Operator):
         if not g_dll.Cache_clear_all(cache_dir):
             self.report({'ERROR'}, "Cannot initialize cache transaction")
             return False
+        try:
+            _cache_status_update(
+                CType.GPUCLOTH_CACHE_STATUS_BAKE_BEGIN,
+                context.scene, frame=int(s.bake_start))
+            _sync_cache_status(context.scene)
+        except (OSError, RuntimeError) as exc:
+            self.report({'ERROR'}, f"Cache status begin failed: {exc}")
+            return False
         s.is_baked = False
         s.playback_mode = False
         s.bake_progress = 0
@@ -1860,7 +2078,14 @@ class GPUCloth_BakeSimulation(bpy.types.Operator):
             context.window_manager.event_timer_remove(self._timer)
             self._timer = None
         s = context.scene.gpu_cloth_helper
-        s.is_baked      = success
+        if success:
+            try:
+                _cache_status_update(
+                    CType.GPUCLOTH_CACHE_STATUS_BAKE_COMPLETE,
+                    context.scene, frame=int(s.bake_end))
+            except (OSError, RuntimeError) as exc:
+                self.report({'ERROR'}, f"Cache completion failed: {exc}")
+                success = False
         s.bake_progress = 100 if success else 0
         if success:
             s.playback_mode = True
@@ -1870,9 +2095,20 @@ class GPUCloth_BakeSimulation(bpy.types.Operator):
             s.playback_mode = False
             cache_dir = bpy.path.abspath(s.cache_dir).encode('utf-8')
             g_dll.Cache_clear_all(cache_dir)
+            try:
+                _cache_status_update(
+                    CType.GPUCLOTH_CACHE_STATUS_BAKE_CANCEL,
+                    context.scene, error_code=1, frame=int(self._frame))
+            except (OSError, RuntimeError):
+                pass
+        try:
+            _sync_cache_status(context.scene)
+        except (OSError, RuntimeError):
+            s.is_baked = False
         _live_arrays.clear()
         if success:
             self.report({'INFO'}, "Запекание завершено.")
+        return success
 
     def execute(self, context):
         if not self._begin(context):
@@ -1886,8 +2122,9 @@ class GPUCloth_BakeSimulation(bpy.types.Operator):
                 self.report({'ERROR'}, f"Cache write failed at frame {frame}")
                 return {'CANCELLED'}
             s.bake_progress = int(100 * completed / total)
-        self._finish(context, success=True)
-        return {'FINISHED'}
+        return (
+            {'FINISHED'} if self._finish(context, success=True)
+            else {'CANCELLED'})
 
     def invoke(self, context, event):
         if not self._begin(context):
@@ -1911,7 +2148,12 @@ class GPUCloth_FreeCache(bpy.types.Operator):
     def poll(cls, context):
         return (
             g_dll is not None
-            and context.scene.gpu_cloth_helper.is_baked
+            and (
+                context.scene.gpu_cloth_helper.is_baked
+                or context.scene.gpu_cloth_helper.is_outdated
+                or context.scene.gpu_cloth_helper.is_frame_skip
+                or context.scene.gpu_cloth_helper.cached_frame_count > 0
+            )
         )
 
     def execute(self, context):
@@ -1922,9 +2164,13 @@ class GPUCloth_FreeCache(bpy.types.Operator):
             self.report({'ERROR'}, "Не удалось очистить кэш")
             return {'CANCELLED'}
 
-        s.is_baked      = False
         s.bake_progress = 0
         s.playback_mode = False
+        try:
+            _sync_cache_status(context.scene)
+        except (OSError, RuntimeError) as exc:
+            self.report({'ERROR'}, f"Cache status refresh failed: {exc}")
+            return {'CANCELLED'}
         self.report({'INFO'}, "Кэш очищен.")
         return {'FINISHED'}
 
@@ -2635,6 +2881,9 @@ def register():
 
     if _frame_change_handler not in bpy.app.handlers.frame_change_post:
         bpy.app.handlers.frame_change_post.append(_frame_change_handler)
+    if _cache_input_change_handler not in bpy.app.handlers.depsgraph_update_post:
+        bpy.app.handlers.depsgraph_update_post.append(
+            _cache_input_change_handler)
 
     # OGC contact-bounds visualiser — register once, draw callback checks flag
     global _ogc_draw_handle
@@ -2651,6 +2900,9 @@ def unregister():
 
     if _frame_change_handler in bpy.app.handlers.frame_change_post:
         bpy.app.handlers.frame_change_post.remove(_frame_change_handler)
+    if _cache_input_change_handler in bpy.app.handlers.depsgraph_update_post:
+        bpy.app.handlers.depsgraph_update_post.remove(
+            _cache_input_change_handler)
 
     for cls in reversed(_OPERATOR_CLASSES):
         bpy.utils.unregister_class(cls)

@@ -333,9 +333,27 @@ GPUCLOTH_FEATURE_AIR_DAMPING = 52
 GPUCLOTH_FEATURE_CACHE_DISK = 35
 GPUCLOTH_FEATURE_BAKE_RANGE = 40
 GPUCLOTH_FEATURE_CALCULATE_TO_FRAME = 41
+GPUCLOTH_FEATURE_CACHE_STATUS = 56
 
 GPUCLOTH_CACHE_STORAGE_DISK = 1
 GPUCLOTH_CACHE_COMPRESSION_NONE = 0
+GPUCLOTH_CACHE_STATUS_CONFIGURED = 1 << 0
+GPUCLOTH_CACHE_STATUS_BAKING = 1 << 1
+GPUCLOTH_CACHE_STATUS_BAKED = 1 << 2
+GPUCLOTH_CACHE_STATUS_OUTDATED = 1 << 3
+GPUCLOTH_CACHE_STATUS_FRAME_SKIP = 1 << 4
+GPUCLOTH_CACHE_STATUS_ERROR = 1 << 5
+GPUCLOTH_CACHE_STATUS_BAKE_BEGIN = 1
+GPUCLOTH_CACHE_STATUS_BAKE_COMPLETE = 2
+GPUCLOTH_CACHE_STATUS_BAKE_CANCEL = 3
+GPUCLOTH_CACHE_STATUS_SOURCE_CHANGED = 4
+GPUCLOTH_CACHE_INFO_EMPTY = 0
+GPUCLOTH_CACHE_INFO_READY = 1
+GPUCLOTH_CACHE_INFO_BAKING = 2
+GPUCLOTH_CACHE_INFO_BAKED = 3
+GPUCLOTH_CACHE_INFO_OUTDATED = 4
+GPUCLOTH_CACHE_INFO_FRAME_SKIP = 5
+GPUCLOTH_CACHE_INFO_ERROR = 6
 
 GPUCLOTH_SOLVER_XPBD = 1 << 0
 GPUCLOTH_SOLVER_PD = 1 << 1
@@ -629,6 +647,41 @@ class GPUClothCacheConfig(Structure):
     ]
 
 
+class GPUClothCacheStatusUpdate(Structure):
+    _fields_ = [
+        ("header", GPUClothFeatureConfigHeader),
+        ("operation", c_uint),
+        ("frame", c_int),
+        ("error_code", c_uint),
+        ("reserved0", c_uint),
+        ("source_generation", c_uint64),
+        ("reserved", c_uint64 * 2),
+    ]
+
+
+class GPUClothCacheStatus(Structure):
+    _fields_ = [
+        ("struct_size", c_uint),
+        ("status_version", c_uint),
+        ("flags", c_uint),
+        ("info_code", c_uint),
+        ("frame_start", c_int),
+        ("frame_end", c_int),
+        ("frame_step", c_int),
+        ("last_exact", c_int),
+        ("last_valid", c_int),
+        ("outdated_from_frame", c_int),
+        ("cached_frame_count", c_uint),
+        ("missing_frame_count", c_uint),
+        ("error_code", c_uint),
+        ("source_generation", c_uint64),
+        ("baked_source_generation", c_uint64),
+        ("status_generation", c_uint64),
+        ("info", c_char * 96),
+        ("reserved", c_uint64 * 2),
+    ]
+
+
 class GPUClothSewingRecord(Structure):
     _fields_ = [
         ("seam_id", c_uint64),
@@ -704,13 +757,15 @@ class GPUClothDescriptorLayout(Structure):
         ("effector_config_size", c_uint),
         ("effector_weights_config_size", c_uint),
         ("cache_config_size", c_uint),
+        ("cache_status_update_size", c_uint),
+        ("cache_status_size", c_uint),
         ("sewing_record_size", c_uint),
         ("sewing_config_size", c_uint),
         ("vertex_channel_config_size", c_uint),
         ("collision_filter_config_size", c_uint),
         ("proxy_config_size", c_uint),
         ("diagnostics_config_size", c_uint),
-        ("reserved", c_uint * 3),
+        ("reserved", c_uint * 1),
     ]
 
 class fmatrix3x3(Structure):

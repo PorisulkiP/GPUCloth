@@ -85,6 +85,10 @@ POINT_CACHE_RANGE_MAP = {
     "frame_end": "bake_end",
 }
 
+POINT_CACHE_RUNTIME_STATUS = (
+    "is_baked", "is_baking", "is_outdated", "is_frame_skip", "info",
+)
+
 
 def find_cpu_cloth_modifier(obj):
     return next((modifier for modifier in obj.modifiers if modifier.type == "CLOTH"), None)
@@ -212,16 +216,37 @@ def sync_cpu_to_gpu(obj, scene=None):
                 "target": "GPUClothScene.frame_step",
                 "value": 1,
             })
+        if bool(getattr(point_cache, "use_disk_cache", False)):
+            result["copied"].append({
+                "source": "PointCache.use_disk_cache",
+                "target": "GPUClothCache.storage_mode",
+                "value": "DISK",
+            })
+        cache_index = int(getattr(point_cache, "index", 0))
+        if cache_index not in (-1, 0):
+            result["errors"].append(
+                f"PointCache.index: {cache_index} is unsupported; "
+                "GPUCloth owns only the active primary cache")
+        else:
+            result["copied"].append({
+                "source": "PointCache.index",
+                "target": "GPUClothCache.cache_index",
+                "value": 0,
+            })
 
     mapped = {
         "ClothSettings": set(CLOTH_SETTINGS_MAP),
         "ClothCollisionSettings": set(COLLISION_SETTINGS_MAP),
         "EffectorWeights": set(EFFECTOR_WEIGHTS_MAP),
+        "PointCache": (
+            set(POINT_CACHE_RANGE_MAP) |
+            {"frame_step", "use_disk_cache", "index"}),
     }
     owners = {
         "ClothSettings": settings,
         "ClothCollisionSettings": collision,
         "EffectorWeights": getattr(settings, "effector_weights", None),
+        "PointCache": point_cache,
     }
     for owner_name, owner in owners.items():
         for prop_name in sorted(_public_writable_properties(owner) - mapped[owner_name]):
@@ -230,8 +255,18 @@ def sync_cpu_to_gpu(obj, scene=None):
             inactive_effector_setting = (
                 owner_name == "EffectorWeights"
                 and not _scene_has_effectors(scene))
-            if _is_non_default(owner, prop_name) and not inactive_effector_setting:
+            inactive_point_cache_setting = (
+                owner_name == "PointCache"
+                and prop_name == "use_library_path"
+                and not bool(getattr(point_cache, "use_external", False)))
+            if (_is_non_default(owner, prop_name)
+                    and not inactive_effector_setting
+                    and not inactive_point_cache_setting):
                 result["unsupported_non_default"].append(qualified_name)
+    if point_cache is not None:
+        for prop_name in POINT_CACHE_RUNTIME_STATUS:
+            qualified_name = f"PointCache.{prop_name}"
+            result["unsupported"].append(qualified_name)
 
     if result["errors"] or result["unsupported_non_default"]:
         for destination, target_name, previous in reversed(rollback):

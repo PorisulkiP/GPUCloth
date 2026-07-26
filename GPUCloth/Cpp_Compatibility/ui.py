@@ -738,11 +738,13 @@ class GPUCLOTH_PT_cache(bpy.types.Panel):
 
         col.separator()
 
-        if scene_s.is_baked:
-            col.label(
-                text=_t("Status: baked", "Статус: запечено"),
-                icon='CHECKMARK')
+        status_icon = (
+            'ERROR' if scene_s.is_outdated or scene_s.is_frame_skip
+            else ('TIME' if scene_s.is_baking
+                  else ('CHECKMARK' if scene_s.is_baked else 'INFO')))
+        col.label(text=scene_s.cache_info, icon=status_icon)
 
+        if scene_s.is_baked:
             col.prop(scene_s, "playback_mode",
                      text=_t("Play from Cache", "Воспроизводить из кэша"),
                      toggle=True,
@@ -778,6 +780,10 @@ class GPUCLOTH_PT_cache(bpy.types.Panel):
                              text=_t("Bake Simulation",
                                      "Запечь симуляцию"),
                              icon='REC')
+            if scene_s.cached_frame_count > 0:
+                col.operator("gpucloth.free_cache",
+                             text="Clear Cache",
+                             icon='TRASH')
 
 
 # ===========================================================================

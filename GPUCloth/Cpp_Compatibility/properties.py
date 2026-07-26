@@ -1224,6 +1224,37 @@ class GPUClothSceneSettings(PropertyGroup):
         default=False,
     )
 
+    is_baking: BoolProperty(
+        name="Baking",
+        description="True while the native cache transaction is active",
+        default=False,
+    )
+
+    is_outdated: BoolProperty(
+        name="Outdated",
+        description="True when cache inputs differ from the baked source generation",
+        default=False,
+    )
+
+    is_frame_skip: BoolProperty(
+        name="Frame Skip",
+        description="True when the configured cache range contains a skipped or invalid frame",
+        default=False,
+    )
+
+    cache_info: StringProperty(
+        name="Cache Status",
+        description="Stable native cache status message",
+        default="Cache empty",
+    )
+
+    cached_frame_count: IntProperty(
+        name="Cached Frames",
+        description="Number of structurally valid frame records in the configured range",
+        default=0,
+        min=0,
+    )
+
     bake_start: IntProperty(
         name="Start Frame",
         description="First frame of bake range",
