@@ -122,7 +122,19 @@ def _configure_cache_features(dll, scene):
             CType.GPUCLOTH_CACHE_STORAGE_DISK
             if helper.use_disk_cache
             else CType.GPUCLOTH_CACHE_STORAGE_MEMORY)
-    config.compression_mode = CType.GPUCLOTH_CACHE_COMPRESSION_NONE
+    compression_modes = {
+        'NO': CType.GPUCLOTH_CACHE_COMPRESSION_NONE,
+        'LIGHT': CType.GPUCLOTH_CACHE_COMPRESSION_LIGHT,
+        'HEAVY': CType.GPUCLOTH_CACHE_COMPRESSION_HEAVY,
+    }
+    try:
+        config.compression_mode = (
+            CType.GPUCLOTH_CACHE_COMPRESSION_NONE
+            if helper.use_external_cache or not helper.use_disk_cache
+            else compression_modes[helper.cache_compression])
+    except KeyError as exc:
+        raise RuntimeError(
+            f"unsupported cache compression {helper.cache_compression}") from exc
     config.frame_start = int(helper.bake_start)
     config.frame_end = int(helper.bake_end)
     config.frame_step = 1
@@ -148,6 +160,10 @@ def _configure_cache_features(dll, scene):
             else CType.GPUCLOTH_FEATURE_CACHE_MEMORY)
     for feature in (
             storage_feature,
+            *(
+                (CType.GPUCLOTH_FEATURE_CACHE_COMPRESSION,)
+                if config.storage_mode == CType.GPUCLOTH_CACHE_STORAGE_DISK
+                else ()),
             CType.GPUCLOTH_FEATURE_BAKE_RANGE,
             CType.GPUCLOTH_FEATURE_CALCULATE_TO_FRAME,
             CType.GPUCLOTH_FEATURE_CACHE_STATUS,
@@ -540,7 +556,7 @@ def _cache_source_generation(scene):
         excluded={
             "cache_dir", "cache_index", "cache_name", "use_disk_cache",
             "use_external_cache", "external_cache_dir",
-            "use_library_path",
+            "use_library_path", "cache_compression",
             "bake_start", "bake_end", "bake_progress",
             "is_baked", "is_baking", "is_outdated", "is_frame_skip",
             "cache_info", "cached_frame_count", "playback_mode",

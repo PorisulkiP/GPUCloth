@@ -62,6 +62,8 @@ enum GPUClothCacheFlags : uint32_t {
 
 enum GPUClothCacheCompressionMode : uint32_t {
     GPUCLOTH_CACHE_COMPRESSION_NONE = 0,
+    GPUCLOTH_CACHE_COMPRESSION_LIGHT = 1,
+    GPUCLOTH_CACHE_COMPRESSION_HEAVY = 2,
 };
 
 enum GPUClothCacheStatusFlags : uint32_t {

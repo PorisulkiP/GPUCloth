@@ -224,6 +224,10 @@ def sync_cpu_to_gpu(obj, scene=None):
             point_cache, "use_external", False))
         use_library_path = bool(getattr(
             point_cache, "use_library_path", True))
+        compression = str(getattr(point_cache, "compression", "NO"))
+        if compression not in {"NO", "LIGHT", "HEAVY"}:
+            result["errors"].append(
+                f"PointCache.compression: unsupported mode {compression}")
         filepath = str(getattr(point_cache, "filepath", ""))
         external_path = ""
         if filepath:
@@ -240,11 +244,13 @@ def sync_cpu_to_gpu(obj, scene=None):
             (helper, "use_external_cache", helper.use_external_cache),
             (helper, "external_cache_dir", helper.external_cache_dir),
             (helper, "use_library_path", helper.use_library_path),
+            (helper, "cache_compression", helper.cache_compression),
         ))
         scene.gpu_cloth_helper.use_disk_cache = use_disk_cache
         helper.use_external_cache = use_external
         helper.external_cache_dir = external_path
         helper.use_library_path = use_library_path
+        helper.cache_compression = compression
         result["copied"].extend(({
             "source": "PointCache.use_disk_cache",
             "target": "GPUClothCache.storage_mode",
@@ -263,6 +269,10 @@ def sync_cpu_to_gpu(obj, scene=None):
             "source": "PointCache.use_library_path",
             "target": "GPUClothCache.library_path",
             "value": use_library_path,
+        }, {
+            "source": "PointCache.compression",
+            "target": "GPUClothCache.compression_mode",
+            "value": compression,
         }))
         cache_index = max(0, int(getattr(point_cache, "index", -1)))
         cache_name = str(getattr(point_cache, "name", "")) or "GPUCloth"
@@ -291,7 +301,8 @@ def sync_cpu_to_gpu(obj, scene=None):
         "PointCache": (
             set(POINT_CACHE_RANGE_MAP) |
             {"frame_step", "use_disk_cache", "use_external",
-             "use_library_path", "filepath", "index", "name"}),
+             "use_library_path", "filepath", "compression",
+             "index", "name"}),
     }
     owners = {
         "ClothSettings": settings,

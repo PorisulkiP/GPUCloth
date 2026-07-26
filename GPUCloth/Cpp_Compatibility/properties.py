@@ -1238,6 +1238,17 @@ class GPUClothSceneSettings(PropertyGroup):
         default=True,
     )
 
+    cache_compression: EnumProperty(
+        name="Compression",
+        description="Lossless compression used for newly baked disk frames",
+        items=(
+            ('NO', "None", "Store legacy uncompressed float32 frames"),
+            ('LIGHT', "Light", "Fast lossless disk compression"),
+            ('HEAVY', "Heavy", "Higher-ratio lossless disk compression"),
+        ),
+        default='NO',
+    )
+
     use_external_cache: BoolProperty(
         name="External Cache",
         description="Read an existing GPUCloth cache without modifying it",

@@ -735,6 +735,8 @@ class GPUCLOTH_PT_cache(bpy.types.Panel):
         else:
             col.prop(scene_s, "cache_dir")
             col.prop(scene_s, "use_disk_cache")
+            if scene_s.use_disk_cache:
+                col.prop(scene_s, "cache_compression")
         row = col.row(align=True)
         row.prop(scene_s, "cache_index", text="Index")
         row.prop(scene_s, "cache_name", text="Name")
