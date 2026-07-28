@@ -26,6 +26,7 @@ CLOTH_COLLSETTINGS_FLAG_SELF    = 4
 
 CLOTH_BENDING_LINEAR    = 0
 CLOTH_BENDING_ANGULAR   = 1
+CLOTH_PRODUCT_FLAG_TYPED_ANGULAR_BENDING = 1 << 0
 
 CLOTH_SIMSETTINGS_FLAG_COLLOBJ                = (1 << 2)   #   4
 CLOTH_SIMSETTINGS_FLAG_GOAL                   = (1 << 3)   #   8
@@ -300,8 +301,16 @@ GPUCLOTH_CONFIG_VERTEX_CHANNEL = 1 << 12
 GPUCLOTH_CONFIG_COLLISION_FILTER = 1 << 13
 GPUCLOTH_CONFIG_PROXY = 1 << 14
 GPUCLOTH_CONFIG_DIAGNOSTICS = 1 << 15
+GPUCLOTH_CONFIG_COLLECTION = 1 << 16
 
+GPUCLOTH_ELEMENT_FLOAT = 1
+GPUCLOTH_ELEMENT_FLOAT3 = 2
+GPUCLOTH_ELEMENT_UINT32 = 3
+GPUCLOTH_ELEMENT_UINT3 = 4
 GPUCLOTH_ELEMENT_SEWING_RECORD = 5
+GPUCLOTH_ELEMENT_DIAGNOSTIC_EVENT = 6
+GPUCLOTH_ELEMENT_COLLECTION_RECORD = 7
+GPUCLOTH_ELEMENT_FLOAT2 = 8
 
 GPUCLOTH_ABI_UNSUPPORTED = 4
 GPUCLOTH_ABI_OK = 0
@@ -326,14 +335,32 @@ GPUCLOTH_FEATURE_STRETCH = 4
 GPUCLOTH_FEATURE_COMPRESSION = 5
 GPUCLOTH_FEATURE_SHEAR = 6
 GPUCLOTH_FEATURE_BENDING_LINEAR = 7
+GPUCLOTH_FEATURE_BENDING_ANGULAR = 8
+GPUCLOTH_FEATURE_MATERIAL_DAMPING = 9
+GPUCLOTH_FEATURE_INTERNAL_SPRINGS = 16
 GPUCLOTH_FEATURE_PRESSURE_UNIFORM = 17
 GPUCLOTH_FEATURE_PRESSURE_VOLUME = 18
 GPUCLOTH_FEATURE_FLUID_DENSITY = 19
 GPUCLOTH_FEATURE_PRESSURE_VERTEX_GROUP = 20
+GPUCLOTH_FEATURE_ANISOTROPY = 21
+GPUCLOTH_FEATURE_STATIC_OBJECT_COLLISION = 22
+GPUCLOTH_FEATURE_MOVING_OBJECT_COLLISION = 23
+GPUCLOTH_FEATURE_DEFORMING_OBJECT_COLLISION = 24
+GPUCLOTH_FEATURE_COLLISION_FRICTION_DAMPING = 25
+GPUCLOTH_FEATURE_COLLISION_QUALITY_CLAMP = 26
+GPUCLOTH_FEATURE_COLLISION_COLLECTION = 27
 GPUCLOTH_FEATURE_COLLISION_VERTEX_GROUP = 28
+GPUCLOTH_FEATURE_SELF_COLLISION = 29
+GPUCLOTH_FEATURE_SELF_COLLISION_FRICTION = 30
+GPUCLOTH_FEATURE_SELF_COLLISION_VERTEX_GROUP = 31
+GPUCLOTH_FEATURE_EFFECTORS = 32
+GPUCLOTH_FEATURE_EFFECTOR_WEIGHTS = 33
+GPUCLOTH_FEATURE_EFFECTOR_COLLECTION = 34
 GPUCLOTH_FEATURE_GRAVITY_VECTOR = 50
 GPUCLOTH_FEATURE_SIMULATION_QUALITY = 51
 GPUCLOTH_FEATURE_AIR_DAMPING = 52
+GPUCLOTH_FEATURE_COLLIDER_SURFACE_CONTROLS = 53
+GPUCLOTH_FEATURE_MODIFIER_EVALUATION = 54
 GPUCLOTH_FEATURE_CACHE_DISK = 35
 GPUCLOTH_FEATURE_CACHE_MEMORY = 36
 GPUCLOTH_FEATURE_CACHE_EXTERNAL = 37
@@ -341,7 +368,29 @@ GPUCLOTH_FEATURE_CACHE_MULTIPLE = 38
 GPUCLOTH_FEATURE_CACHE_COMPRESSION = 39
 GPUCLOTH_FEATURE_BAKE_RANGE = 40
 GPUCLOTH_FEATURE_CALCULATE_TO_FRAME = 41
+GPUCLOTH_FEATURE_MASS_VERTEX_GROUP = 48
+GPUCLOTH_FEATURE_STIFFNESS_VERTEX_GROUPS = 49
+GPUCLOTH_FEATURE_SOLVER_DIAGNOSTICS = 55
 GPUCLOTH_FEATURE_CACHE_STATUS = 56
+
+GPUCLOTH_MATERIAL_ANISOTROPY_ENABLED = 1 << 0
+
+GPUCLOTH_CONSTRAINT_INTERNAL_SPRINGS = 1 << 0
+GPUCLOTH_CONSTRAINT_INTERNAL_NORMAL_CHECK = 1 << 1
+
+GPUCLOTH_MESH_DYNAMIC_BASE = 1 << 0
+
+GPUCLOTH_VERTEX_MASS = 1
+GPUCLOTH_VERTEX_PIN_WEIGHT = 2
+GPUCLOTH_VERTEX_PIN_TARGET_XYZ = 3
+GPUCLOTH_VERTEX_SHRINK_WEIGHT = 4
+GPUCLOTH_VERTEX_PRESSURE_WEIGHT = 5
+GPUCLOTH_VERTEX_STRUCTURAL_STIFFNESS = 6
+GPUCLOTH_VERTEX_SHEAR_STIFFNESS = 7
+GPUCLOTH_VERTEX_BENDING_STIFFNESS = 8
+GPUCLOTH_VERTEX_INTERNAL_STIFFNESS = 9
+GPUCLOTH_VERTEX_OBJECT_COLLISION_MASK = 10
+GPUCLOTH_VERTEX_SELF_COLLISION_MASK = 11
 
 GPUCLOTH_CACHE_STORAGE_DISK = 1
 GPUCLOTH_CACHE_STORAGE_MEMORY = 2
@@ -374,16 +423,73 @@ GPUCLOTH_SOLVER_PD = 1 << 1
 GPUCLOTH_SOLVER_MIL2 = 1 << 2
 
 GPUCLOTH_PRESSURE_ENABLED = 1 << 0
-
-GPUCLOTH_ELEMENT_FLOAT = 1
-GPUCLOTH_ELEMENT_FLOAT3 = 2
-GPUCLOTH_VERTEX_PIN_WEIGHT = 2
-GPUCLOTH_VERTEX_PIN_TARGET_XYZ = 3
-GPUCLOTH_VERTEX_SHRINK_WEIGHT = 4
-GPUCLOTH_VERTEX_PRESSURE_WEIGHT = 5
-GPUCLOTH_VERTEX_OBJECT_COLLISION_MASK = 10
+GPUCLOTH_PIN_GROUP_PRESENT = 1 << 0
 
 CLOTH_VERT_FLAG_NOOBJCOLL = 1 << 2
+
+GPUCLOTH_DIAGNOSTICS_STATUS = 1 << 0
+GPUCLOTH_DIAGNOSTICS_EVENTS = 1 << 1
+GPUCLOTH_DIAGNOSTICS_INFO = 1
+GPUCLOTH_DIAGNOSTICS_WARNING = 2
+GPUCLOTH_DIAGNOSTICS_ERROR = 3
+GPUCLOTH_DIAGNOSTICS_CONFIGURED = 1
+GPUCLOTH_DIAGNOSTICS_SOLVE_STARTED = 2
+GPUCLOTH_DIAGNOSTICS_SOLVE_SUCCEEDED = 3
+GPUCLOTH_DIAGNOSTICS_SOLVE_FAILED = 4
+GPUCLOTH_DIAGNOSTICS_RESULT_NONE = 0
+GPUCLOTH_DIAGNOSTICS_RESULT_SUCCESS = 1
+GPUCLOTH_DIAGNOSTICS_RESULT_FAILED = 2
+GPUCLOTH_DIAGNOSTICS_ERROR_NONE = 0
+GPUCLOTH_DIAGNOSTICS_ERROR_RUNTIME_INIT = 1
+GPUCLOTH_DIAGNOSTICS_ERROR_NO_CLOTH = 2
+GPUCLOTH_DIAGNOSTICS_ERROR_INVALID_CLOTH = 3
+GPUCLOTH_DIAGNOSTICS_ERROR_EMPTY_CLOTH = 4
+GPUCLOTH_DIAGNOSTICS_ERROR_SOLVER_STATE = 5
+GPUCLOTH_DIAGNOSTICS_ERROR_PRESSURE_STATE = 6
+GPUCLOTH_DIAGNOSTICS_ERROR_DEVICE_CLOTH = 7
+GPUCLOTH_DIAGNOSTICS_ERROR_BACKEND_UNAVAILABLE = 8
+GPUCLOTH_DIAGNOSTICS_ERROR_PIN_STATE = 9
+GPUCLOTH_DIAGNOSTICS_ERROR_DYNAMIC_MESH_STATE = 10
+GPUCLOTH_DIAGNOSTICS_STATUS_CONFIGURED = 1 << 0
+GPUCLOTH_DIAGNOSTICS_STATUS_RUNNING = 1 << 1
+GPUCLOTH_DIAGNOSTICS_STATUS_HAS_RESULT = 1 << 2
+GPUCLOTH_DIAGNOSTICS_STATUS_HAS_ERROR = 1 << 3
+GPUCLOTH_SOLVER_RESULT_SUCCESS = 1 << 0
+GPUCLOTH_SOLVER_RESULT_NUMERICAL_ISSUE = 1 << 1
+GPUCLOTH_SOLVER_RESULT_NO_CONVERGENCE = 1 << 2
+GPUCLOTH_SOLVER_RESULT_INVALID_INPUT = 1 << 3
+GPUCLOTH_CONVERGENCE_LINF_POSITION_DELTA = 1
+
+GPUCLOTH_COLLECTION_COLLISION = 1
+GPUCLOTH_COLLECTION_EFFECTOR = 2
+GPUCLOTH_COLLECTION_OBJECT_MESH = 1
+GPUCLOTH_COLLECTION_OBJECT_CURVE = 2
+GPUCLOTH_COLLECTION_OBJECT_EMPTY = 3
+GPUCLOTH_COLLECTION_OBJECT_OTHER = 255
+GPUCLOTH_COLLECTION_RECORD_INSTANCE = 1 << 0
+GPUCLOTH_COLLECTION_RECORD_EVALUATED = 1 << 1
+GPUCLOTH_COLLECTION_RECORD_VIEWPORT_ENABLED = 1 << 2
+GPUCLOTH_COLLECTION_RECORD_RENDER_ENABLED = 1 << 3
+GPUCLOTH_COLLECTION_STATUS_CONFIGURED = 1 << 0
+GPUCLOTH_COLLECTION_STATUS_STAGED = 1 << 1
+
+GPUCLOTH_COLLIDER_STATIC = 1 << 0
+GPUCLOTH_COLLIDER_MOVING = 1 << 1
+GPUCLOTH_COLLIDER_DEFORMING = 1 << 2
+GPUCLOTH_COLLIDER_USE_CULLING = 1 << 3
+GPUCLOTH_COLLIDER_USE_NORMAL = 1 << 4
+
+GPUCLOTH_EFFECTOR_USE_ABSORPTION = 1 << 0
+
+GPUCLOTH_COLLISION_OBJECT_ENABLED = 1 << 0
+GPUCLOTH_COLLISION_SELF_ENABLED = 1 << 1
+
+GPUCLOTH_VALUE_BOOL = 1
+GPUCLOTH_VALUE_INT32 = 2
+GPUCLOTH_VALUE_UINT32 = 3
+GPUCLOTH_VALUE_FLOAT32 = 4
+GPUCLOTH_VALUE_FLOAT64 = 5
+GPUCLOTH_VALUE_OBJECT_ID = 6
 
 
 class GPUClothABIVersion(Structure):
@@ -513,7 +619,9 @@ class GPUClothMaterialConfig(Structure):
         ("stiffness", c_float * 4),
         ("stiffness_max", c_float * 4),
         ("damping", c_float * 4),
-        ("reserved", c_uint * 2),
+        ("directional_stiffness", c_float * 6),
+        ("directional_stiffness_max", c_float * 6),
+        ("material_coordinates", GPUClothBufferView),
     ]
 
 
@@ -527,6 +635,27 @@ class GPUClothPinConfig(Structure):
         ("goal_damping", c_float),
         ("pin_stiffness", c_float),
         ("reserved", c_uint * 2),
+    ]
+
+
+class GPUClothPinSnapshotConfig(Structure):
+    _fields_ = [
+        ("header", GPUClothFeatureConfigHeader),
+        ("object_id", c_uint64),
+        ("topology_generation", c_uint64),
+        ("frame_generation", c_uint64),
+        ("pin_flags", c_uint),
+        ("vertex_count", c_uint),
+        ("goal_min", c_float),
+        ("goal_max", c_float),
+        ("goal_default", c_float),
+        ("goal_spring", c_float),
+        ("goal_damping", c_float),
+        ("reserved0", c_uint),
+        ("membership", GPUClothBufferView),
+        ("raw_weights", GPUClothBufferView),
+        ("evaluated_targets", GPUClothBufferView),
+        ("reserved", c_uint64 * 1),
     ]
 
 
@@ -645,6 +774,88 @@ class GPUClothEffectorWeightsConfig(Structure):
     ]
 
 
+class GPUClothCollectionRecord(Structure):
+    _fields_ = [
+        ("struct_size", c_uint),
+        ("record_version", c_uint),
+        ("object_type", c_uint),
+        ("record_flags", c_uint),
+        ("object_id", c_uint64),
+        ("instance_id", c_uint64),
+        ("source_collection_id", c_uint64),
+        ("topology_generation", c_uint64),
+        ("geometry_generation", c_uint64),
+        ("modifier_index", c_uint),
+        ("payload_kind", c_uint),
+        ("payload_address", c_uint64),
+        ("reserved", c_uint64 * 1),
+    ]
+
+
+class GPUClothCollectionSnapshotConfig(Structure):
+    _fields_ = [
+        ("header", GPUClothFeatureConfigHeader),
+        ("cloth_id", c_uint64),
+        ("collection_id", c_uint64),
+        ("snapshot_generation", c_uint64),
+        ("collection_kind", c_uint),
+        ("collection_flags", c_uint),
+        ("record_count", c_uint),
+        ("reserved0", c_uint),
+        ("records", GPUClothBufferView),
+        ("reserved", c_uint64 * 8),
+    ]
+
+
+class GPUClothCollectionTransactionConfig(Structure):
+    _fields_ = [
+        ("struct_size", c_uint),
+        ("transaction_version", c_uint),
+        ("transaction_flags", c_uint),
+        ("reserved0", c_uint),
+        ("source_generation", c_uint64),
+        ("requested_transaction_id", c_uint64),
+        ("reserved", c_uint64 * 2),
+    ]
+
+
+class GPUClothCollectionQuery(Structure):
+    _fields_ = [
+        ("struct_size", c_uint),
+        ("query_version", c_uint),
+        ("collection_kind", c_uint),
+        ("query_flags", c_uint),
+        ("cloth_id", c_uint64),
+        ("collection_id", c_uint64),
+        ("snapshot_generation", c_uint64),
+        ("transaction_id", c_uint64),
+        ("record_capacity", c_uint),
+        ("record_count", c_uint),
+        ("required_count", c_uint),
+        ("reserved0", c_uint),
+        ("records_address", c_uint64),
+        ("reserved", c_uint64 * 2),
+    ]
+
+
+class GPUClothCollectionStatus(Structure):
+    _fields_ = [
+        ("struct_size", c_uint),
+        ("status_version", c_uint),
+        ("status_flags", c_uint),
+        ("last_error", c_uint),
+        ("transaction_id", c_uint64),
+        ("snapshot_generation", c_uint64),
+        ("collection_id", c_uint64),
+        ("collision_record_count", c_uint),
+        ("effector_record_count", c_uint),
+        ("record_count", c_uint),
+        ("reserved0", c_uint),
+        ("commit_generation", c_uint64),
+        ("reserved", c_uint64 * 4),
+    ]
+
+
 class GPUClothCacheConfig(Structure):
     _fields_ = [
         ("header", GPUClothFeatureConfigHeader),
@@ -755,6 +966,52 @@ class GPUClothDiagnosticsConfig(Structure):
     ]
 
 
+class GPUClothDiagnosticsEvent(Structure):
+    _fields_ = [
+        ("struct_size", c_uint),
+        ("event_type", c_uint),
+        ("severity", c_uint),
+        ("result", c_uint),
+        ("error_code", c_uint),
+        ("solver_mask", c_uint),
+        ("sequence", c_uint64),
+    ]
+
+
+class GPUClothDiagnosticsStatus(Structure):
+    _fields_ = [
+        ("struct_size", c_uint),
+        ("status_version", c_uint),
+        ("status_flags", c_uint),
+        ("last_result", c_uint),
+        ("last_error", c_uint),
+        ("requested_solver_mask", c_uint),
+        ("backend_solver_mask", c_uint),
+        ("solver_result_status", c_uint),
+        ("convergence_metric", c_uint),
+        ("event_capacity", c_uint),
+        ("event_count", c_uint),
+        ("dropped_event_count", c_uint),
+        ("event_write_index", c_uint),
+        ("substep_count", c_uint),
+        ("min_iterations", c_uint),
+        ("max_iterations", c_uint),
+        ("avg_iterations", c_float),
+        ("min_error_value", c_float),
+        ("max_error_value", c_float),
+        ("avg_error_value", c_float),
+        ("last_error_value", c_float),
+        ("convergence_tolerance", c_float),
+        ("total_iterations", c_uint64),
+        ("execution_time_ns", c_uint64),
+        ("sequence", c_uint64),
+        ("solve_count", c_uint64),
+        ("failure_count", c_uint64),
+        ("event_generation", c_uint64),
+        ("reserved", c_uint64 * 2),
+    ]
+
+
 class GPUClothDescriptorLayout(Structure):
     _fields_ = [
         ("struct_size", c_uint),
@@ -781,7 +1038,16 @@ class GPUClothDescriptorLayout(Structure):
         ("collision_filter_config_size", c_uint),
         ("proxy_config_size", c_uint),
         ("diagnostics_config_size", c_uint),
-        ("reserved", c_uint * 1),
+        ("legacy_reserved0", c_uint),
+        ("diagnostics_event_size", c_uint),
+        ("diagnostics_status_size", c_uint),
+        ("pin_snapshot_config_size", c_uint),
+        ("collection_record_size", c_uint),
+        ("collection_snapshot_config_size", c_uint),
+        ("collection_transaction_config_size", c_uint),
+        ("collection_query_size", c_uint),
+        ("collection_status_size", c_uint),
+        ("reserved", c_uint * 3),
     ]
 
 class fmatrix3x3(Structure):
@@ -920,7 +1186,7 @@ class ClothSimSettings(Structure):
             ("solver_ptb_seam", c_short),
             ("solver_use_pt_budget",         c_short),
             ("use_anisotropy",               c_short),
-            ("_pad_aniso2",                  c_short)
+            ("product_flags",                c_short)
 ]
 
     def __init__(self):
@@ -991,9 +1257,10 @@ class Cloth(Structure):
     _fields_ = [
         ("verts", POINTER(ClothVertex)), 
         ("springs", POINTER(LinkNode)), 
-        ("numsprings", c_uint), 
-        ("mvert_num", c_uint),
-        ("primitive_num", c_uint),
+        ("numLogicalSprings", c_size_t),
+        ("numPhisicalSprings", c_size_t),
+        ("mvert_num", c_size_t),
+        ("primitive_num", c_size_t),
         ("bvhtree", POINTER(BVHTree)),
         ("bvhselftree", POINTER(BVHTree)),
         ("tri", POINTER(MVertTri)),
@@ -1002,8 +1269,10 @@ class Cloth(Structure):
         ("last_frame", c_int),
         ("initial_mesh_volume", c_float),
         ("average_acceleration", c_float*3),
-        ("edges", POINTER(MEdge)),
-        ("sew_edge_graph", POINTER(EdgeSet))
+        ("sew_edge_graph", POINTER(EdgeSet)),
+        ("cn", c_void_p),
+        ("pa_pool", POINTER(c_int)),
+        ("pb_pool", POINTER(c_int)),
     ]
 
 class IDNode(Structure):
