@@ -202,3 +202,5 @@ softBody/
 /tmp/tools/sccache-v*/
 /tmp/tools/nvcc-sccache.*
 /tmp/tools/sccache_probe*
+/tmp/tools/vulkan-sdk-*/
+/vulkan_sdk/1.3.290.0/
