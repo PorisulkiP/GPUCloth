@@ -201,10 +201,26 @@ class GPUCLOTH_PT_material(bpy.types.Panel):
         col = layout.column(align=True)
         col.prop(s, "use_anisotropy", text=_t("Anisotropic Stiffness", "Анизотропная жёсткость"))
         if s.use_anisotropy:
+            simulation_data = (
+                s.proxy_object.data
+                if s.use_proxy and s.proxy_object is not None
+                else context.object.data)
+            col.prop_search(
+                s, "anisotropy_uv_map", simulation_data, "uv_layers",
+                text=_t("Material UV", "UV материала"))
             col.prop(s, "tension_u",    text=_t("Tension U (Warp)", "Растяжение U"))
             col.prop(s, "tension_v",    text=_t("Tension V (Weft)", "Растяжение V"))
+            col.prop(s, "compression_u", text=_t("Compression U (Warp)", "Сжатие U"))
+            col.prop(s, "compression_v", text=_t("Compression V (Weft)", "Сжатие V"))
             col.prop(s, "bending_u",    text=_t("Bending U (Warp)", "Изгиб U"))
             col.prop(s, "bending_v",    text=_t("Bending V (Weft)", "Изгиб V"))
+            col.separator()
+            col.prop(s, "max_tension_u", text=_t("Max Tension U", "Макс. растяжение U"))
+            col.prop(s, "max_tension_v", text=_t("Max Tension V", "Макс. растяжение V"))
+            col.prop(s, "max_compression_u", text=_t("Max Compression U", "Макс. сжатие U"))
+            col.prop(s, "max_compression_v", text=_t("Max Compression V", "Макс. сжатие V"))
+            col.prop(s, "max_bend_u", text=_t("Max Bending U", "Макс. изгиб U"))
+            col.prop(s, "max_bend_v", text=_t("Max Bending V", "Макс. изгиб V"))
 
         layout.separator()
 
@@ -251,6 +267,8 @@ class GPUCLOTH_PT_physical(bpy.types.Panel):
         col.prop(s, "max_bend",       text=_t("Max Bending",     "Макс. изгиб"))
         col.prop(s, "max_struct",     text=_t("Max Structural",  "Макс. структура"))
         col.prop(s, "max_sewing",     text=_t("Max Sewing",      "Макс. шов"))
+        col.prop(s, "use_sewing_springs",
+                 text=_t("Sew Cloth", "Сшивать ткань"))
 
         layout.separator()
         col = layout.column(align=True)
@@ -348,8 +366,12 @@ class GPUCLOTH_PT_pressure(bpy.types.Panel):
                  text=_t("Pressure", "Давление"))
         col.prop(s, "pressure_factor",
                  text=_t("Factor", "Множитель"))
-        col.prop(s, "target_volume",
-                 text=_t("Target Volume", "Целевой объём"))
+        col.prop(s, "use_pressure_volume",
+                 text=_t("Use Custom Volume", "Использовать заданный объём"))
+        volume_col = col.column()
+        volume_col.active = s.use_pressure_volume
+        volume_col.prop(s, "target_volume",
+                        text=_t("Target Volume", "Целевой объём"))
         col.prop(s, "fluid_density",
                  text=_t("Fluid Density", "Плотность флюида"))
 
@@ -392,8 +414,12 @@ class GPUCLOTH_PT_shape(bpy.types.Panel):
                      text=_t("Stiffness", "Жёсткость"))
             col.prop(s, "goalfrict",
                      text=_t("Friction", "Трение"))
+            col.prop(s, "mingoal",
+                     text=_t("Min Goal", "Мин. цель"))
             col.prop(s, "maxgoal",
                      text=_t("Max Goal", "Макс. цель"))
+            col.prop(s, "defgoal",
+                     text=_t("Default Goal", "Цель по умолчанию"))
 
         layout.separator()
         col = layout.column(align=True)
@@ -536,6 +562,7 @@ class GPUCLOTH_PT_field_weights(bpy.types.Panel):
         layout = self.layout
         s      = context.object.GPUCloth
         fw     = s.effector_weights
+        layout.prop(fw, "collection", text="Collection")
 
         col = layout.column(align=True)
         col.prop(s, "eff_force_scale",
@@ -548,34 +575,34 @@ class GPUCLOTH_PT_field_weights(bpy.types.Panel):
         col.label(text=_t("Field Weights:", "Веса полей:"))
         col.prop(fw, "global_gravity",
                  text=_t("Gravity", "Гравитация"))
-        col.prop(fw, "weight_gravity",
-                 text=_t("Gravity", "Гравитация"))
-        col.prop(fw, "weight_wind",
-                 text=_t("Wind", "Ветер"))
+        col.prop(fw, "weight_all",
+                 text=_t("All", "Все"))
+        col.prop(fw, "weight_force",
+                 text=_t("Force", "Сила"))
         col.prop(fw, "weight_vortex",
                  text=_t("Vortex", "Вихрь"))
         col.prop(fw, "weight_magnetic",
                  text=_t("Magnetic", "Магнитное"))
-        col.prop(fw, "weight_turbulence",
-                 text=_t("Turbulence", "Турбулентность"))
-        col.prop(fw, "weight_drag",
-                 text=_t("Drag", "Торможение"))
-        col.prop(fw, "weight_smoke_flow",
-                 text=_t("Smoke Flow", "Поток дыма"))
+        col.prop(fw, "weight_wind",
+                 text=_t("Wind", "Ветер"))
+        col.prop(fw, "weight_curve_guide",
+                 text=_t("Curve Guide", "Напр. кривой"))
+        col.prop(fw, "weight_texture",
+                 text=_t("Texture", "Текстура"))
         col.prop(fw, "weight_harmonic",
                  text=_t("Harmonic", "Гармоническое"))
         col.prop(fw, "weight_charge",
                  text=_t("Charge", "Заряд"))
         col.prop(fw, "weight_lennard_jones",
                  text=_t("Lennard-Jones", "Леннард-Джонс"))
-        col.prop(fw, "weight_texture",
-                 text=_t("Texture", "Текстура"))
-        col.prop(fw, "weight_curve_guide",
-                 text=_t("Curve Guide", "Напр. кривой"))
         col.prop(fw, "weight_boid",
                  text=_t("Boid", "Боид"))
-        col.prop(fw, "weight_fluid",
-                 text=_t("Fluid", "Флюид"))
+        col.prop(fw, "weight_turbulence",
+                 text=_t("Turbulence", "Турбулентность"))
+        col.prop(fw, "weight_drag",
+                 text=_t("Drag", "Торможение"))
+        col.prop(fw, "weight_smoke_flow",
+                 text=_t("Fluid Flow", "Поток жидкости"))
 
 
 # ===========================================================================
@@ -613,6 +640,9 @@ class GPUCLOTH_PT_collision(bpy.types.Panel):
         col.prop(s, "ogc_kc")
         col.prop(s, "ogc_friction")
         col.prop(s, "ogc_gamma_p")
+        col.prop(
+            s, "self_collision_friction",
+            text=_t("Blender Self Friction", "Трение самоколлизии Blender"))
 
         layout.separator()
 

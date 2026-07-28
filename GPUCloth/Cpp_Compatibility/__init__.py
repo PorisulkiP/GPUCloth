@@ -36,20 +36,57 @@ from . import operators
 from . import ui
 
 
+_REGISTER_TEARDOWN_FAILURE = (
+    "GPUCloth package register blocked by retained native owners")
+_UNREGISTER_TEARDOWN_FAILURE = (
+    "GPUCloth package unregister blocked by retained native owners")
+
+
+def get_solver_diagnostics(cloth=None):
+    return operators.get_solver_diagnostics(cloth)
+
+
+def _rollback_registered_modules(modules):
+    for module in reversed(modules):
+        try:
+            module.unregister()
+        except Exception as exc:
+            print(
+                f"GPUCloth registration rollback failed for "
+                f"{module.__name__}: {exc}")
+
+
 def register():
+    if not operators.ensure_native_teardown():
+        raise RuntimeError(_REGISTER_TEARDOWN_FAILURE)
+
+    registered = []
     # Порядок важен: PropertyGroup-ы регистрируются ДО операторов,
     # которые читают поля типа OBJ.GPUCloth.*
-    properties.register()
-    cloth_settings_bridge.restore_all_cpu_owners()
-    operators.register()
-    ui.register()
+    try:
+        properties.register()
+        registered.append(properties)
+        cloth_settings_bridge.restore_all_cpu_owners()
+        operators.register()
+        registered.append(operators)
+        ui.register()
+        registered.append(ui)
+    except Exception:
+        _rollback_registered_modules(registered)
+        raise
 
 
 def unregister():
+    if not operators.ensure_native_teardown(shutdown_runtime=True):
+        print(_UNREGISTER_TEARDOWN_FAILURE)
+        return False
+
     # Порядок обратный: UI первым (ссылается на операторы),
     # затем операторы (ссылаются на PropertyGroup),
     # затем PropertyGroup-ы.
     cloth_settings_bridge.restore_all_cpu_owners()
     ui.unregister()
-    operators.unregister()
+    if operators.unregister() is False:
+        raise RuntimeError(_UNREGISTER_TEARDOWN_FAILURE)
     properties.unregister()
+    return True

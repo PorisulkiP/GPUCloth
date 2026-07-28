@@ -40,7 +40,9 @@ def register():
 
 
 def unregister():
-    Cpp_Compatibility.unregister()
+    if Cpp_Compatibility.unregister() is False:
+        raise RuntimeError(
+            "GPUCloth unregister blocked by retained native owners")
 
 
 if __name__ == "__main__":

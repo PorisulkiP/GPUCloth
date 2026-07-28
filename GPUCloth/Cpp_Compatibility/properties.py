@@ -163,7 +163,7 @@ MATERIAL_PRESETS = {
             'shear_damp': 5.0,    'bending_damping': 5.0,
         },
         'RUBBER': {
-            'vertex_mass': 1.2, 'quality_step': 5, 'bending_model': 'LINEAR',
+            'vertex_mass': 1.2, 'quality_step': 5, 'bending_model': 'ANGULAR',
             'tension': 100.0, 'compression': 100.0, 'shear': 50.0, 'bending_stiffness': 2.0,
             'tension_damp': 15.0, 'compression_damp': 15.0,
             'shear_damp': 12.0,   'bending_damping': 1.0,
@@ -227,7 +227,7 @@ MATERIAL_PRESETS = {
             'shear_damp': 5.0,    'bending_damping': 5.0,
         },
         'RUBBER': {
-            'vertex_mass': 1.2, 'quality_step': 8, 'bending_model': 'LINEAR',
+            'vertex_mass': 1.2, 'quality_step': 8, 'bending_model': 'ANGULAR',
             'tension': 50.0, 'compression': 50.0, 'shear': 25.0, 'bending_stiffness': 1.0,
             'tension_damp': 15.0, 'compression_damp': 15.0,
             'shear_damp': 12.0,   'bending_damping': 1.0,
@@ -293,6 +293,12 @@ def _on_solver_change(self, context):
     """Re-apply preset when solver changes (values differ per solver)."""
     if self.material_preset != 'CUSTOM':
         _apply_preset(self, context)
+    elif self.solver_type == 'Mil2' or (
+            self.solver_type == 'PD' and
+            self.bending_model not in {'ANGULAR', 'SDB'}):
+        self.bending_model = 'ANGULAR'
+    elif self.solver_type != 'PD' and self.bending_model == 'SDB':
+        self.bending_model = 'ANGULAR'
 
 
 # ===========================================================================
@@ -300,6 +306,21 @@ def _on_solver_change(self, context):
 # ===========================================================================
 
 def _bending_model_items(self, context):
+    if self.solver_type == 'PD':
+        return [
+            ('ANGULAR', _t("Angular", "Угловой"),
+             _t("Dihedral-angle bending constraint",
+                "Ограничение изгиба по двугранному углу")),
+            ('SDB', "Stable Discrete Bending (SDB)",
+             _t("Stable Discrete Bending operator for Projective Dynamics",
+                "Оператор Stable Discrete Bending для Projective Dynamics")),
+        ]
+    if self.solver_type == 'Mil2':
+        return [
+            ('ANGULAR', _t("Angular", "Угловой"),
+             _t("Standard Mil2 dihedral-angle bending constraint",
+                "Стандартное ограничение изгиба Mil2 по двугранному углу")),
+        ]
     return [
         ('LINEAR',  _t("Linear",  "Линейный"),  _t("Linear bending stiffness", "Линейная жёсткость изгиба")),
         ('ANGULAR', _t("Angular", "Угловой"),    _t("Angular bending stiffness (more realistic)", "Угловая жёсткость изгиба (реалистичнее)")),
@@ -337,43 +358,48 @@ def _material_preset_items(self, context):
 class GPUClothEffectorWeights(PropertyGroup):
     """Per-field-type weights mirrored by the native EffectorWeights array."""
 
-    global_gravity: FloatProperty(
-        name="Global Gravity",
-        description="Override scene gravity for this cloth (0 = use scene, 1 = full scene gravity)",
-        default=1.0,
-        min=0.0,
-        max=1.0,
-        subtype='FACTOR',
+    collection: PointerProperty(
+        name="Effector Collection",
+        description="Restrict force fields to objects in this collection",
+        type=bpy.types.Collection,
     )
 
-    weight_gravity: FloatProperty(
-        name="Gravity", description="Gravity field weight", default=1.0, min=-10.0, max=10.0)
+    global_gravity: FloatProperty(
+        name="Gravity",
+        description="Global gravity weight",
+        default=1.0,
+        min=-200.0,
+        max=200.0,
+    )
+
+    weight_all: FloatProperty(
+        name="All", description="All effectors weight", default=1.0, min=-200.0, max=200.0)
+    weight_force: FloatProperty(
+        name="Force", description="Force effector weight", default=1.0, min=-200.0, max=200.0)
     weight_wind: FloatProperty(
-        name="Wind", description="Wind field weight", default=1.0, min=-10.0, max=10.0)
+        name="Wind", description="Wind effector weight", default=1.0, min=-200.0, max=200.0)
     weight_vortex: FloatProperty(
-        name="Vortex", description="Vortex field weight", default=1.0, min=-10.0, max=10.0)
+        name="Vortex", description="Vortex effector weight", default=1.0, min=-200.0, max=200.0)
     weight_magnetic: FloatProperty(
-        name="Magnetic", description="Magnetic field weight", default=1.0, min=-10.0, max=10.0)
+        name="Magnetic", description="Magnetic effector weight", default=1.0, min=-200.0, max=200.0)
     weight_turbulence: FloatProperty(
-        name="Turbulence", description="Turbulence field weight", default=1.0, min=-10.0, max=10.0)
+        name="Turbulence", description="Turbulence effector weight", default=1.0, min=-200.0, max=200.0)
     weight_drag: FloatProperty(
-        name="Drag", description="Drag field weight", default=1.0, min=-10.0, max=10.0)
+        name="Drag", description="Drag effector weight", default=1.0, min=-200.0, max=200.0)
     weight_smoke_flow: FloatProperty(
-        name="Smoke Flow", description="Smoke Flow field weight", default=1.0, min=-10.0, max=10.0)
+        name="Fluid Flow", description="Fluid Flow effector weight", default=1.0, min=-200.0, max=200.0)
     weight_harmonic: FloatProperty(
-        name="Harmonic", description="Harmonic field weight", default=1.0, min=-10.0, max=10.0)
+        name="Harmonic", description="Harmonic effector weight", default=1.0, min=-200.0, max=200.0)
     weight_charge: FloatProperty(
-        name="Charge", description="Charge field weight", default=1.0, min=-10.0, max=10.0)
+        name="Charge", description="Charge effector weight", default=1.0, min=-200.0, max=200.0)
     weight_lennard_jones: FloatProperty(
-        name="Lennard-Jones", description="Lennard-Jones field weight", default=1.0, min=-10.0, max=10.0)
+        name="Lennard-Jones", description="Lennard-Jones effector weight", default=1.0, min=-200.0, max=200.0)
     weight_texture: FloatProperty(
-        name="Texture", description="Texture field weight", default=1.0, min=-10.0, max=10.0)
+        name="Texture", description="Texture effector weight", default=1.0, min=-200.0, max=200.0)
     weight_curve_guide: FloatProperty(
-        name="Curve Guide", description="Curve Guide field weight", default=1.0, min=-10.0, max=10.0)
+        name="Curve Guide", description="Curve Guide effector weight", default=1.0, min=-200.0, max=200.0)
     weight_boid: FloatProperty(
-        name="Boid", description="Boid field weight", default=1.0, min=-10.0, max=10.0)
-    weight_fluid: FloatProperty(
-        name="Fluid", description="Fluid field weight", default=1.0, min=-10.0, max=10.0)
+        name="Boid", description="Boid effector weight", default=1.0, min=-200.0, max=200.0)
 
 
 # ===========================================================================
@@ -461,7 +487,7 @@ class GPUClothObjectSettings(PropertyGroup):
         description="Stretch stiffness",
         default=15.0,
         min=0.0,
-        max=500.0,
+        max=10000.0,
     )
 
     compression: FloatProperty(
@@ -469,7 +495,7 @@ class GPUClothObjectSettings(PropertyGroup):
         description="Compression stiffness",
         default=15.0,
         min=0.0,
-        max=500.0,
+        max=10000.0,
     )
 
     shear: FloatProperty(
@@ -477,7 +503,7 @@ class GPUClothObjectSettings(PropertyGroup):
         description="Shear stiffness",
         default=5.0,
         min=0.0,
-        max=500.0,
+        max=10000.0,
     )
 
     bending_stiffness: FloatProperty(
@@ -485,7 +511,7 @@ class GPUClothObjectSettings(PropertyGroup):
         description="Bending stiffness",
         default=0.5,
         min=0.0,
-        max=100.0,
+        max=10000.0,
     )
 
     # ── Material parameters (damping) ─────────────────────────────────────
@@ -518,7 +544,7 @@ class GPUClothObjectSettings(PropertyGroup):
         description="Bending oscillation damping",
         default=0.5,
         min=0.0,
-        max=50.0,
+        max=1000.0,
     )
 
     # ── Self-collision (OGC) ──────────────────────────────────────────────
@@ -640,7 +666,7 @@ class GPUClothObjectSettings(PropertyGroup):
         description="Maximum tension stiffness clamping value",
         default=500.0,
         min=0.0,
-        max=500.0,
+        max=10000.0,
     )
 
     max_compression: FloatProperty(
@@ -648,7 +674,7 @@ class GPUClothObjectSettings(PropertyGroup):
         description="Maximum compression stiffness clamping value",
         default=500.0,
         min=0.0,
-        max=500.0,
+        max=10000.0,
     )
 
     max_shear: FloatProperty(
@@ -656,7 +682,7 @@ class GPUClothObjectSettings(PropertyGroup):
         description="Maximum shear stiffness clamping value",
         default=500.0,
         min=0.0,
-        max=500.0,
+        max=10000.0,
     )
 
     max_bend: FloatProperty(
@@ -664,7 +690,7 @@ class GPUClothObjectSettings(PropertyGroup):
         description="Maximum bending stiffness clamping value",
         default=100.0,
         min=0.0,
-        max=500.0,
+        max=10000.0,
     )
 
     max_struct: FloatProperty(
@@ -680,7 +706,13 @@ class GPUClothObjectSettings(PropertyGroup):
         description="Maximum sewing force clamping value",
         default=500.0,
         min=0.0,
-        max=500.0,
+        max=10000.0,
+    )
+
+    use_sewing_springs: BoolProperty(
+        name="Sew Cloth",
+        description="Pull loose Blender cloth edges together",
+        default=False,
     )
 
     vel_damping: FloatProperty(
@@ -710,7 +742,7 @@ class GPUClothObjectSettings(PropertyGroup):
         description="Maximum length an internal spring can have during creation",
         default=0.0,
         min=0.0,
-        max=100.0,
+        max=1000.0,
     )
 
     internal_spring_max_diversion: FloatProperty(
@@ -718,7 +750,7 @@ class GPUClothObjectSettings(PropertyGroup):
         description="Maximum angle diversion from vertex normal during internal spring creation (radians)",
         default=0.7853981633974483,  # π/4
         min=0.0,
-        max=3.141592653589793,       # π
+        max=0.7853981633974483,      # pi/4
         subtype='ANGLE',
     )
 
@@ -727,7 +759,7 @@ class GPUClothObjectSettings(PropertyGroup):
         description="Tension stiffness for internal springs",
         default=15.0,
         min=0.0,
-        max=500.0,
+        max=10000.0,
     )
 
     internal_compression: FloatProperty(
@@ -735,7 +767,7 @@ class GPUClothObjectSettings(PropertyGroup):
         description="Compression stiffness for internal springs",
         default=15.0,
         min=0.0,
-        max=500.0,
+        max=10000.0,
     )
 
     max_internal_tension: FloatProperty(
@@ -743,7 +775,7 @@ class GPUClothObjectSettings(PropertyGroup):
         description="Maximum tension stiffness clamping for internal springs",
         default=500.0,
         min=0.0,
-        max=500.0,
+        max=10000.0,
     )
 
     max_internal_compression: FloatProperty(
@@ -751,74 +783,83 @@ class GPUClothObjectSettings(PropertyGroup):
         description="Maximum compression stiffness clamping for internal springs",
         default=500.0,
         min=0.0,
-        max=500.0,
+        max=10000.0,
     )
 
     # ── Anisotropy (warp/weft directional stiffness) ─────────────────────────
     use_anisotropy: BoolProperty(
         name="Anisotropic Stiffness",
-        description="Enable per-direction warp/weft stiffness (overrides isotropic tension/bending)",
+        description=(
+            "Enable per-direction warp/weft tension, compression, and "
+            "bending stiffness"),
         default=False,
+    )
+    anisotropy_uv_map: StringProperty(
+        name="Material Direction UV Map",
+        description=(
+            "Explicit seam-free UV map used by GPUCloth as warp (U) and "
+            "weft (V) material coordinates"),
+        default="",
     )
     tension_u: FloatProperty(
         name="Tension U (Warp)",
         description="Stretch stiffness along warp (U) direction. 0 = use isotropic tension",
-        default=0.0, min=0.0, max=500.0,
+        default=0.0, min=0.0, max=10000.0,
     )
     tension_v: FloatProperty(
         name="Tension V (Weft)",
         description="Stretch stiffness along weft (V) direction. 0 = use isotropic tension",
-        default=0.0, min=0.0, max=500.0,
+        default=0.0, min=0.0, max=10000.0,
     )
     compression_u: FloatProperty(
         name="Compression U (Warp)",
         description="Compression stiffness along warp. 0 = use isotropic compression",
-        default=0.0, min=0.0, max=500.0,
+        default=0.0, min=0.0, max=10000.0,
     )
     compression_v: FloatProperty(
         name="Compression V (Weft)",
         description="Compression stiffness along weft. 0 = use isotropic compression",
-        default=0.0, min=0.0, max=500.0,
+        default=0.0, min=0.0, max=10000.0,
     )
     bending_u: FloatProperty(
         name="Bending U (Warp)",
         description="Bending stiffness along warp. 0 = use isotropic bending",
-        default=0.0, min=0.0, max=500.0,
+        default=0.0, min=0.0, max=10000.0,
     )
     bending_v: FloatProperty(
         name="Bending V (Weft)",
         description="Bending stiffness along weft. 0 = use isotropic bending",
-        default=0.0, min=0.0, max=500.0,
+        default=0.0, min=0.0, max=10000.0,
     )
     max_tension_u: FloatProperty(
         name="Max Tension U",
         description="Maximum tension clamping along warp",
-        default=500.0, min=0.0, max=500.0,
+        default=500.0, min=0.0, max=10000.0,
     )
     max_tension_v: FloatProperty(
         name="Max Tension V",
         description="Maximum tension clamping along weft",
-        default=500.0, min=0.0, max=500.0,
+        default=500.0, min=0.0, max=10000.0,
     )
     max_compression_u: FloatProperty(
         name="Max Compression U",
         description="Maximum compression clamping along warp",
-        default=500.0, min=0.0, max=500.0,
+        default=500.0, min=0.0, max=10000.0,
     )
     max_compression_v: FloatProperty(
         name="Max Compression V",
         description="Maximum compression clamping along weft",
-        default=500.0, min=0.0, max=500.0,
+        default=500.0, min=0.0, max=10000.0,
     )
     max_bend_u: FloatProperty(
         name="Max Bend U",
         description="Maximum bending clamping along warp",
-        default=500.0, min=0.0, max=500.0,
+        default=500.0, min=0.0, max=10000.0,
     )
     max_bend_v: FloatProperty(
         name="Max Bend V",
         description="Maximum bending clamping along weft",
-        default=500.0, min=0.0, max=500.0,
+        default=500.0, min=0.0, max=10000.0,
     )
 
     # ── Advanced Solver Config ──────────────────────────────────────────────
@@ -906,6 +947,12 @@ class GPUClothObjectSettings(PropertyGroup):
         max=1000.0,
     )
 
+    use_pressure_volume: BoolProperty(
+        name="Use Custom Volume",
+        description="Use Target Volume instead of the initial mesh volume",
+        default=False,
+    )
+
     pressure_factor: FloatProperty(
         name="Factor",
         description="Pressure scaling factor: pressure = ((V/V0 - 1) + uniform) * factor",
@@ -918,7 +965,7 @@ class GPUClothObjectSettings(PropertyGroup):
         name="Fluid Density",
         description="Density of the fluid inside/outside for hydrostatic pressure gradient",
         default=0.0,
-        min=0.0,
+        min=-10.0,
         max=10.0,
     )
 
@@ -948,13 +995,31 @@ class GPUClothObjectSettings(PropertyGroup):
         description="Friction/damping applied to pinned vertices",
         default=0.0,
         min=0.0,
-        max=50.0,
+        max=1000.0,
+    )
+
+    mingoal: FloatProperty(
+        name="Min Goal Factor",
+        description="Minimum Blender goal factor",
+        default=0.0,
+        min=0.0,
+        max=1.0,
+        subtype='FACTOR',
     )
 
     maxgoal: FloatProperty(
         name="Max Goal Factor",
         description="Maximum pin goal factor",
         default=1.0,
+        min=0.0,
+        max=1.0,
+        subtype='FACTOR',
+    )
+
+    defgoal: FloatProperty(
+        name="Default Goal Factor",
+        description="Goal factor for vertices absent from the pin group",
+        default=0.0,
         min=0.0,
         max=1.0,
         subtype='FACTOR',
@@ -1017,7 +1082,7 @@ class GPUClothObjectSettings(PropertyGroup):
         description="Collision iterations per simulation step",
         default=2,
         min=1,
-        max=80,
+        max=32767,
     )
 
     epsilon: FloatProperty(
@@ -1034,8 +1099,16 @@ class GPUClothObjectSettings(PropertyGroup):
         description="Minimum distance for self-collisions (m)",
         default=0.015,
         min=0.001,
-        max=1.0,
+        max=0.1,
         subtype='DISTANCE',
+    )
+
+    self_collision_friction: FloatProperty(
+        name="Self Friction",
+        description="Blender self-collision friction before native scaling",
+        default=5.0,
+        min=0.0,
+        max=80.0,
     )
 
     clamp: FloatProperty(
@@ -1068,7 +1141,9 @@ class GPUClothObjectSettings(PropertyGroup):
 
     vgroup_selfcol: StringProperty(
         name="Exclude Self VGroup",
-        description="Vertex group excluding vertices from self-collisions (0=excluded, 1=fully collide)",
+        description=(
+            "Vertices with any positive group weight are excluded from "
+            "self-collisions"),
         default="",
     )
 

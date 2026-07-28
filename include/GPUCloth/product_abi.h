@@ -43,6 +43,54 @@ enum GPUClothConfigKindMask : uint32_t {
     GPUCLOTH_CONFIG_COLLISION_FILTER = 1u << 13,
     GPUCLOTH_CONFIG_PROXY = 1u << 14,
     GPUCLOTH_CONFIG_DIAGNOSTICS = 1u << 15,
+    GPUCLOTH_CONFIG_COLLECTION = 1u << 16,
+};
+
+enum GPUClothPressureFlags : uint32_t {
+    GPUCLOTH_PRESSURE_ENABLED = 1u << 0,
+};
+
+enum GPUClothCacheStorageMode : uint32_t {
+    GPUCLOTH_CACHE_STORAGE_DISK = 1,
+    GPUCLOTH_CACHE_STORAGE_MEMORY = 2,
+    GPUCLOTH_CACHE_STORAGE_EXTERNAL = 3,
+};
+
+enum GPUClothCacheFlags : uint32_t {
+    GPUCLOTH_CACHE_FLAG_EXTERNAL_READ_ONLY = 1u << 0,
+    GPUCLOTH_CACHE_FLAG_LIBRARY_PATH = 1u << 1,
+};
+
+enum GPUClothCacheCompressionMode : uint32_t {
+    GPUCLOTH_CACHE_COMPRESSION_NONE = 0,
+    GPUCLOTH_CACHE_COMPRESSION_LIGHT = 1,
+    GPUCLOTH_CACHE_COMPRESSION_HEAVY = 2,
+};
+
+enum GPUClothCacheStatusFlags : uint32_t {
+    GPUCLOTH_CACHE_STATUS_CONFIGURED = 1u << 0,
+    GPUCLOTH_CACHE_STATUS_BAKING = 1u << 1,
+    GPUCLOTH_CACHE_STATUS_BAKED = 1u << 2,
+    GPUCLOTH_CACHE_STATUS_OUTDATED = 1u << 3,
+    GPUCLOTH_CACHE_STATUS_FRAME_SKIP = 1u << 4,
+    GPUCLOTH_CACHE_STATUS_ERROR = 1u << 5,
+};
+
+enum GPUClothCacheStatusOperation : uint32_t {
+    GPUCLOTH_CACHE_STATUS_BAKE_BEGIN = 1,
+    GPUCLOTH_CACHE_STATUS_BAKE_COMPLETE,
+    GPUCLOTH_CACHE_STATUS_BAKE_CANCEL,
+    GPUCLOTH_CACHE_STATUS_SOURCE_CHANGED,
+};
+
+enum GPUClothCacheInfoCode : uint32_t {
+    GPUCLOTH_CACHE_INFO_EMPTY = 0,
+    GPUCLOTH_CACHE_INFO_READY,
+    GPUCLOTH_CACHE_INFO_BAKING,
+    GPUCLOTH_CACHE_INFO_BAKED,
+    GPUCLOTH_CACHE_INFO_OUTDATED,
+    GPUCLOTH_CACHE_INFO_FRAME_SKIP,
+    GPUCLOTH_CACHE_INFO_ERROR,
 };
 
 enum GPUClothFeatureId : uint32_t {
@@ -183,6 +231,9 @@ enum GPUClothBufferElementType : uint32_t {
     GPUCLOTH_ELEMENT_UINT32,
     GPUCLOTH_ELEMENT_UINT3,
     GPUCLOTH_ELEMENT_SEWING_RECORD,
+    GPUCLOTH_ELEMENT_DIAGNOSTIC_EVENT,
+    GPUCLOTH_ELEMENT_COLLECTION_RECORD,
+    GPUCLOTH_ELEMENT_FLOAT2,
 };
 
 struct GPUClothBufferView {
@@ -222,6 +273,10 @@ struct GPUClothSimulationConfig {
     uint32_t reserved[3];
 };
 
+enum GPUClothMaterialFlags : uint32_t {
+    GPUCLOTH_MATERIAL_ANISOTROPY_ENABLED = 1u << 0,
+};
+
 struct GPUClothMaterialConfig {
     GPUClothFeatureConfigHeader header;
     uint32_t bending_model;
@@ -229,7 +284,11 @@ struct GPUClothMaterialConfig {
     float stiffness[4];
     float stiffness_max[4];
     float damping[4];
-    uint32_t reserved[2];
+    // ABI v2 suffix used only by GPUCLOTH_FEATURE_ANISOTROPY:
+    // tension U/V, compression U/V, bending U/V.
+    float directional_stiffness[6];
+    float directional_stiffness_max[6];
+    GPUClothBufferView material_coordinates;
 };
 
 struct GPUClothPinConfig {
@@ -241,6 +300,37 @@ struct GPUClothPinConfig {
     float goal_damping;
     float pin_stiffness;
     uint32_t reserved[2];
+};
+
+enum GPUClothPinSnapshotFlags : uint32_t {
+    GPUCLOTH_PIN_GROUP_PRESENT = 1u << 0,
+};
+
+// One evaluated-frame pin publication. Membership, raw Blender group weights,
+// evaluated targets, and goal settings become visible atomically. The native
+// owner retains the last accepted target snapshot as frame history.
+struct GPUClothPinSnapshotConfig {
+    GPUClothFeatureConfigHeader header;
+    uint64_t object_id;
+    uint64_t topology_generation;
+    uint64_t frame_generation;
+    uint32_t pin_flags;
+    uint32_t vertex_count;
+    float goal_min;
+    float goal_max;
+    float goal_default;
+    float goal_spring;
+    float goal_damping;
+    uint32_t reserved0;
+    GPUClothBufferView membership;
+    GPUClothBufferView raw_weights;
+    GPUClothBufferView evaluated_targets;
+    uint64_t reserved[1];
+};
+
+enum GPUClothConstraintFlags : uint32_t {
+    GPUCLOTH_CONSTRAINT_INTERNAL_SPRINGS = 1u << 0,
+    GPUCLOTH_CONSTRAINT_INTERNAL_NORMAL_CHECK = 1u << 1,
 };
 
 struct GPUClothConstraintConfig {
@@ -268,6 +358,11 @@ struct GPUClothPressureConfig {
     uint32_t reserved[2];
 };
 
+enum GPUClothCollisionFlags : uint32_t {
+    GPUCLOTH_COLLISION_OBJECT_ENABLED = 1u << 0,
+    GPUCLOTH_COLLISION_SELF_ENABLED = 1u << 1,
+};
+
 struct GPUClothCollisionConfig {
     GPUClothFeatureConfigHeader header;
     uint32_t collision_flags;
@@ -280,6 +375,14 @@ struct GPUClothCollisionConfig {
     float self_friction;
     float self_impulse_clamp;
     uint32_t reserved[3];
+};
+
+enum GPUClothColliderFlags : uint32_t {
+    GPUCLOTH_COLLIDER_STATIC = 1u << 0,
+    GPUCLOTH_COLLIDER_MOVING = 1u << 1,
+    GPUCLOTH_COLLIDER_DEFORMING = 1u << 2,
+    GPUCLOTH_COLLIDER_USE_CULLING = 1u << 3,
+    GPUCLOTH_COLLIDER_USE_NORMAL = 1u << 4,
 };
 
 struct GPUClothColliderConfig {
@@ -303,6 +406,12 @@ struct GPUClothColliderConfig {
     uint32_t reserved[4];
 };
 
+enum GPUClothMeshStateFlags : uint32_t {
+    // Per-frame evaluated base-mesh positions. The accepted topology remains
+    // fixed; only xrest/rest lengths/rest angles may change.
+    GPUCLOTH_MESH_DYNAMIC_BASE = 1u << 0,
+};
+
 struct GPUClothMeshStateConfig {
     GPUClothFeatureConfigHeader header;
     uint64_t object_id;
@@ -316,6 +425,10 @@ struct GPUClothMeshStateConfig {
     GPUClothBufferView rest_positions;
     GPUClothBufferView normals;
     GPUClothBufferView triangles;
+};
+
+enum GPUClothEffectorFlags : uint32_t {
+    GPUCLOTH_EFFECTOR_USE_ABSORPTION = 1u << 0,
 };
 
 struct GPUClothEffectorConfig {
@@ -342,6 +455,107 @@ struct GPUClothEffectorWeightsConfig {
     uint32_t weight_count;
     float weights[15];
     uint32_t reserved;
+};
+
+enum GPUClothCollectionKind : uint32_t {
+    GPUCLOTH_COLLECTION_COLLISION = 1,
+    GPUCLOTH_COLLECTION_EFFECTOR = 2,
+};
+
+enum GPUClothCollectionObjectType : uint32_t {
+    GPUCLOTH_COLLECTION_OBJECT_MESH = 1,
+    GPUCLOTH_COLLECTION_OBJECT_CURVE = 2,
+    GPUCLOTH_COLLECTION_OBJECT_EMPTY = 3,
+    GPUCLOTH_COLLECTION_OBJECT_OTHER = 255,
+};
+
+enum GPUClothCollectionRecordFlags : uint32_t {
+    GPUCLOTH_COLLECTION_RECORD_INSTANCE = 1u << 0,
+    GPUCLOTH_COLLECTION_RECORD_EVALUATED = 1u << 1,
+    GPUCLOTH_COLLECTION_RECORD_VIEWPORT_ENABLED = 1u << 2,
+    GPUCLOTH_COLLECTION_RECORD_RENDER_ENABLED = 1u << 3,
+};
+
+enum GPUClothCollectionStatusFlags : uint32_t {
+    GPUCLOTH_COLLECTION_STATUS_CONFIGURED = 1u << 0,
+    GPUCLOTH_COLLECTION_STATUS_STAGED = 1u << 1,
+};
+
+// Ordered Blender dependency-graph occurrence. payload_address points to a
+// GPUClothColliderConfig or GPUClothEffectorConfig during the synchronous
+// stage call and is always deep-copied by the native owner.
+struct GPUClothCollectionRecord {
+    uint32_t struct_size;
+    uint32_t record_version;
+    uint32_t object_type;
+    uint32_t record_flags;
+    uint64_t object_id;
+    uint64_t instance_id;
+    uint64_t source_collection_id;
+    uint64_t topology_generation;
+    uint64_t geometry_generation;
+    uint32_t modifier_index;
+    uint32_t payload_kind;
+    uint64_t payload_address;
+    uint64_t reserved[1];
+};
+
+struct GPUClothCollectionSnapshotConfig {
+    GPUClothFeatureConfigHeader header;
+    uint64_t cloth_id;
+    uint64_t collection_id;
+    uint64_t snapshot_generation;
+    uint32_t collection_kind;
+    uint32_t collection_flags;
+    uint32_t record_count;
+    uint32_t reserved0;
+    GPUClothBufferView records;
+    uint64_t reserved[8];
+};
+
+struct GPUClothCollectionTransactionConfig {
+    uint32_t struct_size;
+    uint32_t transaction_version;
+    uint32_t transaction_flags;
+    uint32_t reserved0;
+    uint64_t source_generation;
+    uint64_t requested_transaction_id;
+    uint64_t reserved[2];
+};
+
+// Caller supplies records_address/record_capacity. The query always returns
+// required_count and never publishes a partial record set.
+struct GPUClothCollectionQuery {
+    uint32_t struct_size;
+    uint32_t query_version;
+    uint32_t collection_kind;
+    uint32_t query_flags;
+    uint64_t cloth_id;
+    uint64_t collection_id;
+    uint64_t snapshot_generation;
+    uint64_t transaction_id;
+    uint32_t record_capacity;
+    uint32_t record_count;
+    uint32_t required_count;
+    uint32_t reserved0;
+    uint64_t records_address;
+    uint64_t reserved[2];
+};
+
+struct GPUClothCollectionStatus {
+    uint32_t struct_size;
+    uint32_t status_version;
+    uint32_t status_flags;
+    uint32_t last_error;
+    uint64_t transaction_id;
+    uint64_t snapshot_generation;
+    uint64_t collection_id;
+    uint32_t collision_record_count;
+    uint32_t effector_record_count;
+    uint32_t record_count;
+    uint32_t reserved0;
+    uint64_t commit_generation;
+    uint64_t reserved[4];
 };
 
 enum GPUClothVertexChannel : uint32_t {
@@ -387,6 +601,37 @@ struct GPUClothCacheConfig {
     uint64_t path_utf8_address;
     uint64_t name_utf8_address;
     uint64_t reserved[3];
+};
+
+struct GPUClothCacheStatusUpdate {
+    GPUClothFeatureConfigHeader header;
+    uint32_t operation;
+    int32_t frame;
+    uint32_t error_code;
+    uint32_t reserved0;
+    uint64_t source_generation;
+    uint64_t reserved[2];
+};
+
+struct GPUClothCacheStatus {
+    uint32_t struct_size;
+    uint32_t status_version;
+    uint32_t flags;
+    uint32_t info_code;
+    int32_t frame_start;
+    int32_t frame_end;
+    int32_t frame_step;
+    int32_t last_exact;
+    int32_t last_valid;
+    int32_t outdated_from_frame;
+    uint32_t cached_frame_count;
+    uint32_t missing_frame_count;
+    uint32_t error_code;
+    uint64_t source_generation;
+    uint64_t baked_source_generation;
+    uint64_t status_generation;
+    char info[96];
+    uint64_t reserved[2];
 };
 
 struct GPUClothSewingRecord {
@@ -438,6 +683,106 @@ struct GPUClothDiagnosticsConfig {
     uint64_t reserved[1];
 };
 
+enum GPUClothDiagnosticsFlags : uint32_t {
+    GPUCLOTH_DIAGNOSTICS_STATUS = 1u << 0,
+    GPUCLOTH_DIAGNOSTICS_EVENTS = 1u << 1,
+};
+
+enum GPUClothDiagnosticsSeverity : uint32_t {
+    GPUCLOTH_DIAGNOSTICS_INFO = 1,
+    GPUCLOTH_DIAGNOSTICS_WARNING,
+    GPUCLOTH_DIAGNOSTICS_ERROR,
+};
+
+enum GPUClothDiagnosticsEventType : uint32_t {
+    GPUCLOTH_DIAGNOSTICS_CONFIGURED = 1,
+    GPUCLOTH_DIAGNOSTICS_SOLVE_STARTED,
+    GPUCLOTH_DIAGNOSTICS_SOLVE_SUCCEEDED,
+    GPUCLOTH_DIAGNOSTICS_SOLVE_FAILED,
+};
+
+enum GPUClothDiagnosticsResult : uint32_t {
+    GPUCLOTH_DIAGNOSTICS_RESULT_NONE = 0,
+    GPUCLOTH_DIAGNOSTICS_RESULT_SUCCESS,
+    GPUCLOTH_DIAGNOSTICS_RESULT_FAILED,
+};
+
+enum GPUClothDiagnosticsError : uint32_t {
+    GPUCLOTH_DIAGNOSTICS_ERROR_NONE = 0,
+    GPUCLOTH_DIAGNOSTICS_ERROR_RUNTIME_INIT,
+    GPUCLOTH_DIAGNOSTICS_ERROR_NO_CLOTH,
+    GPUCLOTH_DIAGNOSTICS_ERROR_INVALID_CLOTH,
+    GPUCLOTH_DIAGNOSTICS_ERROR_EMPTY_CLOTH,
+    GPUCLOTH_DIAGNOSTICS_ERROR_SOLVER_STATE,
+    GPUCLOTH_DIAGNOSTICS_ERROR_PRESSURE_STATE,
+    GPUCLOTH_DIAGNOSTICS_ERROR_DEVICE_CLOTH,
+    GPUCLOTH_DIAGNOSTICS_ERROR_BACKEND_UNAVAILABLE,
+    GPUCLOTH_DIAGNOSTICS_ERROR_PIN_STATE,
+    GPUCLOTH_DIAGNOSTICS_ERROR_DYNAMIC_MESH_STATE,
+};
+
+enum GPUClothDiagnosticsStatusFlags : uint32_t {
+    GPUCLOTH_DIAGNOSTICS_STATUS_CONFIGURED = 1u << 0,
+    GPUCLOTH_DIAGNOSTICS_STATUS_RUNNING = 1u << 1,
+    GPUCLOTH_DIAGNOSTICS_STATUS_HAS_RESULT = 1u << 2,
+    GPUCLOTH_DIAGNOSTICS_STATUS_HAS_ERROR = 1u << 3,
+};
+
+enum GPUClothSolverResultStatus : uint32_t {
+    GPUCLOTH_SOLVER_RESULT_SUCCESS = 1u << 0,
+    GPUCLOTH_SOLVER_RESULT_NUMERICAL_ISSUE = 1u << 1,
+    GPUCLOTH_SOLVER_RESULT_NO_CONVERGENCE = 1u << 2,
+    GPUCLOTH_SOLVER_RESULT_INVALID_INPUT = 1u << 3,
+};
+
+enum GPUClothConvergenceMetric : uint32_t {
+    GPUCLOTH_CONVERGENCE_LINF_POSITION_DELTA = 1,
+};
+
+// Caller-owned event records. A configured buffer remains live until
+// RemoveCloth/FreeSolverData and is written only by synchronous API calls.
+struct GPUClothDiagnosticsEvent {
+    uint32_t struct_size;
+    uint32_t event_type;
+    uint32_t severity;
+    uint32_t result;
+    uint32_t error_code;
+    uint32_t solver_mask;
+    uint64_t sequence;
+};
+
+struct GPUClothDiagnosticsStatus {
+    uint32_t struct_size;
+    uint32_t status_version;
+    uint32_t status_flags;
+    uint32_t last_result;
+    uint32_t last_error;
+    uint32_t requested_solver_mask;
+    uint32_t backend_solver_mask;
+    uint32_t solver_result_status;
+    uint32_t convergence_metric;
+    uint32_t event_capacity;
+    uint32_t event_count;
+    uint32_t dropped_event_count;
+    uint32_t event_write_index;
+    uint32_t substep_count;
+    uint32_t min_iterations;
+    uint32_t max_iterations;
+    float avg_iterations;
+    float min_error_value;
+    float max_error_value;
+    float avg_error_value;
+    float last_error_value;
+    float convergence_tolerance;
+    uint64_t total_iterations;
+    uint64_t execution_time_ns;
+    uint64_t sequence;
+    uint64_t solve_count;
+    uint64_t failure_count;
+    uint64_t event_generation;
+    uint64_t reserved[2];
+};
+
 struct GPUClothDescriptorLayout {
     uint32_t struct_size;
     uint32_t schema_version;
@@ -455,12 +800,24 @@ struct GPUClothDescriptorLayout {
     uint32_t effector_config_size;
     uint32_t effector_weights_config_size;
     uint32_t cache_config_size;
+    uint32_t cache_status_update_size;
+    uint32_t cache_status_size;
     uint32_t sewing_record_size;
     uint32_t sewing_config_size;
     uint32_t vertex_channel_config_size;
     uint32_t collision_filter_config_size;
     uint32_t proxy_config_size;
     uint32_t diagnostics_config_size;
+    // ABI 1.25 and earlier exposed this word as reserved at offset 96.
+    uint32_t legacy_reserved0;
+    uint32_t diagnostics_event_size;
+    uint32_t diagnostics_status_size;
+    uint32_t pin_snapshot_config_size;
+    uint32_t collection_record_size;
+    uint32_t collection_snapshot_config_size;
+    uint32_t collection_transaction_config_size;
+    uint32_t collection_query_size;
+    uint32_t collection_status_size;
     uint32_t reserved[3];
 };
 
@@ -471,8 +828,9 @@ static_assert(sizeof(GPUClothFeatureConfigHeader) == 16, "GPUClothFeatureConfigH
 static_assert(sizeof(GPUClothBufferView) == 40, "GPUClothBufferView ABI drift");
 static_assert(sizeof(GPUClothNamedValue) == 64, "GPUClothNamedValue ABI drift");
 static_assert(sizeof(GPUClothSimulationConfig) == 64, "GPUClothSimulationConfig ABI drift");
-static_assert(sizeof(GPUClothMaterialConfig) == 80, "GPUClothMaterialConfig ABI drift");
+static_assert(sizeof(GPUClothMaterialConfig) == 160, "GPUClothMaterialConfig ABI drift");
 static_assert(sizeof(GPUClothPinConfig) == 48, "GPUClothPinConfig ABI drift");
+static_assert(sizeof(GPUClothPinSnapshotConfig) == 200, "GPUClothPinSnapshotConfig ABI drift");
 static_assert(sizeof(GPUClothConstraintConfig) == 64, "GPUClothConstraintConfig ABI drift");
 static_assert(sizeof(GPUClothPressureConfig) == 48, "GPUClothPressureConfig ABI drift");
 static_assert(sizeof(GPUClothCollisionConfig) == 64, "GPUClothCollisionConfig ABI drift");
@@ -480,11 +838,20 @@ static_assert(sizeof(GPUClothColliderConfig) == 256, "GPUClothColliderConfig ABI
 static_assert(sizeof(GPUClothMeshStateConfig) == 256, "GPUClothMeshStateConfig ABI drift");
 static_assert(sizeof(GPUClothEffectorConfig) == 160, "GPUClothEffectorConfig ABI drift");
 static_assert(sizeof(GPUClothEffectorWeightsConfig) == 96, "GPUClothEffectorWeightsConfig ABI drift");
+static_assert(sizeof(GPUClothCollectionRecord) == 80, "GPUClothCollectionRecord ABI drift");
+static_assert(sizeof(GPUClothCollectionSnapshotConfig) == 160, "GPUClothCollectionSnapshotConfig ABI drift");
+static_assert(sizeof(GPUClothCollectionTransactionConfig) == 48, "GPUClothCollectionTransactionConfig ABI drift");
+static_assert(sizeof(GPUClothCollectionQuery) == 88, "GPUClothCollectionQuery ABI drift");
+static_assert(sizeof(GPUClothCollectionStatus) == 96, "GPUClothCollectionStatus ABI drift");
 static_assert(sizeof(GPUClothCacheConfig) == 96, "GPUClothCacheConfig ABI drift");
+static_assert(sizeof(GPUClothCacheStatusUpdate) == 56, "GPUClothCacheStatusUpdate ABI drift");
+static_assert(sizeof(GPUClothCacheStatus) == 192, "GPUClothCacheStatus ABI drift");
 static_assert(sizeof(GPUClothSewingRecord) == 32, "GPUClothSewingRecord ABI drift");
 static_assert(sizeof(GPUClothSewingConfig) == 80, "GPUClothSewingConfig ABI drift");
 static_assert(sizeof(GPUClothVertexChannelConfig) == 40, "GPUClothVertexChannelConfig ABI drift");
 static_assert(sizeof(GPUClothCollisionFilterConfig) == 32, "GPUClothCollisionFilterConfig ABI drift");
 static_assert(sizeof(GPUClothProxyConfig) == 160, "GPUClothProxyConfig ABI drift");
 static_assert(sizeof(GPUClothDiagnosticsConfig) == 96, "GPUClothDiagnosticsConfig ABI drift");
-static_assert(sizeof(GPUClothDescriptorLayout) == 100, "GPUClothDescriptorLayout ABI drift");
+static_assert(sizeof(GPUClothDiagnosticsEvent) == 32, "GPUClothDiagnosticsEvent ABI drift");
+static_assert(sizeof(GPUClothDiagnosticsStatus) == 152, "GPUClothDiagnosticsStatus ABI drift");
+static_assert(sizeof(GPUClothDescriptorLayout) == 144, "GPUClothDescriptorLayout ABI drift");

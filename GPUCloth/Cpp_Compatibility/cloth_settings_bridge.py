@@ -9,6 +9,12 @@ import bpy
 
 SCHEMA_VERSION = 1
 _STATE_PREFIX = "gpucloth_cpu_modifier_"
+_MODIFIER_VISIBILITY = (
+    ("viewport", "show_viewport"),
+    ("render", "show_render"),
+    ("editmode", "show_in_editmode"),
+    ("cage", "show_on_cage"),
+)
 
 
 CLOTH_SETTINGS_MAP = {
@@ -37,9 +43,11 @@ CLOTH_SETTINGS_MAP = {
     "internal_tension_stiffness_max": "max_internal_tension",
     "internal_compression_stiffness": "internal_compression",
     "internal_compression_stiffness_max": "max_internal_compression",
+    "sewing_force_max": "max_sewing",
+    "use_sewing_springs": "use_sewing_springs",
     "use_pressure": "use_pressure",
+    "use_pressure_volume": "use_pressure_volume",
     "uniform_pressure_force": "uniform_pressure_force",
-    "target_volume": "target_volume",
     "pressure_factor": "pressure_factor",
     "fluid_density": "fluid_density",
     "shrink_min": "shrink_min",
@@ -47,37 +55,53 @@ CLOTH_SETTINGS_MAP = {
     "use_dynamic_mesh": "use_dynamic_mesh",
     "goal_spring": "goalspring",
     "goal_friction": "goalfrict",
+    "goal_min": "mingoal",
     "goal_max": "maxgoal",
+    "goal_default": "defgoal",
     "vertex_group_mass": "vgroup_mass",
+    "vertex_group_structural_stiffness": "vgroup_struct",
+    "vertex_group_shear_stiffness": "vgroup_shear",
+    "vertex_group_bending": "vgroup_bend",
+    "vertex_group_intern": "vgroup_intern",
+    "vertex_group_shrink": "vgroup_shrink",
+    "vertex_group_pressure": "vgroup_pressure",
 }
 
 
 COLLISION_SETTINGS_MAP = {
+    "collection": "collision_collection",
     "use_collision": "use_object_collision",
     "distance_min": "epsilon",
     "friction": "collision_friction",
     "damping": "collision_damping",
     "collision_quality": "collision_quality",
     "impulse_clamp": "clamp",
+    "use_self_collision": "use_self_collision",
     "self_distance_min": "selfepsilon",
+    "self_friction": "self_collision_friction",
     "self_impulse_clamp": "self_clamp",
+    "vertex_group_object_collisions": "vgroup_objcol",
+    "vertex_group_self_collisions": "vgroup_selfcol",
 }
 
 
 EFFECTOR_WEIGHTS_MAP = {
+    "collection": "collection",
     "gravity": "global_gravity",
-    "wind": "weight_wind",
+    "all": "weight_all",
+    "force": "weight_force",
     "vortex": "weight_vortex",
     "magnetic": "weight_magnetic",
-    "turbulence": "weight_turbulence",
-    "drag": "weight_drag",
-    "smokeflow": "weight_smoke_flow",
+    "wind": "weight_wind",
+    "curve_guide": "weight_curve_guide",
+    "texture": "weight_texture",
     "harmonic": "weight_harmonic",
     "charge": "weight_charge",
     "lennardjones": "weight_lennard_jones",
-    "texture": "weight_texture",
-    "curve_guide": "weight_curve_guide",
     "boid": "weight_boid",
+    "turbulence": "weight_turbulence",
+    "drag": "weight_drag",
+    "smokeflow": "weight_smoke_flow",
 }
 
 
@@ -158,6 +182,85 @@ def _copy_group(source, destination, mapping, owner_name, copied, errors, rollba
             errors.append(f"{owner_name}.{source_name}: {exc}")
 
 
+def _copy_rest_shape_key(settings, gpu, copied, errors, rollback):
+    if not hasattr(settings, "rest_shape_key"):
+        errors.append("ClothSettings.rest_shape_key: source missing")
+        return
+    if not hasattr(gpu, "shapekey_rest"):
+        errors.append("GPUCloth.shapekey_rest: destination missing")
+        return
+    try:
+        source = settings.rest_shape_key
+        value = "" if source is None else str(source.name)
+        previous = gpu.shapekey_rest
+        gpu.shapekey_rest = value
+        actual = gpu.shapekey_rest
+        if actual != value:
+            gpu.shapekey_rest = previous
+            errors.append(
+                "ClothSettings.rest_shape_key: value "
+                f"{value!r} cannot be represented by "
+                f"GPUCloth.shapekey_rest (got {actual!r})")
+            return
+        rollback.append((gpu, "shapekey_rest", previous))
+        copied.append({
+            "source": "ClothSettings.rest_shape_key",
+            "target": "GPUCloth.shapekey_rest",
+            "value": value,
+        })
+    except (AttributeError, TypeError, ValueError) as exc:
+        errors.append(f"ClothSettings.rest_shape_key: {exc}")
+
+
+def _copy_pressure_volume(settings, gpu, copied, errors, rollback):
+    if not hasattr(settings, "target_volume"):
+        errors.append("ClothSettings.target_volume: source missing")
+        return
+    if not hasattr(settings, "use_pressure_volume"):
+        errors.append("ClothSettings.use_pressure_volume: source missing")
+        return
+    if not hasattr(gpu, "target_volume"):
+        errors.append("GPUCloth.target_volume: destination missing")
+        return
+
+    use_custom_volume = bool(settings.use_pressure_volume)
+    source_volume = float(settings.target_volume)
+    if use_custom_volume and source_volume <= 0.0:
+        errors.append(
+            "ClothSettings.use_pressure_volume: a zero custom target "
+            "volume cannot be represented; disable custom volume to use "
+            "the initial mesh volume")
+        return
+
+    # Blender ignores the stored target_volume value when custom volume is
+    # disabled and derives the equilibrium volume from the initial mesh.
+    # GPUCloth represents that mode with target_volume == 0.
+    value = source_volume if use_custom_volume else 0.0
+    previous = gpu.target_volume
+    try:
+        gpu.target_volume = value
+        actual = float(gpu.target_volume)
+        if not _values_match(value, actual):
+            gpu.target_volume = previous
+            errors.append(
+                "ClothSettings.target_volume: effective value "
+                f"{value!r} cannot be represented by "
+                f"GPUCloth.target_volume (got {actual!r})")
+            return
+        rollback.append((gpu, "target_volume", previous))
+        copied.extend(({
+            "source": "ClothSettings.use_pressure_volume",
+            "target": "GPUCloth.target_volume.mode",
+            "value": use_custom_volume,
+        }, {
+            "source": "ClothSettings.target_volume",
+            "target": "GPUCloth.target_volume",
+            "value": value,
+        }))
+    except (AttributeError, TypeError, ValueError) as exc:
+        errors.append(f"ClothSettings.target_volume: {exc}")
+
+
 def sync_cpu_to_gpu(obj, scene=None):
     """Copy only fields already consumed by addon production wiring."""
     modifier = find_cpu_cloth_modifier(obj)
@@ -185,6 +288,10 @@ def sync_cpu_to_gpu(obj, scene=None):
     _copy_group(
         collision, gpu, COLLISION_SETTINGS_MAP, "ClothCollisionSettings",
         result["copied"], result["errors"], rollback)
+    _copy_rest_shape_key(
+        settings, gpu, result["copied"], result["errors"], rollback)
+    _copy_pressure_volume(
+        settings, gpu, result["copied"], result["errors"], rollback)
     if hasattr(settings, "effector_weights") and settings.effector_weights:
         _copy_group(
             settings.effector_weights, gpu.effector_weights,
@@ -192,7 +299,9 @@ def sync_cpu_to_gpu(obj, scene=None):
             result["copied"], result["errors"], rollback)
 
     mapped = {
-        "ClothSettings": set(CLOTH_SETTINGS_MAP),
+        "ClothSettings": (
+            set(CLOTH_SETTINGS_MAP) |
+            {"rest_shape_key", "target_volume"}),
         "ClothCollisionSettings": set(COLLISION_SETTINGS_MAP),
         "EffectorWeights": set(EFFECTOR_WEIGHTS_MAP),
     }
@@ -305,10 +414,11 @@ def apply_modifier_ownership(obj, backend):
                 obj[_STATE_PREFIX + "name"] = modifier.name
                 if hasattr(modifier, "persistent_uid"):
                     obj[_STATE_PREFIX + "uid"] = int(modifier.persistent_uid)
-                obj[_STATE_PREFIX + "viewport"] = bool(modifier.show_viewport)
-                obj[_STATE_PREFIX + "render"] = bool(modifier.show_render)
-            modifier.show_viewport = False
-            modifier.show_render = False
+            for suffix, attribute in _MODIFIER_VISIBILITY:
+                key = _STATE_PREFIX + suffix
+                if key not in obj:
+                    obj[key] = bool(getattr(modifier, attribute, False))
+                setattr(modifier, attribute, False)
         return
 
     if (_STATE_PREFIX + "name" not in obj
@@ -316,9 +426,15 @@ def apply_modifier_ownership(obj, backend):
         return
     stored_modifier = _stored_cpu_cloth_modifier(obj)
     if stored_modifier is not None:
-        stored_modifier.show_viewport = bool(obj.get(_STATE_PREFIX + "viewport", True))
-        stored_modifier.show_render = bool(obj.get(_STATE_PREFIX + "render", True))
-    for suffix in ("name", "uid", "viewport", "render"):
+        for suffix, attribute in _MODIFIER_VISIBILITY:
+            setattr(
+                stored_modifier, attribute,
+                bool(obj.get(
+                    _STATE_PREFIX + suffix,
+                    getattr(stored_modifier, attribute, False))))
+    for suffix in (
+            "name", "uid",
+            *(suffix for suffix, _attribute in _MODIFIER_VISIBILITY)):
         key = _STATE_PREFIX + suffix
         if key in obj:
             del obj[key]
@@ -333,12 +449,16 @@ def restore_all_cpu_owners():
             continue
         modifier = _stored_cpu_cloth_modifier(obj)
         if modifier is not None:
-            modifier.show_viewport = bool(
-                obj.get(_STATE_PREFIX + "viewport", True))
-            modifier.show_render = bool(
-                obj.get(_STATE_PREFIX + "render", True))
+            for suffix, attribute in _MODIFIER_VISIBILITY:
+                setattr(
+                    modifier, attribute,
+                    bool(obj.get(
+                        _STATE_PREFIX + suffix,
+                        getattr(modifier, attribute, False))))
             restored.append(obj.name)
-        for suffix in ("name", "uid", "viewport", "render"):
+        for suffix in (
+                "name", "uid",
+                *(suffix for suffix, _attribute in _MODIFIER_VISIBILITY)):
             key = _STATE_PREFIX + suffix
             if key in obj:
                 del obj[key]
