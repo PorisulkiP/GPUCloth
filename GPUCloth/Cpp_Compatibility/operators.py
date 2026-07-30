@@ -3336,7 +3336,8 @@ class GPUCloth_LoadDLL(bpy.types.Operator):
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 text=True, check=True,
             )
-            if "CUDA Version" in result.stdout:
+            if ("CUDA Version" in result.stdout or
+                    "CUDA UMD Version" in result.stdout):
                 return True
         except subprocess.CalledProcessError as e:
             self.report({'ERROR'}, f"nvidia-smi завершился с ошибкой: {e}")
@@ -3373,7 +3374,10 @@ class GPUCloth_LoadDLL(bpy.types.Operator):
             candidates = [dll_dir]
             cuda_path = os.environ.get("CUDA_PATH")
             if cuda_path:
-                candidates.append(os.path.join(cuda_path, "bin"))
+                candidates.extend((
+                    os.path.join(cuda_path, "bin", "x64"),
+                    os.path.join(cuda_path, "bin"),
+                ))
             for path_entry in os.environ.get("PATH", "").split(os.pathsep):
                 if (path_entry and
                         (os.path.isfile(os.path.join(path_entry, "cublas64_12.dll")) or

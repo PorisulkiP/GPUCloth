@@ -1293,10 +1293,91 @@ class GPUClothSceneSettings(PropertyGroup):
         options=vcu.get_dir_path_property_options(),
     )
 
+    cache_index: IntProperty(
+        name="Cache Index",
+        description="Blender PointCache identity index",
+        default=0,
+        min=0,
+    )
+
+    cache_name: StringProperty(
+        name="Cache Name",
+        description="Blender PointCache identity name",
+        default="GPUCloth",
+    )
+
+    use_disk_cache: BoolProperty(
+        name="Disk Cache",
+        description="Persist simulation frames instead of session memory only",
+        default=True,
+    )
+
+    use_external_cache: BoolProperty(
+        name="External Cache",
+        description="Read a Blender-selected external cache without mutation",
+        default=False,
+    )
+
+    external_cache_dir: StringProperty(
+        name="External Cache Directory",
+        description="Resolved external PointCache directory",
+        default="",
+        subtype='DIR_PATH',
+        options=vcu.get_dir_path_property_options(),
+    )
+
+    use_library_path: BoolProperty(
+        name="Use Library Path",
+        description="Resolve external cache relative to a linked blend file",
+        default=False,
+    )
+
+    cache_compression: EnumProperty(
+        name="Cache Compression",
+        description="Lossless native frame compression",
+        items=[
+            ('NO', "None", "Store uncompressed float32 frames"),
+            ('LIGHT', "Light", "Use light lossless compression"),
+            ('HEAVY', "Heavy", "Use heavy lossless compression"),
+        ],
+        default='NO',
+    )
+
     is_baked: BoolProperty(
         name="Baked",
         description="True if simulation cache is fully written to disk",
         default=False,
+    )
+
+    is_baking: BoolProperty(
+        name="Baking",
+        description="Native cache transaction is active",
+        default=False,
+    )
+
+    is_outdated: BoolProperty(
+        name="Outdated",
+        description="Cached source generation differs from current inputs",
+        default=False,
+    )
+
+    is_frame_skip: BoolProperty(
+        name="Frame Missing",
+        description="Configured range contains a missing or invalid frame",
+        default=False,
+    )
+
+    cached_frame_count: IntProperty(
+        name="Cached Frames",
+        description="Number of structurally valid frames in active cache",
+        default=0,
+        min=0,
+    )
+
+    cache_info: StringProperty(
+        name="Cache Status",
+        description="Native cache status detail",
+        default="",
     )
 
     bake_start: IntProperty(

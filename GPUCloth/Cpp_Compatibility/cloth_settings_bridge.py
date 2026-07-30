@@ -261,6 +261,70 @@ def _copy_pressure_volume(settings, gpu, copied, errors, rollback):
         errors.append(f"ClothSettings.target_volume: {exc}")
 
 
+def _copy_point_cache(obj, scene, copied, errors):
+    modifier = find_cpu_cloth_modifier(obj)
+    if modifier is None or not hasattr(modifier, "point_cache"):
+        errors.append("ClothModifier.point_cache: source missing")
+        return
+    if scene is None or not hasattr(scene, "gpu_cloth_helper"):
+        errors.append("GPUClothScene.cache: destination missing")
+        return
+
+    point_cache = modifier.point_cache
+    helper = scene.gpu_cloth_helper
+    required = (
+        "cache_index", "cache_name", "use_disk_cache",
+        "use_external_cache", "external_cache_dir", "use_library_path",
+        "cache_compression", "bake_start", "bake_end",
+    )
+    missing = [name for name in required if not hasattr(helper, name)]
+    if missing:
+        errors.append(
+            "GPUClothScene.cache destination missing: " + ", ".join(missing))
+        return
+
+    cache_index = max(0, int(point_cache.index))
+    cache_name = str(point_cache.name) if point_cache.name else "GPUCloth"
+    use_external = bool(point_cache.use_external)
+    use_library_path = bool(
+        use_external and point_cache.use_library_path and obj.library)
+    external_path = ""
+    if use_external:
+        library = obj.library if use_library_path else None
+        external_path = bpy.path.abspath(
+            str(point_cache.filepath), library=library)
+
+    values = {
+        "cache_index": cache_index,
+        "cache_name": cache_name,
+        "use_disk_cache": bool(point_cache.use_disk_cache),
+        "use_external_cache": use_external,
+        "external_cache_dir": external_path,
+        "use_library_path": use_library_path,
+        "cache_compression": str(point_cache.compression),
+        "bake_start": int(point_cache.frame_start),
+        "bake_end": int(point_cache.frame_end),
+    }
+    previous = {name: getattr(helper, name) for name in values}
+    try:
+        for name, value in values.items():
+            setattr(helper, name, value)
+            if not _values_match(value, getattr(helper, name)):
+                raise ValueError(
+                    f"{name} value {value!r} cannot be represented")
+    except (AttributeError, TypeError, ValueError) as exc:
+        for name, value in previous.items():
+            setattr(helper, name, value)
+        errors.append(f"ClothModifier.point_cache: {exc}")
+        return
+
+    copied.extend({
+        "source": f"PointCache.{name}",
+        "target": f"GPUClothScene.{name}",
+        "value": value,
+    } for name, value in values.items())
+
+
 def sync_cpu_to_gpu(obj, scene=None):
     """Copy only fields already consumed by addon production wiring."""
     modifier = find_cpu_cloth_modifier(obj)
@@ -325,6 +389,15 @@ def sync_cpu_to_gpu(obj, scene=None):
             setattr(destination, target_name, previous)
         result["copied"] = []
     elif scene is not None and hasattr(scene, "gpu_cloth_helper"):
+        _copy_point_cache(
+            obj, scene, result["copied"], result["errors"])
+        if result["errors"]:
+            for destination, target_name, previous in reversed(rollback):
+                setattr(destination, target_name, previous)
+            result["copied"] = []
+            result["committed"] = False
+            _store_report(obj, result)
+            return result
         scene.gpu_cloth_helper.gravity_x = scene.gravity[0]
         scene.gpu_cloth_helper.gravity_y = scene.gravity[1]
         scene.gpu_cloth_helper.gravity_z = scene.gravity[2]

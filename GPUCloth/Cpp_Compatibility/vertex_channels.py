@@ -346,30 +346,86 @@ def publish_pin_snapshot(dll, types, clmd, snapshot):
     return result
 
 
-def binary_pin_weights(obj, group_name):
-    vertex_count = len(obj.data.vertices)
-    weights = [0.0] * vertex_count
+def vertex_group_weights(obj, group_name, label):
+    """Return raw base-mesh weights in vertex-index order.
+
+    Empty group names mean that the optional channel is not configured.
+    Named but absent groups are configuration errors.
+    """
     if not group_name:
-        return weights
-    group = obj.vertex_groups.get(group_name)
+        return None
+    try:
+        vertices = obj.data.vertices
+        vertex_count = len(vertices)
+        group = obj.vertex_groups.get(group_name)
+        object_name = obj.name
+    except (AttributeError, ReferenceError, RuntimeError, TypeError) as exc:
+        raise VertexChannelError(
+            f"cannot read {label} vertex group") from exc
     if group is None:
         raise VertexChannelError(
-            f"pin vertex group {group_name!r} is absent on {obj.name!r}")
-    group_index = group.index
-    for vertex in obj.data.vertices:
+            f"{label} vertex group {group_name!r} is absent on "
+            f"{object_name!r}")
+
+    weights = [0.0] * vertex_count
+    seen = set()
+    group_index = int(group.index)
+    for vertex in vertices:
+        try:
+            vertex_index = int(vertex.index)
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise VertexChannelError(
+                f"{label} mesh has an invalid vertex index") from exc
+        if vertex_index < 0 or vertex_index >= vertex_count:
+            raise VertexChannelError(
+                f"{label} vertex index {vertex_index} is invalid")
+        if vertex_index in seen:
+            raise VertexChannelError(
+                f"{label} vertex index {vertex_index} is duplicated")
+        seen.add(vertex_index)
+
         weight = 0.0
         for membership in vertex.groups:
-            if membership.group == group_index:
-                weight = float(membership.weight)
+            try:
+                membership_group = int(membership.group)
+            except (AttributeError, TypeError, ValueError) as exc:
+                raise VertexChannelError(
+                    f"{label} membership at vertex {vertex_index} "
+                    "has an invalid group index") from exc
+            if membership_group == group_index:
+                try:
+                    weight = float(membership.weight)
+                except (OverflowError, TypeError, ValueError) as exc:
+                    raise VertexChannelError(
+                        f"{label} weight at vertex {vertex_index} "
+                        "is not numeric") from exc
                 break
         if not math.isfinite(weight):
             raise VertexChannelError(
-                f"pin weight at vertex {vertex.index} is not finite")
+                f"{label} weight at vertex {vertex_index} is not finite")
         if weight < 0.0 or weight > 1.0:
             raise VertexChannelError(
-                f"pin weight {weight} at vertex {vertex.index} is outside "
+                f"{label} weight {weight} at vertex {vertex_index} is outside "
                 "[0, 1]")
-        weights[vertex.index] = weight
+        weights[vertex_index] = weight
+    if len(seen) != vertex_count:
+        raise VertexChannelError(
+            f"{label} mesh vertex indices are incomplete")
+    return weights
+
+
+def binary_exclusion_mask(obj, group_name, label):
+    """Map Blender's positive exclusion weights to native binary flags."""
+    weights = vertex_group_weights(obj, group_name, label)
+    if weights is None:
+        return [0.0] * len(obj.data.vertices)
+    return [1.0 if weight > 0.0 else 0.0 for weight in weights]
+
+
+def binary_pin_weights(obj, group_name):
+    weights = vertex_group_weights(obj, group_name, "pin")
+    if weights is None:
+        return [0.0] * len(obj.data.vertices)
     return weights
 
 
