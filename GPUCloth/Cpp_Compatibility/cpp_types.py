@@ -52,7 +52,7 @@ SOLVER_MGPBD  = 2   # Многоуровневый PBD с Algebraic Multigrid (A
 SOLVER_Mil2   = 3   # Non-distance barriers + subspace reuse (Mil²)
 SOLVER_OGC    = 4   # Offset Geometric Contact — самостолкновение ткани
 # OGC — солвер самостолкновений, не основной физический солвер.
-# Подключается к любому из вышеперечисленных через SIM_set_self_collision_params.
+# Self-collision response is selected explicitly by GPUClothCollisionConfig.
 
 # ---------------------------------------------------------------------------
 #  Непрозрачный указатель на C++ объект ProxySimHandle
@@ -476,13 +476,61 @@ GPUCLOTH_COLLECTION_STATUS_STAGED = 1 << 1
 GPUCLOTH_COLLIDER_STATIC = 1 << 0
 GPUCLOTH_COLLIDER_MOVING = 1 << 1
 GPUCLOTH_COLLIDER_DEFORMING = 1 << 2
-GPUCLOTH_COLLIDER_USE_CULLING = 1 << 3
-GPUCLOTH_COLLIDER_USE_NORMAL = 1 << 4
+GPUCLOTH_COLLIDER_ONE_SIDED_NORMAL = 1
+GPUCLOTH_COLLIDER_TWO_SIDED = 2
 
 GPUCLOTH_EFFECTOR_USE_ABSORPTION = 1 << 0
 
 GPUCLOTH_COLLISION_OBJECT_ENABLED = 1 << 0
 GPUCLOTH_COLLISION_SELF_ENABLED = 1 << 1
+GPUCLOTH_SELF_RESPONSE_OGC = 1
+GPUCLOTH_SELF_RESPONSE_MIL2_NDB = 2
+
+GPUCLOTH_PREPARATION_CONFIGURED = 1 << 0
+GPUCLOTH_PREPARATION_STATUS_VALIDATED = 1 << 0
+GPUCLOTH_PREPARATION_STATUS_RUNNABLE = 1 << 1
+GPUCLOTH_PREPARATION_STATUS_FAILED = 1 << 2
+GPUCLOTH_PREPARATION_RESULT_NONE = 0
+GPUCLOTH_PREPARATION_RESULT_READY = 1
+GPUCLOTH_PREPARATION_RESULT_REJECTED = 2
+
+GPUCLOTH_INVARIANT_STAGE_NONE = 0
+GPUCLOTH_INVARIANT_STAGE_PREPARE = 1
+GPUCLOTH_INVARIANT_STAGE_DRAPE = 2
+GPUCLOTH_INVARIANT_STAGE_RUNTIME = 3
+GPUCLOTH_INVARIANT_RESULT_NONE = 0
+GPUCLOTH_INVARIANT_RESULT_PASS = 1
+GPUCLOTH_INVARIANT_RESULT_FAILED = 2
+GPUCLOTH_INVARIANT_NONE = 0
+GPUCLOTH_INVARIANT_INVALID_INDEX = 1
+GPUCLOTH_INVARIANT_NONFINITE_STATE = 2
+GPUCLOTH_INVARIANT_DEGENERATE_TRIANGLE = 3
+GPUCLOTH_INVARIANT_INCONSISTENT_WINDING = 4
+GPUCLOTH_INVARIANT_INVALID_SEAM = 5
+GPUCLOTH_INVARIANT_SELF_INTERSECTION = 6
+GPUCLOTH_INVARIANT_EXTERNAL_INTERSECTION = 7
+GPUCLOTH_INVARIANT_EXTERNAL_CLEARANCE = 8
+GPUCLOTH_INVARIANT_PRESSURE_OPEN_SHELL = 9
+GPUCLOTH_INVARIANT_PRESSURE_VOLUME = 10
+GPUCLOTH_INVARIANT_CONTACT_OVERFLOW = 11
+GPUCLOTH_INVARIANT_STALE_GENERATION = 12
+GPUCLOTH_INVARIANT_CUDA_ERROR = 13
+GPUCLOTH_INVARIANT_GRAPH_ERROR = 14
+GPUCLOTH_INVARIANT_NOT_CONVERGED = 15
+
+GPUCLOTH_DRAPE_USE_TRIANGLE_LAYERS = 1 << 0
+GPUCLOTH_DRAPE_STATUS_ACTIVE = 1 << 0
+GPUCLOTH_DRAPE_STATUS_CONVERGED = 1 << 1
+GPUCLOTH_DRAPE_STATUS_APPLIED = 1 << 2
+GPUCLOTH_DRAPE_STATUS_CANCELLED = 1 << 3
+GPUCLOTH_DRAPE_STATUS_FAILED = 1 << 4
+GPUCLOTH_DRAPE_RESULT_NONE = 0
+GPUCLOTH_DRAPE_RESULT_RUNNING = 1
+GPUCLOTH_DRAPE_RESULT_CONVERGED = 2
+GPUCLOTH_DRAPE_RESULT_APPLIED = 3
+GPUCLOTH_DRAPE_RESULT_CANCELLED = 4
+GPUCLOTH_DRAPE_RESULT_NOT_CONVERGED = 5
+GPUCLOTH_DRAPE_RESULT_REJECTED = 6
 
 GPUCLOTH_VALUE_BOOL = 1
 GPUCLOTH_VALUE_INT32 = 2
@@ -700,7 +748,8 @@ class GPUClothCollisionConfig(Structure):
         ("self_distance_min", c_float),
         ("self_friction", c_float),
         ("self_impulse_clamp", c_float),
-        ("reserved", c_uint * 3),
+        ("self_response", c_uint),
+        ("reserved", c_uint * 2),
     ]
 
 
@@ -714,7 +763,7 @@ class GPUClothColliderConfig(Structure):
         ("collider_flags", c_uint),
         ("vertex_count", c_uint),
         ("triangle_count", c_uint),
-        ("reserved0", c_uint),
+        ("sidedness", c_uint),
         ("positions_previous", GPUClothBufferView),
         ("positions_current", GPUClothBufferView),
         ("positions_next", GPUClothBufferView),
@@ -1012,6 +1061,109 @@ class GPUClothDiagnosticsStatus(Structure):
     ]
 
 
+class GPUClothInvariantWitness(Structure):
+    _fields_ = [
+        ("struct_size", c_uint),
+        ("witness_version", c_uint),
+        ("stage", c_uint),
+        ("result", c_uint),
+        ("invariant", c_uint),
+        ("frame", c_int),
+        ("substep", c_int),
+        ("solver_mask", c_uint),
+        ("candidate_generation", c_uint64),
+        ("detection_generation", c_uint64),
+        ("contact_generation", c_uint64),
+        ("apply_generation", c_uint64),
+        ("cloth_id", c_uint64),
+        ("other_object_id", c_uint64),
+        ("cloth_layer", c_int),
+        ("other_layer", c_int),
+        ("triangle_i", c_int),
+        ("triangle_j", c_int),
+        ("edge_i", c_int),
+        ("edge_j", c_int),
+        ("vertex_i", c_int),
+        ("vertex_j", c_int),
+        ("intersection_type", c_uint),
+        ("vf_count", c_uint),
+        ("ee_count", c_uint),
+        ("ef_count", c_uint),
+        ("accepted_owner_count", c_uint),
+        ("overflow_count", c_uint),
+        ("cuda_status", c_int),
+        ("graph_status", c_int),
+        ("minimum_clearance", c_float),
+        ("maximum_penetration", c_float),
+        ("aabb_min", c_float * 3),
+        ("aabb_max", c_float * 3),
+        ("maximum_velocity", c_float),
+        ("reserved0", c_uint),
+        ("frame_wall_ns", c_uint64),
+        ("reserved", c_uint64 * 8),
+    ]
+
+
+class GPUClothPreparationConfig(Structure):
+    _fields_ = [
+        ("struct_size", c_uint),
+        ("config_version", c_uint),
+        ("preparation_flags", c_uint),
+        ("reserved0", c_uint),
+        ("topology_generation", c_uint64),
+        ("requested_generation", c_uint64),
+        ("reserved", c_uint64 * 8),
+    ]
+
+
+class GPUClothPreparationStatus(Structure):
+    _fields_ = [
+        ("struct_size", c_uint),
+        ("status_version", c_uint),
+        ("status_flags", c_uint),
+        ("result", c_uint),
+        ("last_error", c_uint),
+        ("reserved0", c_uint),
+        ("preparation_generation", c_uint64),
+        ("topology_generation", c_uint64),
+        ("accepted_generation", c_uint64),
+        ("reserved", c_uint64 * 6),
+    ]
+
+
+class GPUClothDrapeConfig(Structure):
+    _fields_ = [
+        ("struct_size", c_uint),
+        ("config_version", c_uint),
+        ("drape_flags", c_uint),
+        ("max_steps", c_uint),
+        ("convergence_window", c_uint),
+        ("reserved0", c_uint),
+        ("convergence_tolerance", c_float),
+        ("reserved1", c_float),
+        ("triangle_layers", GPUClothBufferView),
+        ("reserved", c_uint64 * 3),
+    ]
+
+
+class GPUClothDrapeStatus(Structure):
+    _fields_ = [
+        ("struct_size", c_uint),
+        ("status_version", c_uint),
+        ("status_flags", c_uint),
+        ("result", c_uint),
+        ("last_error", c_uint),
+        ("step_count", c_uint),
+        ("consecutive_converged_steps", c_uint),
+        ("reserved0", c_uint),
+        ("maximum_position_delta", c_float),
+        ("convergence_tolerance", c_float),
+        ("begin_generation", c_uint64),
+        ("current_generation", c_uint64),
+        ("reserved", c_uint64 * 5),
+    ]
+
+
 class GPUClothDescriptorLayout(Structure):
     _fields_ = [
         ("struct_size", c_uint),
@@ -1047,7 +1199,12 @@ class GPUClothDescriptorLayout(Structure):
         ("collection_transaction_config_size", c_uint),
         ("collection_query_size", c_uint),
         ("collection_status_size", c_uint),
-        ("reserved", c_uint * 3),
+        ("invariant_witness_size", c_uint),
+        ("preparation_config_size", c_uint),
+        ("preparation_status_size", c_uint),
+        ("drape_config_size", c_uint),
+        ("drape_status_size", c_uint),
+        ("reserved", c_uint * 4),
     ]
 
 class fmatrix3x3(Structure):
