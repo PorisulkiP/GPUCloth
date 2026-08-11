@@ -120,6 +120,99 @@ class GPUCLOTH_PT_main(bpy.types.Panel):
 #  Sub-panel: Solver
 # ===========================================================================
 
+class GPUCLOTH_PT_preparation(bpy.types.Panel):
+    bl_label = "Prepare / Drape"
+    bl_idname = "GPUCLOTH_PT_preparation"
+    bl_parent_id = "GPUCLOTH_PT_main"
+    bl_space_type = 'PROPERTIES'
+    bl_region_type = 'WINDOW'
+    bl_context = "physics"
+
+    @classmethod
+    def poll(cls, context):
+        return bool(
+            context.object is not None and
+            context.object.type == 'MESH' and
+            hasattr(context.object, 'GPUCloth') and
+            context.object.GPUCloth.is_active)
+
+    def draw(self, context):
+        layout = self.layout
+        obj = context.object
+        prepared = bool(
+            context.scene.gpu_cloth_springs_built and
+            obj in operators.g_clothOBJs)
+        layout.enabled = prepared
+        if not prepared:
+            layout.label(text=_t(
+                "Prepare simulation first", "Сначала выполните Prepare"),
+                icon='INFO')
+            return
+
+        preparation = operators.get_preparation_ui_status(obj)
+        if preparation is not None:
+            layout.label(
+                text=(f"Prepare generation "
+                      f"{preparation['preparation_generation']}; "
+                      f"accepted {preparation['accepted_generation']}"),
+                icon='CHECKMARK')
+
+        drape = operators.get_drape_ui_status(obj)
+        flags = drape["status_flags"] if drape else 0
+        active = bool(flags & operators.CType.GPUCLOTH_DRAPE_STATUS_ACTIVE)
+        converged = bool(
+            flags & operators.CType.GPUCLOTH_DRAPE_STATUS_CONVERGED)
+        failed = bool(flags & operators.CType.GPUCLOTH_DRAPE_STATUS_FAILED)
+        applied = bool(flags & operators.CType.GPUCLOTH_DRAPE_STATUS_APPLIED)
+
+        if drape:
+            box = layout.box()
+            box.label(
+                text=f"Drape step {drape['step_count']} / 240",
+                icon='ERROR' if failed else
+                     ('CHECKMARK' if converged else 'TIME'))
+            box.label(
+                text=(f"L∞ {drape['maximum_position_delta']:.6g}; "
+                      f"tol {drape['convergence_tolerance']:.6g}; "
+                      f"stable {drape['consecutive_converged_steps']} / 8"))
+
+        row = layout.row(align=True)
+        if not active and not failed and not applied:
+            row.operator("gpucloth.begin_drape", text="Begin", icon='PLAY')
+        if active and not converged:
+            row.operator("gpucloth.step_drape", text="Step", icon='FRAME_NEXT')
+            settle = row.operator(
+                "gpucloth.step_drape", text="Settle", icon='PLAY')
+            settle.until_settled = True
+        if converged:
+            row.operator(
+                "gpucloth.apply_drape", text="Apply", icon='CHECKMARK')
+        if active or failed:
+            row.operator("gpucloth.cancel_drape", text="Cancel", icon='X')
+
+        witness = operators.get_invariant_ui_status(obj)
+        if witness is not None:
+            box = layout.box()
+            icon = ('CHECKMARK' if witness["invariant"] ==
+                    operators.CType.GPUCLOTH_INVARIANT_NONE else 'ERROR')
+            box.label(
+                text=f"Invariant: {witness['invariant_name']}", icon=icon)
+            primitives = witness["primitives"]
+            if witness["invariant"] != operators.CType.GPUCLOTH_INVARIANT_NONE:
+                box.label(
+                    text=(f"tri {primitives['triangle_i']} / "
+                          f"{primitives['triangle_j']}; "
+                          f"edge {primitives['edge_i']}; "
+                          f"vertex {primitives['vertex_i']}"))
+            row = box.row(align=True)
+            row.operator(
+                "gpucloth.copy_invariant_diagnostics",
+                text="Copy JSON", icon='COPYDOWN')
+            row.operator(
+                "gpucloth.save_invariant_diagnostics",
+                text="Save JSON", icon='FILE_TICK')
+
+
 class GPUCLOTH_PT_solver(bpy.types.Panel):
     bl_label       = "Solver"
     bl_idname      = "GPUCLOTH_PT_solver"
@@ -912,6 +1005,7 @@ class GPUCLOTH_PT_solver_advanced(bpy.types.Panel):
 
 _PANEL_CLASSES = [
     GPUCLOTH_PT_main,
+    GPUCLOTH_PT_preparation,
     GPUCLOTH_PT_solver,
     GPUCLOTH_PT_material,
     GPUCLOTH_PT_physical,

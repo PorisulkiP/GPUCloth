@@ -16,6 +16,7 @@
 
 import bpy
 import hashlib
+import json
 import math
 import os
 import struct
@@ -70,6 +71,7 @@ _dynamic_mesh_states = []
 _collection_snapshots = []
 _effector_weight_states = []
 _collider_history = {}
+_drape_status_by_uid = {}
 _teardown_failure = False
 _MODIFIER_VISIBILITY = (
     "show_viewport", "show_render", "show_in_editmode", "show_on_cage")
@@ -771,17 +773,232 @@ def _validate_descriptor_layout(dll):
             CType.GPUClothCollectionTransactionConfig),
         "collection_query_size": sizeof(CType.GPUClothCollectionQuery),
         "collection_status_size": sizeof(CType.GPUClothCollectionStatus),
+        "invariant_witness_size": sizeof(
+            CType.GPUClothInvariantWitness),
+        "preparation_config_size": sizeof(
+            CType.GPUClothPreparationConfig),
+        "preparation_status_size": sizeof(
+            CType.GPUClothPreparationStatus),
+        "drape_config_size": sizeof(CType.GPUClothDrapeConfig),
+        "drape_status_size": sizeof(CType.GPUClothDrapeStatus),
     }
     mismatches = [
         f"{name}={int(getattr(layout, name))}, expected={expected_size}"
         for name, expected_size in expected.items()
         if int(getattr(layout, name)) != expected_size]
     if (int(layout.struct_size) != sizeof(layout) or
-            int(layout.schema_version) < 3 or
+            int(layout.schema_version) != 4 or
             int(layout.legacy_reserved0) != 0 or mismatches):
         detail = "; ".join(mismatches) if mismatches else "header mismatch"
         raise RuntimeError(f"native descriptor ABI mismatch: {detail}")
     return layout
+
+
+def _validate_product_abi(dll):
+    version = CType.GPUClothABIVersion()
+    version.struct_size = sizeof(version)
+    if not dll.SIM_get_product_abi_version(pointer(version)):
+        raise RuntimeError("native product ABI query failed")
+    actual = (
+        int(version.abi_major), int(version.abi_minor),
+        int(version.abi_patch), int(version.feature_schema_version))
+    expected = (2, 0, 0, 4)
+    if actual != expected:
+        raise RuntimeError(
+            f"native product ABI {actual} does not match required "
+            f"{expected}")
+    return version
+
+
+def _validate_native_preparation(
+        dll, clmd, topology_generation, requested_generation):
+    config = CType.GPUClothPreparationConfig()
+    config.struct_size = sizeof(config)
+    config.config_version = 1
+    config.preparation_flags = CType.GPUCLOTH_PREPARATION_CONFIGURED
+    config.topology_generation = int(topology_generation)
+    config.requested_generation = int(requested_generation)
+    status = CType.GPUClothPreparationStatus()
+    status.struct_size = sizeof(status)
+    status.status_version = 1
+    result = int(dll.SIM_validate_cloth_initial_state(
+        clmd, pointer(config), pointer(status)))
+    if (result != CType.GPUCLOTH_ABI_OK or
+            int(status.result) != CType.GPUCLOTH_PREPARATION_RESULT_READY or
+            not (int(status.status_flags) &
+                 CType.GPUCLOTH_PREPARATION_STATUS_RUNNABLE)):
+        witness = CType.GPUClothInvariantWitness()
+        witness.struct_size = sizeof(witness)
+        witness.witness_version = 1
+        witness_result = int(dll.SIM_get_cloth_invariant_status(
+            clmd, pointer(witness)))
+        detail = {
+            "abi_result": result,
+            "preparation_result": int(status.result),
+            "last_error": int(status.last_error),
+            "witness_result": witness_result,
+            "invariant": int(witness.invariant),
+            "triangle_i": int(witness.triangle_i),
+            "triangle_j": int(witness.triangle_j),
+            "edge_i": int(witness.edge_i),
+            "vertex_i": int(witness.vertex_i),
+            "other_object_id": int(witness.other_object_id),
+        }
+        raise RuntimeError(
+            f"native hard preflight rejected cloth: {detail}")
+    return status
+
+
+_INVARIANT_NAMES = {
+    CType.GPUCLOTH_INVARIANT_NONE: "NONE",
+    CType.GPUCLOTH_INVARIANT_INVALID_INDEX: "INVALID_INDEX",
+    CType.GPUCLOTH_INVARIANT_NONFINITE_STATE: "NONFINITE_STATE",
+    CType.GPUCLOTH_INVARIANT_DEGENERATE_TRIANGLE: "DEGENERATE_TRIANGLE",
+    CType.GPUCLOTH_INVARIANT_INCONSISTENT_WINDING: "INCONSISTENT_WINDING",
+    CType.GPUCLOTH_INVARIANT_INVALID_SEAM: "INVALID_SEAM",
+    CType.GPUCLOTH_INVARIANT_SELF_INTERSECTION: "SELF_INTERSECTION",
+    CType.GPUCLOTH_INVARIANT_EXTERNAL_INTERSECTION: "EXTERNAL_INTERSECTION",
+    CType.GPUCLOTH_INVARIANT_EXTERNAL_CLEARANCE: "EXTERNAL_CLEARANCE",
+    CType.GPUCLOTH_INVARIANT_PRESSURE_OPEN_SHELL: "PRESSURE_OPEN_SHELL",
+    CType.GPUCLOTH_INVARIANT_PRESSURE_VOLUME: "PRESSURE_VOLUME",
+    CType.GPUCLOTH_INVARIANT_CONTACT_OVERFLOW: "CONTACT_OVERFLOW",
+    CType.GPUCLOTH_INVARIANT_STALE_GENERATION: "STALE_GENERATION",
+    CType.GPUCLOTH_INVARIANT_CUDA_ERROR: "CUDA_ERROR",
+    CType.GPUCLOTH_INVARIANT_GRAPH_ERROR: "GRAPH_ERROR",
+    CType.GPUCLOTH_INVARIANT_NOT_CONVERGED: "NOT_CONVERGED",
+}
+
+
+def _prepared_cloth_index(cloth_obj):
+    target_uid = _blender_session_uid(cloth_obj, "drape cloth")
+    for index, candidate in enumerate(g_clothOBJs):
+        if _blender_session_uid(candidate, "prepared cloth") == target_uid:
+            return index
+    return -1
+
+
+def _new_drape_status():
+    status = CType.GPUClothDrapeStatus()
+    status.struct_size = sizeof(status)
+    status.status_version = 1
+    return status
+
+
+def _drape_status_data(status):
+    return {
+        "status_flags": int(status.status_flags),
+        "result": int(status.result),
+        "last_error": int(status.last_error),
+        "step_count": int(status.step_count),
+        "consecutive_converged_steps": int(
+            status.consecutive_converged_steps),
+        "maximum_position_delta": float(status.maximum_position_delta),
+        "convergence_tolerance": float(status.convergence_tolerance),
+        "begin_generation": int(status.begin_generation),
+        "current_generation": int(status.current_generation),
+    }
+
+
+def _remember_drape_status(cloth_obj, status):
+    uid = _blender_session_uid(cloth_obj, "drape cloth")
+    _drape_status_by_uid[uid] = _drape_status_data(status)
+    return _drape_status_by_uid[uid]
+
+
+def get_drape_ui_status(cloth_obj):
+    try:
+        uid = _blender_session_uid(cloth_obj, "drape cloth")
+    except RuntimeError:
+        return None
+    return _drape_status_by_uid.get(uid)
+
+
+def _invariant_witness_data(clmd):
+    witness = CType.GPUClothInvariantWitness()
+    witness.struct_size = sizeof(witness)
+    witness.witness_version = 1
+    result = int(g_dll.SIM_get_cloth_invariant_status(
+        clmd, pointer(witness)))
+    if result != CType.GPUCLOTH_ABI_OK:
+        raise RuntimeError(f"invariant status rejected with {result}")
+    invariant = int(witness.invariant)
+    return {
+        "stage": int(witness.stage),
+        "result": int(witness.result),
+        "invariant": invariant,
+        "invariant_name": _INVARIANT_NAMES.get(
+            invariant, f"UNKNOWN_{invariant}"),
+        "frame": int(witness.frame),
+        "substep": int(witness.substep),
+        "solver_mask": int(witness.solver_mask),
+        "generations": {
+            "candidate": int(witness.candidate_generation),
+            "detection": int(witness.detection_generation),
+            "contact": int(witness.contact_generation),
+            "apply": int(witness.apply_generation),
+        },
+        "cloth_id": int(witness.cloth_id),
+        "other_object_id": int(witness.other_object_id),
+        "layers": [int(witness.cloth_layer), int(witness.other_layer)],
+        "primitives": {
+            "triangle_i": int(witness.triangle_i),
+            "triangle_j": int(witness.triangle_j),
+            "edge_i": int(witness.edge_i),
+            "edge_j": int(witness.edge_j),
+            "vertex_i": int(witness.vertex_i),
+            "vertex_j": int(witness.vertex_j),
+            "intersection_type": int(witness.intersection_type),
+        },
+        "cardinalities": {
+            "vf": int(witness.vf_count),
+            "ee": int(witness.ee_count),
+            "ef": int(witness.ef_count),
+            "accepted_owner": int(witness.accepted_owner_count),
+            "overflow": int(witness.overflow_count),
+        },
+        "cuda_status": int(witness.cuda_status),
+        "graph_status": int(witness.graph_status),
+        "minimum_clearance": float(witness.minimum_clearance),
+        "maximum_penetration": float(witness.maximum_penetration),
+        "aabb_min": [float(value) for value in witness.aabb_min],
+        "aabb_max": [float(value) for value in witness.aabb_max],
+        "maximum_velocity": float(witness.maximum_velocity),
+        "frame_wall_ns": int(witness.frame_wall_ns),
+    }
+
+
+def get_invariant_ui_status(cloth_obj):
+    index = _prepared_cloth_index(cloth_obj)
+    if g_dll is None or index < 0:
+        return None
+    try:
+        return _invariant_witness_data(g_clmd[index])
+    except (OSError, RuntimeError):
+        return None
+
+
+def get_preparation_ui_status(cloth_obj):
+    index = _prepared_cloth_index(cloth_obj)
+    if g_dll is None or index < 0:
+        return None
+    status = CType.GPUClothPreparationStatus()
+    status.struct_size = sizeof(status)
+    status.status_version = 1
+    try:
+        result = int(g_dll.SIM_get_cloth_preparation_status(
+            g_clmd[index], pointer(status)))
+    except OSError:
+        return None
+    if result != CType.GPUCLOTH_ABI_OK:
+        return None
+    return {
+        "status_flags": int(status.status_flags),
+        "result": int(status.result),
+        "last_error": int(status.last_error),
+        "preparation_generation": int(status.preparation_generation),
+        "topology_generation": int(status.topology_generation),
+        "accepted_generation": int(status.accepted_generation),
+    }
 
 
 def _ordered_diagnostic_events(owner, status):
@@ -1812,6 +2029,7 @@ def _capture_cloth_collision_config(settings):
     config.self_distance_min = self_distance_min
     config.self_friction = self_friction
     config.self_impulse_clamp = self_impulse_clamp
+    config.self_response = CType.GPUCLOTH_SELF_RESPONSE_OGC
     return config
 
 
@@ -2118,10 +2336,14 @@ def _capture_collider_payload(
         raise RuntimeError(
             f"collider {source_object.name_full!r} absorption is "
             "outside [0, 1]")
-    if use_culling:
-        config.collider_flags |= CType.GPUCLOTH_COLLIDER_USE_CULLING
-    if use_normal:
-        config.collider_flags |= CType.GPUCLOTH_COLLIDER_USE_NORMAL
+    if use_culling != use_normal:
+        raise RuntimeError(
+            f"collider {source_object.name_full!r} must select an explicit "
+            "surface contract: culling+normal for one-sided, or neither "
+            "for two-sided")
+    config.sidedness = (
+        CType.GPUCLOTH_COLLIDER_ONE_SIDED_NORMAL
+        if use_culling else CType.GPUCLOTH_COLLIDER_TWO_SIDED)
 
     record = CType.GPUClothCollectionRecord()
     record.struct_size = sizeof(record)
@@ -3284,6 +3506,7 @@ def free_gpu_memory(context=None, shutdown_runtime=False):
     _collection_snapshots.clear()
     _effector_weight_states.clear()
     _collider_history = {}
+    _drape_status_by_uid.clear()
     _initial_positions.clear()
     _live_arrays.clear()
     _simulation_frame_state['last_solved'] = None
@@ -3403,9 +3626,6 @@ class GPUCloth_LoadDLL(bpy.types.Operator):
                 POINTER(CType.ClothModifierData), POINTER(CType.Mesh)]
             g_dll.BuildClothSprings.restype = c_bool
 
-            g_dll.SIM_solver.argtypes = []
-            g_dll.SIM_solver.restype  = c_bool
-
             g_dll.SIM_solver_cloth.argtypes = [
                 POINTER(CType.ClothModifierData)]
             g_dll.SIM_solver_cloth.restype = c_bool
@@ -3423,12 +3643,6 @@ class GPUCloth_LoadDLL(bpy.types.Operator):
                 POINTER(CType.Object),
             ]
             g_dll.RemoveCloth.restype = c_bool
-
-            g_dll.AddCollisionObject.argtypes    = [POINTER(CType.Object)]
-            g_dll.AddCollisionObject.restype     = c_bool
-
-            g_dll.RemoveCollisionObject.argtypes = [POINTER(CType.Object)]
-            g_dll.RemoveCollisionObject.restype  = c_bool
 
             g_dll.UpdateScene.argtypes = [POINTER(CType.Scene)]
             g_dll.UpdateScene.restype  = c_bool
@@ -3564,6 +3778,44 @@ class GPUCloth_LoadDLL(bpy.types.Operator):
                 POINTER(CType.GPUClothCollectionStatus),
             ]
             g_dll.SIM_get_cloth_collection_status.restype = c_uint
+            g_dll.SIM_validate_cloth_initial_state.argtypes = [
+                POINTER(CType.ClothModifierData),
+                POINTER(CType.GPUClothPreparationConfig),
+                POINTER(CType.GPUClothPreparationStatus),
+            ]
+            g_dll.SIM_validate_cloth_initial_state.restype = c_uint
+            g_dll.SIM_get_cloth_preparation_status.argtypes = [
+                POINTER(CType.ClothModifierData),
+                POINTER(CType.GPUClothPreparationStatus),
+            ]
+            g_dll.SIM_get_cloth_preparation_status.restype = c_uint
+            g_dll.SIM_get_cloth_invariant_status.argtypes = [
+                POINTER(CType.ClothModifierData),
+                POINTER(CType.GPUClothInvariantWitness),
+            ]
+            g_dll.SIM_get_cloth_invariant_status.restype = c_uint
+            g_dll.SIM_begin_cloth_drape.argtypes = [
+                POINTER(CType.ClothModifierData),
+                POINTER(CType.GPUClothDrapeConfig),
+                POINTER(CType.GPUClothDrapeStatus),
+            ]
+            g_dll.SIM_begin_cloth_drape.restype = c_uint
+            g_dll.SIM_step_cloth_drape.argtypes = [
+                POINTER(CType.ClothModifierData),
+                POINTER(CType.GPUClothDrapeStatus),
+            ]
+            g_dll.SIM_step_cloth_drape.restype = c_uint
+            g_dll.SIM_apply_cloth_drape.argtypes = [
+                POINTER(CType.ClothModifierData),
+                POINTER(CType.GPUClothDrapeStatus),
+            ]
+            g_dll.SIM_apply_cloth_drape.restype = c_uint
+            g_dll.SIM_cancel_cloth_drape.argtypes = [
+                POINTER(CType.ClothModifierData),
+                POINTER(CType.GPUClothDrapeStatus),
+            ]
+            g_dll.SIM_cancel_cloth_drape.restype = c_uint
+            _validate_product_abi(g_dll)
             _validate_descriptor_layout(g_dll)
 
             # ── ProxySim API ─────────────────────────────────────────────────
@@ -4379,6 +4631,10 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
             _collection_snapshots.extend(_commit_frame_inputs(
                 g_dll, g_clmd, prepared_collections,
                 prepared_pin_owners, prepared_dynamic_owners, 1))
+            for index, clmd in enumerate(g_clmd):
+                _validate_native_preparation(
+                    g_dll, clmd,
+                    prepared_topology_generations[index], 1)
             _effector_weight_states.extend({
                 "collection_id": int(
                     owners["effector_weights"]["collection_id"]),
@@ -4658,6 +4914,288 @@ class GPUCloth_UpdateSimulation(bpy.types.Operator):
 # ===========================================================================
 #  Оператор: запекание (bake) симуляции
 # ===========================================================================
+
+def _capture_drape_triangle_layers(simulation_obj):
+    mesh = simulation_obj.data
+    attribute = mesh.attributes.get("gpucloth_drape_layer")
+    if attribute is None:
+        return None
+    if attribute.domain != 'FACE' or attribute.data_type != 'INT':
+        raise RuntimeError(
+            "gpucloth_drape_layer must be a FACE/INT mesh attribute")
+    triangle_count = len(mesh.polygons)
+    if len(attribute.data) != triangle_count:
+        raise RuntimeError("gpucloth_drape_layer face count mismatch")
+    values = np.empty(triangle_count, dtype=np.int32)
+    attribute.data.foreach_get("value", values)
+    if np.any(values < 0):
+        raise RuntimeError("gpucloth_drape_layer cannot contain negatives")
+    layer_type = c_uint * triangle_count
+    layers = layer_type(*(int(value) for value in values))
+    digest = hashlib.blake2b(
+        values.tobytes(), digest_size=8, person=b"GPUDrape").digest()
+    generation = int.from_bytes(digest, "little") or 1
+    return layers, generation
+
+
+def _readback_drape_preview(index):
+    simulation_obj = g_simulationOBJs[index]
+    cloth_obj = g_clothOBJs[index]
+    n_sim = len(simulation_obj.data.vertices)
+    vertices = (CType.ClothVertex * n_sim)()
+    g_dll.SIM_get_cloth_verts(
+        g_clmd[index], vertices, c_size_t(n_sim))
+    positions = (c_float * (n_sim * 3))()
+    for vertex in range(n_sim):
+        positions[vertex * 3 + 0] = vertices[vertex].x[0]
+        positions[vertex * 3 + 1] = vertices[vertex].x[1]
+        positions[vertex * 3 + 2] = vertices[vertex].x[2]
+    flat = np.frombuffer(positions, dtype=np.float32)
+    simulation_obj.data.vertices.foreach_set("co", flat)
+    simulation_obj.data.update()
+
+    handle = g_proxy_handles[index] if index < len(g_proxy_handles) else None
+    if handle is None:
+        if cloth_obj is not simulation_obj:
+            cloth_obj.data.vertices.foreach_set("co", flat)
+            cloth_obj.data.update()
+        return
+    if int(g_dll.ProxySim_proxy_count(handle)) != n_sim:
+        raise RuntimeError("Drape proxy vertex count changed")
+    n_hi = int(g_dll.ProxySim_hi_count(handle))
+    high_positions = (c_float * (n_hi * 3))()
+    g_dll.ProxySim_apply(handle, positions, high_positions)
+    cloth_obj.data.vertices.foreach_set(
+        "co", np.frombuffer(high_positions, dtype=np.float32))
+    cloth_obj.data.update()
+
+
+def _selected_drape_owner(context):
+    index = _prepared_cloth_index(context.object)
+    if g_dll is None or index < 0 or index >= len(g_clmd):
+        raise RuntimeError("selected cloth is not prepared")
+    return index, context.object, g_clmd[index]
+
+
+class GPUCloth_BeginDrape(bpy.types.Operator):
+    bl_idname = "gpucloth.begin_drape"
+    bl_label = "Begin Drape"
+    bl_description = "Snapshot state and begin preparation-only draping"
+
+    @classmethod
+    def poll(cls, context):
+        return bool(
+            context.object is not None and g_dll is not None and
+            _prepared_cloth_index(context.object) >= 0)
+
+    def execute(self, context):
+        try:
+            index, cloth_obj, clmd = _selected_drape_owner(context)
+            _publish_frame_inputs(
+                context, context.evaluated_depsgraph_get())
+            config = CType.GPUClothDrapeConfig()
+            config.struct_size = sizeof(config)
+            config.config_version = 1
+            config.max_steps = 240
+            config.convergence_window = 8
+            config.convergence_tolerance = float(
+                clmd.contents.sim_parms.contents.solver_convergence_tol)
+            layer_owner = _capture_drape_triangle_layers(
+                g_simulationOBJs[index])
+            if layer_owner is not None:
+                layers, generation = layer_owner
+                config.drape_flags = CType.GPUCLOTH_DRAPE_USE_TRIANGLE_LAYERS
+                _set_buffer_view(
+                    config.triangle_layers, CType.GPUCLOTH_ELEMENT_UINT32,
+                    len(layers), sizeof(c_uint), addressof(layers), generation)
+            status = _new_drape_status()
+            result = int(g_dll.SIM_begin_cloth_drape(
+                clmd, pointer(config), pointer(status)))
+            _remember_drape_status(cloth_obj, status)
+            if result != CType.GPUCLOTH_ABI_OK:
+                witness = _invariant_witness_data(clmd)
+                self.report(
+                    {'ERROR'},
+                    f"Drape Begin rejected: {witness['invariant_name']}")
+                return {'CANCELLED'}
+            self.report({'INFO'}, "Drape sandbox started")
+            return {'FINISHED'}
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+            self.report({'ERROR'}, f"Drape Begin failed: {exc}")
+            return {'CANCELLED'}
+
+
+class GPUCloth_StepDrape(bpy.types.Operator):
+    bl_idname = "gpucloth.step_drape"
+    bl_label = "Step Drape"
+    bl_description = "Advance Drape without moving timeline or writing cache"
+
+    until_settled: bpy.props.BoolProperty(
+        name="Until settled", default=False)
+
+    @classmethod
+    def poll(cls, context):
+        status = (get_drape_ui_status(context.object)
+                  if context.object is not None else None)
+        if not status:
+            return False
+        flags = status["status_flags"]
+        return bool(
+            flags & CType.GPUCLOTH_DRAPE_STATUS_ACTIVE and
+            not flags & (CType.GPUCLOTH_DRAPE_STATUS_CONVERGED |
+                         CType.GPUCLOTH_DRAPE_STATUS_FAILED))
+
+    def execute(self, context):
+        try:
+            index, cloth_obj, clmd = _selected_drape_owner(context)
+            status = _new_drape_status()
+            limit = 240 if self.until_settled else 1
+            for _ in range(limit):
+                result = int(g_dll.SIM_step_cloth_drape(
+                    clmd, pointer(status)))
+                state = _remember_drape_status(cloth_obj, status)
+                if result != CType.GPUCLOTH_ABI_OK:
+                    witness = _invariant_witness_data(clmd)
+                    self.report(
+                        {'ERROR'},
+                        f"Drape frame rejected: {witness['invariant_name']}")
+                    return {'CANCELLED'}
+                if (state["status_flags"] &
+                        (CType.GPUCLOTH_DRAPE_STATUS_CONVERGED |
+                         CType.GPUCLOTH_DRAPE_STATUS_FAILED)):
+                    break
+            _readback_drape_preview(index)
+            state = get_drape_ui_status(cloth_obj)
+            if state["status_flags"] & CType.GPUCLOTH_DRAPE_STATUS_FAILED:
+                self.report({'ERROR'}, "Drape did not converge in 240 steps")
+                return {'CANCELLED'}
+            message = ("Drape converged" if state["status_flags"] &
+                       CType.GPUCLOTH_DRAPE_STATUS_CONVERGED else
+                       f"Drape step {state['step_count']}")
+            self.report({'INFO'}, message)
+            return {'FINISHED'}
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+            self.report({'ERROR'}, f"Drape Step failed: {exc}")
+            return {'CANCELLED'}
+
+
+class GPUCloth_ApplyDrape(bpy.types.Operator):
+    bl_idname = "gpucloth.apply_drape"
+    bl_label = "Apply Drape"
+    bl_description = "Publish converged Drape as frame-0 accepted state"
+
+    @classmethod
+    def poll(cls, context):
+        status = (get_drape_ui_status(context.object)
+                  if context.object is not None else None)
+        return bool(status and (
+            status["status_flags"] & CType.GPUCLOTH_DRAPE_STATUS_CONVERGED))
+
+    def execute(self, context):
+        try:
+            index, cloth_obj, clmd = _selected_drape_owner(context)
+            status = _new_drape_status()
+            result = int(g_dll.SIM_apply_cloth_drape(
+                clmd, pointer(status)))
+            _remember_drape_status(cloth_obj, status)
+            if result != CType.GPUCLOTH_ABI_OK:
+                raise RuntimeError(f"native Apply rejected with {result}")
+            _readback_drape_preview(index)
+            _store_initial_positions()
+            _simulation_frame_state['last_solved'] = max(
+                1, int(context.scene.gpu_cloth_helper.bake_start) - 1)
+            _cache_status_update(
+                CType.GPUCLOTH_CACHE_STATUS_SOURCE_CHANGED, context.scene)
+            _sync_cache_status(context.scene)
+            self.report({'INFO'}, "Drape applied as frame-0 state")
+            return {'FINISHED'}
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+            self.report({'ERROR'}, f"Drape Apply failed: {exc}")
+            return {'CANCELLED'}
+
+
+class GPUCloth_CancelDrape(bpy.types.Operator):
+    bl_idname = "gpucloth.cancel_drape"
+    bl_label = "Cancel Drape"
+    bl_description = "Restore the exact Begin snapshot"
+
+    @classmethod
+    def poll(cls, context):
+        status = (get_drape_ui_status(context.object)
+                  if context.object is not None else None)
+        return bool(status and (
+            status["status_flags"] &
+            (CType.GPUCLOTH_DRAPE_STATUS_ACTIVE |
+             CType.GPUCLOTH_DRAPE_STATUS_FAILED)))
+
+    def execute(self, context):
+        try:
+            index, cloth_obj, clmd = _selected_drape_owner(context)
+            status = _new_drape_status()
+            result = int(g_dll.SIM_cancel_cloth_drape(
+                clmd, pointer(status)))
+            _remember_drape_status(cloth_obj, status)
+            if result != CType.GPUCLOTH_ABI_OK:
+                raise RuntimeError(f"native Cancel rejected with {result}")
+            _readback_drape_preview(index)
+            self.report({'INFO'}, "Drape snapshot restored")
+            return {'FINISHED'}
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+            self.report({'ERROR'}, f"Drape Cancel failed: {exc}")
+            return {'CANCELLED'}
+
+
+def _selected_invariant_json(context):
+    _, cloth_obj, clmd = _selected_drape_owner(context)
+    payload = {
+        "schema": "GPUClothInvariantWitness/1",
+        "cloth": cloth_obj.name_full,
+        "witness": _invariant_witness_data(clmd),
+        "drape": get_drape_ui_status(cloth_obj),
+    }
+    return json.dumps(payload, indent=2, sort_keys=True)
+
+
+class GPUCloth_CopyInvariantDiagnostics(bpy.types.Operator):
+    bl_idname = "gpucloth.copy_invariant_diagnostics"
+    bl_label = "Copy Diagnostics JSON"
+
+    def execute(self, context):
+        try:
+            context.window_manager.clipboard = _selected_invariant_json(context)
+            self.report({'INFO'}, "Invariant diagnostics copied")
+            return {'FINISHED'}
+        except (OSError, RuntimeError) as exc:
+            self.report({'ERROR'}, f"Diagnostics copy failed: {exc}")
+            return {'CANCELLED'}
+
+
+class GPUCloth_SaveInvariantDiagnostics(bpy.types.Operator):
+    bl_idname = "gpucloth.save_invariant_diagnostics"
+    bl_label = "Save Diagnostics JSON"
+
+    filepath: bpy.props.StringProperty(subtype='FILE_PATH')
+    filter_glob: bpy.props.StringProperty(default="*.json", options={'HIDDEN'})
+
+    def invoke(self, context, event):
+        if not self.filepath:
+            self.filepath = "//gpucloth_invariant.json"
+        context.window_manager.fileselect_add(self)
+        return {'RUNNING_MODAL'}
+
+    def execute(self, context):
+        try:
+            with open(
+                    bpy.path.abspath(self.filepath), "w",
+                    encoding="utf-8", newline="\n") as output:
+                output.write(_selected_invariant_json(context))
+                output.write("\n")
+            self.report({'INFO'}, "Invariant diagnostics saved")
+            return {'FINISHED'}
+        except (OSError, RuntimeError) as exc:
+            self.report({'ERROR'}, f"Diagnostics save failed: {exc}")
+            return {'CANCELLED'}
+
 
 class GPUCloth_BakeSimulation(bpy.types.Operator):
     """
@@ -5532,6 +6070,12 @@ _OPERATOR_CLASSES = [
     GPUCloth_UnloadDLL,
     GPUCloth_PrepareSimulation,
     GPUCloth_UpdateSimulation,
+    GPUCloth_BeginDrape,
+    GPUCloth_StepDrape,
+    GPUCloth_ApplyDrape,
+    GPUCloth_CancelDrape,
+    GPUCloth_CopyInvariantDiagnostics,
+    GPUCloth_SaveInvariantDiagnostics,
     GPUCloth_BakeSimulation,
     GPUCloth_FreeCache,
     GPUCloth_ExportAlembic,

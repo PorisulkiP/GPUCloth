@@ -363,6 +363,11 @@ enum GPUClothCollisionFlags : uint32_t {
     GPUCLOTH_COLLISION_SELF_ENABLED = 1u << 1,
 };
 
+enum GPUClothSelfResponse : uint32_t {
+    GPUCLOTH_SELF_RESPONSE_OGC = 1,
+    GPUCLOTH_SELF_RESPONSE_MIL2_NDB = 2,
+};
+
 struct GPUClothCollisionConfig {
     GPUClothFeatureConfigHeader header;
     uint32_t collision_flags;
@@ -374,15 +379,19 @@ struct GPUClothCollisionConfig {
     float self_distance_min;
     float self_friction;
     float self_impulse_clamp;
-    uint32_t reserved[3];
+    uint32_t self_response;
+    uint32_t reserved[2];
 };
 
 enum GPUClothColliderFlags : uint32_t {
     GPUCLOTH_COLLIDER_STATIC = 1u << 0,
     GPUCLOTH_COLLIDER_MOVING = 1u << 1,
     GPUCLOTH_COLLIDER_DEFORMING = 1u << 2,
-    GPUCLOTH_COLLIDER_USE_CULLING = 1u << 3,
-    GPUCLOTH_COLLIDER_USE_NORMAL = 1u << 4,
+};
+
+enum GPUClothColliderSidedness : uint32_t {
+    GPUCLOTH_COLLIDER_ONE_SIDED_NORMAL = 1,
+    GPUCLOTH_COLLIDER_TWO_SIDED = 2,
 };
 
 struct GPUClothColliderConfig {
@@ -394,7 +403,7 @@ struct GPUClothColliderConfig {
     uint32_t collider_flags;
     uint32_t vertex_count;
     uint32_t triangle_count;
-    uint32_t reserved0;
+    uint32_t sidedness;
     GPUClothBufferView positions_previous;
     GPUClothBufferView positions_current;
     GPUClothBufferView positions_next;
@@ -783,6 +792,178 @@ struct GPUClothDiagnosticsStatus {
     uint64_t reserved[2];
 };
 
+enum GPUClothInvariantStage : uint32_t {
+    GPUCLOTH_INVARIANT_STAGE_NONE = 0,
+    GPUCLOTH_INVARIANT_STAGE_PREPARE,
+    GPUCLOTH_INVARIANT_STAGE_DRAPE,
+    GPUCLOTH_INVARIANT_STAGE_RUNTIME,
+};
+
+enum GPUClothInvariantResult : uint32_t {
+    GPUCLOTH_INVARIANT_RESULT_NONE = 0,
+    GPUCLOTH_INVARIANT_RESULT_PASS,
+    GPUCLOTH_INVARIANT_RESULT_FAILED,
+};
+
+enum GPUClothInvariant : uint32_t {
+    GPUCLOTH_INVARIANT_NONE = 0,
+    GPUCLOTH_INVARIANT_INVALID_INDEX,
+    GPUCLOTH_INVARIANT_NONFINITE_STATE,
+    GPUCLOTH_INVARIANT_DEGENERATE_TRIANGLE,
+    GPUCLOTH_INVARIANT_INCONSISTENT_WINDING,
+    GPUCLOTH_INVARIANT_INVALID_SEAM,
+    GPUCLOTH_INVARIANT_SELF_INTERSECTION,
+    GPUCLOTH_INVARIANT_EXTERNAL_INTERSECTION,
+    GPUCLOTH_INVARIANT_EXTERNAL_CLEARANCE,
+    GPUCLOTH_INVARIANT_PRESSURE_OPEN_SHELL,
+    GPUCLOTH_INVARIANT_PRESSURE_VOLUME,
+    GPUCLOTH_INVARIANT_CONTACT_OVERFLOW,
+    GPUCLOTH_INVARIANT_STALE_GENERATION,
+    GPUCLOTH_INVARIANT_CUDA_ERROR,
+    GPUCLOTH_INVARIANT_GRAPH_ERROR,
+    GPUCLOTH_INVARIANT_NOT_CONVERGED,
+};
+
+enum GPUClothIntersectionType : uint32_t {
+    GPUCLOTH_INTERSECTION_NONE = 0,
+    GPUCLOTH_INTERSECTION_EDGE_FACE,
+    GPUCLOTH_INTERSECTION_ENDPOINT,
+    GPUCLOTH_INTERSECTION_COPLANAR_OVERLAP,
+};
+
+enum GPUClothPreparationFlags : uint32_t {
+    GPUCLOTH_PREPARATION_CONFIGURED = 1u << 0,
+};
+
+enum GPUClothPreparationStatusFlags : uint32_t {
+    GPUCLOTH_PREPARATION_STATUS_VALIDATED = 1u << 0,
+    GPUCLOTH_PREPARATION_STATUS_RUNNABLE = 1u << 1,
+    GPUCLOTH_PREPARATION_STATUS_FAILED = 1u << 2,
+};
+
+enum GPUClothPreparationResult : uint32_t {
+    GPUCLOTH_PREPARATION_RESULT_NONE = 0,
+    GPUCLOTH_PREPARATION_RESULT_READY,
+    GPUCLOTH_PREPARATION_RESULT_REJECTED,
+};
+
+enum GPUClothDrapeFlags : uint32_t {
+    GPUCLOTH_DRAPE_USE_TRIANGLE_LAYERS = 1u << 0,
+};
+
+enum GPUClothDrapeStatusFlags : uint32_t {
+    GPUCLOTH_DRAPE_STATUS_ACTIVE = 1u << 0,
+    GPUCLOTH_DRAPE_STATUS_CONVERGED = 1u << 1,
+    GPUCLOTH_DRAPE_STATUS_APPLIED = 1u << 2,
+    GPUCLOTH_DRAPE_STATUS_CANCELLED = 1u << 3,
+    GPUCLOTH_DRAPE_STATUS_FAILED = 1u << 4,
+};
+
+enum GPUClothDrapeResult : uint32_t {
+    GPUCLOTH_DRAPE_RESULT_NONE = 0,
+    GPUCLOTH_DRAPE_RESULT_RUNNING,
+    GPUCLOTH_DRAPE_RESULT_CONVERGED,
+    GPUCLOTH_DRAPE_RESULT_APPLIED,
+    GPUCLOTH_DRAPE_RESULT_CANCELLED,
+    GPUCLOTH_DRAPE_RESULT_NOT_CONVERGED,
+    GPUCLOTH_DRAPE_RESULT_REJECTED,
+};
+
+// Always-on first failure record.  Pair tracing may add detail elsewhere, but
+// never changes ordering, math, retry policy, or this deterministic witness.
+struct GPUClothInvariantWitness {
+    uint32_t struct_size;
+    uint32_t witness_version;
+    uint32_t stage;
+    uint32_t result;
+    uint32_t invariant;
+    int32_t frame;
+    int32_t substep;
+    uint32_t solver_mask;
+    uint64_t candidate_generation;
+    uint64_t detection_generation;
+    uint64_t contact_generation;
+    uint64_t apply_generation;
+    uint64_t cloth_id;
+    uint64_t other_object_id;
+    int32_t cloth_layer;
+    int32_t other_layer;
+    int32_t triangle_i;
+    int32_t triangle_j;
+    int32_t edge_i;
+    int32_t edge_j;
+    int32_t vertex_i;
+    int32_t vertex_j;
+    uint32_t intersection_type;
+    uint32_t vf_count;
+    uint32_t ee_count;
+    uint32_t ef_count;
+    uint32_t accepted_owner_count;
+    uint32_t overflow_count;
+    int32_t cuda_status;
+    int32_t graph_status;
+    float minimum_clearance;
+    float maximum_penetration;
+    float aabb_min[3];
+    float aabb_max[3];
+    float maximum_velocity;
+    uint32_t reserved0;
+    uint64_t frame_wall_ns;
+    uint64_t reserved[8];
+};
+
+struct GPUClothPreparationConfig {
+    uint32_t struct_size;
+    uint32_t config_version;
+    uint32_t preparation_flags;
+    uint32_t reserved0;
+    uint64_t topology_generation;
+    uint64_t requested_generation;
+    uint64_t reserved[8];
+};
+
+struct GPUClothPreparationStatus {
+    uint32_t struct_size;
+    uint32_t status_version;
+    uint32_t status_flags;
+    uint32_t result;
+    uint32_t last_error;
+    uint32_t reserved0;
+    uint64_t preparation_generation;
+    uint64_t topology_generation;
+    uint64_t accepted_generation;
+    uint64_t reserved[6];
+};
+
+struct GPUClothDrapeConfig {
+    uint32_t struct_size;
+    uint32_t config_version;
+    uint32_t drape_flags;
+    uint32_t max_steps;
+    uint32_t convergence_window;
+    uint32_t reserved0;
+    float convergence_tolerance;
+    float reserved1;
+    GPUClothBufferView triangle_layers;
+    uint64_t reserved[3];
+};
+
+struct GPUClothDrapeStatus {
+    uint32_t struct_size;
+    uint32_t status_version;
+    uint32_t status_flags;
+    uint32_t result;
+    uint32_t last_error;
+    uint32_t step_count;
+    uint32_t consecutive_converged_steps;
+    uint32_t reserved0;
+    float maximum_position_delta;
+    float convergence_tolerance;
+    uint64_t begin_generation;
+    uint64_t current_generation;
+    uint64_t reserved[5];
+};
+
 struct GPUClothDescriptorLayout {
     uint32_t struct_size;
     uint32_t schema_version;
@@ -818,7 +999,12 @@ struct GPUClothDescriptorLayout {
     uint32_t collection_transaction_config_size;
     uint32_t collection_query_size;
     uint32_t collection_status_size;
-    uint32_t reserved[3];
+    uint32_t invariant_witness_size;
+    uint32_t preparation_config_size;
+    uint32_t preparation_status_size;
+    uint32_t drape_config_size;
+    uint32_t drape_status_size;
+    uint32_t reserved[4];
 };
 
 static_assert(sizeof(GPUClothABIVersion) == 32, "GPUClothABIVersion ABI drift");
@@ -854,4 +1040,9 @@ static_assert(sizeof(GPUClothProxyConfig) == 160, "GPUClothProxyConfig ABI drift
 static_assert(sizeof(GPUClothDiagnosticsConfig) == 96, "GPUClothDiagnosticsConfig ABI drift");
 static_assert(sizeof(GPUClothDiagnosticsEvent) == 32, "GPUClothDiagnosticsEvent ABI drift");
 static_assert(sizeof(GPUClothDiagnosticsStatus) == 152, "GPUClothDiagnosticsStatus ABI drift");
-static_assert(sizeof(GPUClothDescriptorLayout) == 144, "GPUClothDescriptorLayout ABI drift");
+static_assert(sizeof(GPUClothInvariantWitness) == 256, "GPUClothInvariantWitness ABI drift");
+static_assert(sizeof(GPUClothPreparationConfig) == 96, "GPUClothPreparationConfig ABI drift");
+static_assert(sizeof(GPUClothPreparationStatus) == 96, "GPUClothPreparationStatus ABI drift");
+static_assert(sizeof(GPUClothDrapeConfig) == 96, "GPUClothDrapeConfig ABI drift");
+static_assert(sizeof(GPUClothDrapeStatus) == 96, "GPUClothDrapeStatus ABI drift");
+static_assert(sizeof(GPUClothDescriptorLayout) == 168, "GPUClothDescriptorLayout ABI drift");
