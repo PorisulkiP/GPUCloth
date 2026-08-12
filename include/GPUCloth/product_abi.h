@@ -394,6 +394,13 @@ enum GPUClothColliderSidedness : uint32_t {
     GPUCLOTH_COLLIDER_TWO_SIDED = 2,
 };
 
+enum GPUClothColliderMotionCertificateFlags : uint32_t {
+    // Optional accelerator for plain Mil2 only.  Collision truth remains the
+    // evaluated positions/triangles above; missing or unusable certificates
+    // therefore select the exact evaluated-mesh path.
+    GPUCLOTH_COLLIDER_MOTION_CERTIFICATE_PRESENT = 1u << 0,
+};
+
 struct GPUClothColliderConfig {
     GPUClothFeatureConfigHeader header;
     uint64_t object_id;
@@ -412,7 +419,13 @@ struct GPUClothColliderConfig {
     float friction;
     float damping;
     float effector_absorption;
-    uint32_t reserved[4];
+    uint32_t motion_group_count;
+    uint32_t motion_certificate_flags;
+    GPUClothBufferView canonical_positions;
+    GPUClothBufferView triangle_motion_groups;
+    GPUClothBufferView motion_group_canonical_to_world;
+    GPUClothBufferView motion_group_endpoint_residual;
+    uint32_t reserved[2];
 };
 
 enum GPUClothMeshStateFlags : uint32_t {
@@ -1020,7 +1033,7 @@ static_assert(sizeof(GPUClothPinSnapshotConfig) == 200, "GPUClothPinSnapshotConf
 static_assert(sizeof(GPUClothConstraintConfig) == 64, "GPUClothConstraintConfig ABI drift");
 static_assert(sizeof(GPUClothPressureConfig) == 48, "GPUClothPressureConfig ABI drift");
 static_assert(sizeof(GPUClothCollisionConfig) == 64, "GPUClothCollisionConfig ABI drift");
-static_assert(sizeof(GPUClothColliderConfig) == 256, "GPUClothColliderConfig ABI drift");
+static_assert(sizeof(GPUClothColliderConfig) == 416, "GPUClothColliderConfig ABI drift");
 static_assert(sizeof(GPUClothMeshStateConfig) == 256, "GPUClothMeshStateConfig ABI drift");
 static_assert(sizeof(GPUClothEffectorConfig) == 160, "GPUClothEffectorConfig ABI drift");
 static_assert(sizeof(GPUClothEffectorWeightsConfig) == 96, "GPUClothEffectorWeightsConfig ABI drift");

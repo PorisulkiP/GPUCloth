@@ -476,6 +476,7 @@ GPUCLOTH_COLLECTION_STATUS_STAGED = 1 << 1
 GPUCLOTH_COLLIDER_STATIC = 1 << 0
 GPUCLOTH_COLLIDER_MOVING = 1 << 1
 GPUCLOTH_COLLIDER_DEFORMING = 1 << 2
+GPUCLOTH_COLLIDER_MOTION_CERTIFICATE_PRESENT = 1 << 0
 GPUCLOTH_COLLIDER_ONE_SIDED_NORMAL = 1
 GPUCLOTH_COLLIDER_TWO_SIDED = 2
 
@@ -772,7 +773,13 @@ class GPUClothColliderConfig(Structure):
         ("friction", c_float),
         ("damping", c_float),
         ("effector_absorption", c_float),
-        ("reserved", c_uint * 4),
+        ("motion_group_count", c_uint),
+        ("motion_certificate_flags", c_uint),
+        ("canonical_positions", GPUClothBufferView),
+        ("triangle_motion_groups", GPUClothBufferView),
+        ("motion_group_canonical_to_world", GPUClothBufferView),
+        ("motion_group_endpoint_residual", GPUClothBufferView),
+        ("reserved", c_uint * 2),
     ]
 
 

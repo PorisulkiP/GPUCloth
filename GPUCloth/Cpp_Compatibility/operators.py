@@ -1816,6 +1816,191 @@ def _finite_float32_tuple(values, label):
     return tuple(result)
 
 
+_COLLIDER_MOTION_GROUP_MAX = 64
+
+
+def _collider_canonical_motion_topology(
+        source, vertex_count, evaluated_triangles, base_generation):
+    """Return a persistent patch topology, or None for exact-only geometry.
+
+    Bone weights are used only to choose coherent patches.  No Blender
+    skinning formula is assumed: every frame fits a coarse rigid transform to
+    the evaluated mesh and bounds the remaining deformation explicitly.
+    """
+    if getattr(source, "type", None) != 'MESH':
+        return None
+    try:
+        mesh = source.data
+        mesh.calc_loop_triangles()
+        canonical_triangles = tuple(
+            tuple(int(index) for index in triangle.vertices)
+            for triangle in mesh.loop_triangles)
+        if (len(mesh.vertices) != int(vertex_count) or
+                canonical_triangles != tuple(evaluated_triangles)):
+            return None
+        canonical = _finite_float32_tuple(
+            (coordinate for vertex in mesh.vertices for coordinate in vertex.co),
+            f"collider {source.name_full!r} canonical vertices")
+
+        armatures = []
+        for modifier in getattr(source, "modifiers", ()):
+            if (getattr(modifier, "type", None) == 'ARMATURE' and
+                    getattr(modifier, "object", None) is not None):
+                armatures.append(modifier.object)
+        parent = getattr(source, "parent", None)
+        if parent is not None and getattr(parent, "type", None) == 'ARMATURE':
+            armatures.append(parent)
+        unique_armatures = {
+            int(armature.as_pointer()): armature for armature in armatures}
+        bone_names = set()
+        if len(unique_armatures) == 1:
+            armature = next(iter(unique_armatures.values()))
+            bone_names = {
+                str(bone.name) for bone in armature.data.bones}
+        group_names = {
+            int(group.index): str(group.name)
+            for group in getattr(source, "vertex_groups", ())}
+        bone_group_indices = {
+            index for index, name in group_names.items()
+            if name in bone_names}
+
+        triangle_keys = []
+        for triangle in mesh.loop_triangles:
+            score = {}
+            if bone_group_indices:
+                for vertex_index in triangle.vertices:
+                    for entry in mesh.vertices[int(vertex_index)].groups:
+                        group = int(entry.group)
+                        weight = float(entry.weight)
+                        if group in bone_group_indices and weight > 1.0e-8:
+                            score[group] = score.get(group, 0.0) + weight
+            if score:
+                key = max(
+                    score,
+                    key=lambda group: (score[group], group_names[group]))
+            else:
+                key = -1
+            triangle_keys.append(key)
+
+        counts = {}
+        for key in triangle_keys:
+            counts[key] = counts.get(key, 0) + 1
+        ordered_keys = sorted(
+            counts, key=lambda key: (-counts[key], int(key)))
+        if len(ordered_keys) > _COLLIDER_MOTION_GROUP_MAX:
+            retained = set(ordered_keys[:_COLLIDER_MOTION_GROUP_MAX - 1])
+            triangle_keys = [
+                key if key in retained else -2 for key in triangle_keys]
+        unique_keys = sorted(set(triangle_keys))
+        key_to_group = {
+            key: group for group, key in enumerate(unique_keys)}
+        triangle_groups = tuple(
+            key_to_group[key] for key in triangle_keys)
+
+        canonical_np = np.asarray(canonical, dtype='<f4')
+        groups_np = np.asarray(triangle_groups, dtype='<u4')
+        hasher = hashlib.blake2b(digest_size=8, person=b"GPUCollCert")
+        hasher.update(int(base_generation).to_bytes(8, "little", signed=False))
+        hasher.update(canonical_np.tobytes(order='C'))
+        hasher.update(groups_np.tobytes(order='C'))
+        topology_generation = int.from_bytes(
+            hasher.digest(), "little") or 1
+        return {
+            "canonical": tuple(float(value) for value in canonical_np),
+            "triangle_groups": triangle_groups,
+            "group_count": len(unique_keys),
+            "topology_generation": topology_generation,
+        }
+    except (
+            AttributeError, ReferenceError, RuntimeError, TypeError,
+            ValueError, OverflowError):
+        return None
+
+
+def _fit_collider_motion_certificate(
+        canonical_topology, triangles, current_positions, next_positions):
+    """Fit fixed patch references and bound the complete linear interval."""
+    if canonical_topology is None:
+        return None
+    try:
+        canonical = np.asarray(
+            canonical_topology["canonical"], dtype=np.float64).reshape(-1, 3)
+        current = np.asarray(
+            current_positions, dtype=np.float64).reshape(-1, 3)
+        next_values = np.asarray(
+            next_positions, dtype=np.float64).reshape(-1, 3)
+        triangle_array = np.asarray(triangles, dtype=np.int64)
+        groups = np.asarray(
+            canonical_topology["triangle_groups"], dtype=np.int64)
+        group_count = int(canonical_topology["group_count"])
+        if (canonical.shape != current.shape or current.shape != next_values.shape or
+                triangle_array.shape != (len(groups), 3) or
+                group_count <= 0 or group_count > _COLLIDER_MOTION_GROUP_MAX):
+            return None
+
+        canonical_to_world = np.empty(
+            (group_count, 2, 3, 4), dtype=np.float32)
+        residuals = np.empty((group_count, 2), dtype=np.float32)
+        fp32_epsilon = float(np.finfo(np.float32).eps)
+        for group in range(group_count):
+            triangle_mask = groups == group
+            vertices = np.unique(triangle_array[triangle_mask].reshape(-1))
+            if len(vertices) < 3:
+                return None
+            source_points = canonical[vertices]
+            source_center = source_points.mean(axis=0)
+            for endpoint, evaluated in enumerate((current, next_values)):
+                target_points = evaluated[vertices]
+                target_center = target_points.mean(axis=0)
+                covariance = (
+                    (source_points - source_center).T @
+                    (target_points - target_center))
+                left, _, right_t = np.linalg.svd(
+                    covariance, full_matrices=True)
+                rotation = right_t.T @ left.T
+                if np.linalg.det(rotation) < 0.0:
+                    right_t[-1, :] *= -1.0
+                    rotation = right_t.T @ left.T
+                translation = target_center - rotation @ source_center
+                emitted_forward = np.concatenate(
+                    (rotation, translation[:, None]), axis=1
+                ).astype(np.float32)
+                if not np.isfinite(emitted_forward).all():
+                    return None
+                # The device interpolates these exact FP32 endpoint proxies.
+                # Bound each exact evaluated endpoint against the emitted
+                # surface; convex interpolation then bounds the full interval.
+                emitted64 = emitted_forward.astype(np.float64)
+                predicted = (
+                    source_points @ emitted64[:, :3].T + emitted64[:, 3])
+                endpoint_error = float(np.linalg.norm(
+                    target_points - predicted, axis=1).max())
+                magnitude = max(
+                    1.0,
+                    float(np.abs(source_points).max()),
+                    float(np.abs(target_points).max()),
+                    float(np.abs(predicted).max()),
+                )
+                residual = endpoint_error + 128.0 * fp32_epsilon * (
+                    magnitude + endpoint_error + 1.0)
+                residual32 = np.nextafter(
+                    np.float32(residual), np.float32(np.inf))
+                if not np.isfinite(residual32) or residual32 < 0.0:
+                    return None
+                canonical_to_world[group, endpoint] = emitted_forward
+                residuals[group, endpoint] = residual32
+        return {
+            "canonical_to_world": tuple(
+                float(value) for value in canonical_to_world.reshape(-1)),
+            "endpoint_residual": tuple(
+                float(value) for value in residuals.reshape(-1)),
+        }
+    except (
+            FloatingPointError, IndexError, KeyError, OverflowError,
+            TypeError, ValueError, np.linalg.LinAlgError):
+        return None
+
+
 def _capture_dynamic_mesh_snapshot(
         settings_owner, simulation_obj, depsgraph, topology_generation,
         geometry_generation):
@@ -2215,8 +2400,14 @@ def _capture_collider_payload(
     triangle_values = [
         index for triangle in triangles for index in triangle]
     triangle_array = (c_uint * len(triangle_values))(*triangle_values)
-    topology_generation = _topology_generation(
+    exact_topology_generation = _topology_generation(
         occurrence["object_id"], vertex_count, triangles)
+    canonical_topology = _collider_canonical_motion_topology(
+        source, vertex_count, triangles, exact_topology_generation)
+    topology_generation = (
+        int(canonical_topology["topology_generation"])
+        if canonical_topology is not None
+        else exact_topology_generation)
     matrix_signature = _matrix_signature(
         relative_matrix,
         f"collider {occurrence['source_object'].name_full!r} "
@@ -2269,6 +2460,27 @@ def _capture_collider_payload(
             addressof(next_array)}) != 3:
         raise RuntimeError("collider time-level buffers alias")
 
+    motion_certificate = _fit_collider_motion_certificate(
+        canonical_topology, triangles, current_positions, next_positions)
+    canonical_array = None
+    triangle_group_array = None
+    canonical_to_world_array = None
+    endpoint_residual_array = None
+    if motion_certificate is not None:
+        canonical_values = canonical_topology["canonical"]
+        triangle_group_values = canonical_topology["triangle_groups"]
+        canonical_to_world_values = motion_certificate["canonical_to_world"]
+        endpoint_residual_values = motion_certificate["endpoint_residual"]
+        canonical_array = (c_float * len(canonical_values))(*canonical_values)
+        triangle_group_array = (
+            c_uint * len(triangle_group_values))(*triangle_group_values)
+        canonical_to_world_array = (
+            c_float * len(canonical_to_world_values))(
+                *canonical_to_world_values)
+        endpoint_residual_array = (
+            c_float * len(endpoint_residual_values))(
+                *endpoint_residual_values)
+
     config = CType.GPUClothColliderConfig()
     config.header.struct_size = sizeof(config)
     config.header.feature_id = feature_id
@@ -2296,6 +2508,39 @@ def _capture_collider_payload(
     _set_buffer_view(
         config.triangles, CType.GPUCLOTH_ELEMENT_UINT3, len(triangles),
         sizeof(c_uint) * 3, triangle_address, topology_generation)
+    if motion_certificate is not None:
+        group_count = int(canonical_topology["group_count"])
+        config.motion_group_count = group_count
+        config.motion_certificate_flags = (
+            CType.GPUCLOTH_COLLIDER_MOTION_CERTIFICATE_PRESENT)
+        _set_buffer_view(
+            config.canonical_positions,
+            CType.GPUCLOTH_ELEMENT_FLOAT3,
+            vertex_count,
+            sizeof(c_float) * 3,
+            addressof(canonical_array),
+            topology_generation)
+        _set_buffer_view(
+            config.triangle_motion_groups,
+            CType.GPUCLOTH_ELEMENT_UINT32,
+            len(triangles),
+            sizeof(c_uint),
+            addressof(triangle_group_array),
+            topology_generation)
+        _set_buffer_view(
+            config.motion_group_canonical_to_world,
+            CType.GPUCLOTH_ELEMENT_FLOAT,
+            group_count * 24,
+            sizeof(c_float),
+            addressof(canonical_to_world_array),
+            snapshot_generation)
+        _set_buffer_view(
+            config.motion_group_endpoint_residual,
+            CType.GPUCLOTH_ELEMENT_FLOAT,
+            group_count * 2,
+            sizeof(c_float),
+            addressof(endpoint_residual_array),
+            snapshot_generation)
 
     source_object = occurrence["source_object"]
     settings = getattr(source_object, "collision", None)
@@ -2366,6 +2611,10 @@ def _capture_collider_payload(
         "positions_current": current_array,
         "positions_next": next_array,
         "triangles": triangle_array,
+        "canonical_positions": canonical_array,
+        "triangle_motion_groups": triangle_group_array,
+        "motion_group_canonical_to_world": canonical_to_world_array,
+        "motion_group_endpoint_residual": endpoint_residual_array,
         "history_key": history_key,
         "history_next": {
             "topology_generation": topology_generation,
