@@ -3704,18 +3704,11 @@ def _load_cached_frame(scene, depsgraph, frame):
         return False
     updated = False
     for i, cloth_obj in enumerate(g_clothOBJs):
-        if i >= len(g_clmd):
-            break
-        nV = len(cloth_obj.data.vertices)
-        pos = (c_float * (nV * 3))()
-        loaded = g_dll.Cache_load_frame_gpu(
-            frame, g_clmd[i], c_size_t(nV), cache_dir)
-        if not loaded:
-            loaded = g_dll.Cache_prefetch_frame(
-                frame, c_size_t(nV), cache_dir)
-        if loaded and g_dll.Cache_get_frame_positions(
-                frame, pos, c_size_t(nV)):
-            flat = np.frombuffer(pos, dtype=np.float32)
+        clmd = g_clmd[i] if i < len(g_clmd) else None
+        cached = _cached_frame_positions(
+            scene, frame, cloth_obj, clmd, cache_dir)
+        if cached is not None:
+            flat = np.frombuffer(cached, dtype=np.float32)
             cloth_obj.data.vertices.foreach_set("co", flat)
             cloth_obj.data.update()
             cloth_obj.data.update_tag()
@@ -3723,6 +3716,25 @@ def _load_cached_frame(scene, depsgraph, frame):
     if updated:
         depsgraph.update()
     return updated
+
+
+def _cached_frame_positions(scene, frame, cloth_obj, clmd, cache_dir):
+    """Read one cached mesh without requiring a live solver owner."""
+    nV = len(cloth_obj.data.vertices)
+    pos = (c_float * (nV * 3))()
+    if scene.gpu_cloth_helper.use_external_cache or clmd is None:
+        loaded = g_dll.Cache_prefetch_frame(
+            frame, c_size_t(nV), cache_dir)
+    else:
+        loaded = g_dll.Cache_load_frame_gpu(
+            frame, clmd, c_size_t(nV), cache_dir)
+        if not loaded:
+            loaded = g_dll.Cache_prefetch_frame(
+                frame, c_size_t(nV), cache_dir)
+    if not loaded or not g_dll.Cache_get_frame_positions(
+            frame, pos, c_size_t(nV)):
+        return None
+    return pos
 
 
 def _cache_input_change_handler(scene, depsgraph):
@@ -4898,9 +4910,6 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
             bpy.ops.object.mode_set(mode=mode)
             return {'CANCELLED'}
 
-        # 7. Загружаем сцену на GPU.
-        self.fill_Scene(context)
-
         try:
             requested_cache_playback = bool(
                 context.scene.gpu_cloth_helper.playback_mode)
@@ -4919,6 +4928,30 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
             bpy.ops.object.mode_set(mode=mode)
             return {'CANCELLED'}
 
+        helper = context.scene.gpu_cloth_helper
+        if helper.use_external_cache:
+            cache_ready = bool(
+                requested_cache_playback and helper.is_baked and
+                not helper.is_outdated and not helper.is_frame_skip)
+            if not cache_ready:
+                self.report(
+                    {'ERROR'},
+                    "External cache is read-only and has no valid baked "
+                    "playback owner")
+                free_gpu_memory(context)
+                bpy.ops.object.mode_set(mode=mode)
+                return {'CANCELLED'}
+            helper.playback_mode = True
+            bpy.ops.object.mode_set(mode=mode)
+            context.scene.gpu_cloth_springs_built = True
+            _store_initial_positions()
+            _bake_range['start'] = int(helper.bake_start)
+            _bake_range['end'] = int(helper.bake_end)
+            _simulation_frame_state['last_solved'] = None
+            return {'FINISHED'}
+
+        # 7. Live simulation owns the native scene and solver state.
+        self.fill_Scene(context)
         if not g_dll.FillSolverData(g_scene):
             self.report({'ERROR'}, "FillSolverData вернул ошибку")
             free_gpu_memory(context)
@@ -5180,15 +5213,8 @@ class GPUCloth_UpdateSimulation(bpy.types.Operator):
         #     Cache_get_frame_positions: D2H → h_flat → foreach_set
         #
         if scene_s.playback_mode and scene_s.is_baked:
-            for i, cloth_obj in enumerate(g_clothOBJs):
-                nV  = len(cloth_obj.data.vertices)
-                pos = (c_float * (nV * 3))()
-                # GPU-direct load для данного кадра
-                if g_dll.Cache_load_frame_gpu(
-                        frame, g_clmd[i], c_size_t(nV), cache_dir):
-                    # D2H для foreach_set (viewport)
-                    if g_dll.Cache_get_frame_positions(frame, pos, c_size_t(nV)):
-                        self._apply_positions(cloth_obj, pos, nV)
+            _load_cached_frame(
+                context.scene, context.evaluated_depsgraph_get(), frame)
             # Prefetch следующего кадра пока пользователь смотрит текущий
             for cloth_obj in g_clothOBJs:
                 g_dll.Cache_prefetch_frame(
@@ -5812,17 +5838,14 @@ def _make_cache_handler(cache_dir_bytes):
             frame = scene.frame_current
             updated = False
             for i, cloth_obj in enumerate(g_clothOBJs):
-                if i >= len(g_clmd):
-                    break
-                nV  = len(cloth_obj.data.vertices)
-                pos = (c_float * (nV * 3))()
-                if g_dll.Cache_load_frame_gpu(
-                        frame, g_clmd[i], c_size_t(nV), cache_dir_bytes):
-                    if g_dll.Cache_get_frame_positions(frame, pos, c_size_t(nV)):
-                        flat = np.frombuffer(pos, dtype=np.float32)
-                        cloth_obj.data.vertices.foreach_set("co", flat)
-                        cloth_obj.data.update()
-                        updated = True
+                clmd = g_clmd[i] if i < len(g_clmd) else None
+                cached = _cached_frame_positions(
+                    scene, frame, cloth_obj, clmd, cache_dir_bytes)
+                if cached is not None:
+                    flat = np.frombuffer(cached, dtype=np.float32)
+                    cloth_obj.data.vertices.foreach_set("co", flat)
+                    cloth_obj.data.update()
+                    updated = True
             if updated:
                 for cloth_obj in g_clothOBJs:
                     cloth_obj.data.update_tag()
