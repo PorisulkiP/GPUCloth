@@ -23,6 +23,7 @@ import struct
 import sys
 import subprocess
 import time
+from fractions import Fraction
 
 import numpy as np
 from ctypes import (
@@ -52,7 +53,18 @@ if sys.gettrace() is not None:
 # ===========================================================================
 
 g_dll                = None   # Загруженная DLL / .so
-g_runtime_initialized = False
+g_runtime_handle     = CType.GPUClothV3RuntimeHandle(0)
+_runtime_frame_generation = 0
+_V3_RUNTIME_DEVICE_ORDINAL = 0
+_V3_RUNTIME_APPLICATION_ID = 0x475055434C4F5448
+# Blender's floating fps_base RNA value is IEEE-754 binary32-valued. Four
+# unit-scale binary32 ulps is the explicit finite conversion tolerance. The
+# 2^12 input-fraction bound exceeds 1/sqrt(4*2^-23); the final bounds mirror
+# the v3 uint32 denominator and native INT16_MAX numerator guard.
+_V3_FPS_NUMERATOR_MAX = 0x7FFF
+_V3_FPS_DENOMINATOR_MAX = 0xFFFFFFFF
+_V3_FPS_INPUT_DENOMINATOR_MAX = min(_V3_FPS_DENOMINATOR_MAX, 1 << 12)
+_V3_FPS_RATE_TOLERANCE = 4.0 * (2.0 ** -23)
 g_scene              = None   # Указатель на CType.Scene
 g_obj                = []     # list[POINTER(CType.Object)]  — объекты ткани
 g_clmd               = []     # list[POINTER(CType.ClothModifierData)]
@@ -95,13 +107,18 @@ def _reset_effector_publication_metrics():
 
 def _runtime_owners_retained():
     return bool(
-        g_scene is not None or g_obj or g_mesh or g_clmd or
+        _runtime_handle_value() or g_scene is not None or g_obj or g_mesh or g_clmd or
         g_clothOBJs or g_simulationOBJs or g_clothCollisionOBJs or
         g_proxy_handles or _collision_keepalive or _solver_diagnostics or
         _pin_snapshot_states or _dynamic_mesh_states or
         _collection_snapshots or _effector_weight_states or
         _collider_history or
         _initial_positions or _live_arrays)
+
+
+def _runtime_handle_value():
+    value = getattr(g_runtime_handle, "value", g_runtime_handle)
+    return int(value or 0)
 
 
 def _guard_prepare_teardown(execute):
@@ -180,9 +197,7 @@ def _guard_prepare_teardown(execute):
 
 def ensure_native_teardown(shutdown_runtime=False):
     """Resolve retained native owners before package registration mutation."""
-    if not (
-            _teardown_failure or _runtime_owners_retained() or
-            (shutdown_runtime and g_runtime_initialized)):
+    if not (_teardown_failure or _runtime_owners_retained()):
         return True
     return free_gpu_memory(shutdown_runtime=shutdown_runtime)
 
@@ -3565,7 +3580,9 @@ def _publish_frame_inputs(context, depsgraph):
             len(g_clmd) == len(_pin_snapshot_states) ==
             len(_dynamic_mesh_states)):
         raise RuntimeError("frame input owners are not aligned")
-    generation = int(_input_generation["value"]) + 1
+    generation = max(
+        int(_input_generation["value"]) + 1,
+        int(_runtime_frame_generation) + 1)
 
     # Capture every Blender input first. No native owner sees a partial
     # dependency-graph evaluation if later validation fails.
@@ -3651,6 +3668,10 @@ def _publish_frame_inputs(context, depsgraph):
         _pin_snapshot_states[index]["snapshot"] = snapshot
     for index, snapshot in enumerate(prepared_dynamic_meshes):
         _dynamic_mesh_states[index]["pending"] = snapshot
+
+    # Scene/frame ownership is v3-native; legacy cloth inputs below remain a
+    # temporary compatibility path under this already-live runtime.
+    _runtime_update(context.scene, generation=generation)
 
 
 def _accept_dynamic_mesh_snapshot(index):
@@ -3834,40 +3855,118 @@ def _sync_cache_status(scene):
     return status
 
 
-def _bind_optional_runtime_hooks(dll):
-    """Bind runtime lifecycle exports when present in newer DLL builds."""
-    try:
-        dll.SIM_initialize_runtime.argtypes = []
-        dll.SIM_initialize_runtime.restype = c_bool
-    except AttributeError:
-        pass
-
-    try:
-        dll.SIM_shutdown_runtime.argtypes = []
-        dll.SIM_shutdown_runtime.restype = c_bool
-    except AttributeError:
-        pass
-
-    try:
-        dll.SIM_get_cache_feature_config.argtypes = [
-            POINTER(CType.GPUClothCacheConfig)]
-        dll.SIM_get_cache_feature_config.restype = c_uint
-    except AttributeError:
-        pass
-
-
-def _initialize_runtime_if_available():
-    global g_runtime_initialized
-
-    g_runtime_initialized = False
+def _runtime_create():
+    """Create the native v3 owner exactly at simulation preparation."""
+    global g_runtime_handle
     if g_dll is None:
+        raise RuntimeError("GPUCloth DLL is not loaded")
+    if _teardown_failure:
+        raise RuntimeError("v3 runtime teardown recovery is required")
+    if _runtime_handle_value():
+        return g_runtime_handle
+
+    config = CType.GPUClothV3RuntimeConfig()
+    config.struct_size = sizeof(config)
+    config.config_version = 1
+    config.runtime_flags = CType.GPUCLOTH_V3_RUNTIME_NONE
+    config.device_ordinal = _V3_RUNTIME_DEVICE_ORDINAL
+    config.application_id = _V3_RUNTIME_APPLICATION_ID
+    config.reserved[:] = (0, 0, 0, 0, 0)
+    out_runtime = CType.GPUClothV3RuntimeHandle(0)
+    result = int(g_dll.GPUCloth_v3_runtime_create(
+        pointer(config), pointer(out_runtime)))
+    if result != CType.GPUCLOTH_ABI_OK:
+        raise RuntimeError(f"v3 runtime create rejected with {result}")
+    if not out_runtime.value:
+        raise RuntimeError("v3 runtime create returned a null handle")
+    g_runtime_handle = out_runtime
+    return g_runtime_handle
+
+
+def _scene_fps_ratio(scene):
+    """Convert Blender's fps/fps_base to a bounded exact v3 fraction."""
+    fps = float(scene.render.fps)
+    fps_base = float(scene.render.fps_base)
+    if (not math.isfinite(fps) or not math.isfinite(fps_base)
+            or fps <= 0.0 or fps_base <= 0.0):
+        raise RuntimeError("Blender fps/fps_base must be finite and positive")
+
+    def rationalize(value, label):
+        tolerance = _V3_FPS_RATE_TOLERANCE * max(1.0, abs(value))
+        for denominator in range(1, _V3_FPS_INPUT_DENOMINATOR_MAX + 1):
+            numerator = int(round(value * denominator))
+            if numerator <= 0:
+                continue
+            candidate = Fraction(numerator, denominator)
+            if abs(float(candidate) - value) <= tolerance:
+                return candidate
+        raise RuntimeError(f"Blender {label} is not representable by v3 frame ABI")
+
+    exact_rate = Fraction.from_float(fps) / Fraction.from_float(fps_base)
+    candidate = rationalize(fps, "fps") / rationalize(fps_base, "fps_base")
+    numerator = int(candidate.numerator)
+    denominator = int(candidate.denominator)
+    if (numerator <= 0 or numerator > _V3_FPS_NUMERATOR_MAX
+            or denominator <= 0 or denominator > _V3_FPS_DENOMINATOR_MAX
+            or abs(float(candidate) - float(exact_rate)) >
+            _V3_FPS_RATE_TOLERANCE * max(1.0, abs(float(exact_rate)))):
+        raise RuntimeError("Blender fps/fps_base is not representable by v3 frame ABI")
+    return numerator, denominator
+
+
+def _runtime_update(scene, generation=None):
+    """Publish one Blender frame; reject duplicate/out-of-order generations."""
+    global _runtime_frame_generation
+    if g_dll is None or not _runtime_handle_value():
+        raise RuntimeError("v3 runtime owner is not live")
+    if generation is None:
+        generation = _runtime_frame_generation + 1
+    generation = int(generation)
+    if generation <= _runtime_frame_generation:
+        raise RuntimeError(
+            f"v3 frame generation is not increasing: {generation} <= "
+            f"{_runtime_frame_generation}")
+
+    config = CType.GPUClothV3FrameConfig()
+    config.struct_size = sizeof(config)
+    config.config_version = 1
+    config.frame = int(scene.frame_current)
+    config.frame_flags = 0
+    config.frame_generation = generation
+    fps_numerator, fps_denominator = _scene_fps_ratio(scene)
+    config.fps_numerator = fps_numerator
+    config.fps_denominator = fps_denominator
+    config.subframe = float(scene.frame_subframe)
+    config.gravity[:] = tuple(float(value) for value in scene.gravity)
+    config.reserved[:] = (0, 0)
+    result = int(g_dll.GPUCloth_v3_runtime_update(
+        g_runtime_handle, pointer(config)))
+    if result != CType.GPUCLOTH_ABI_OK:
+        raise RuntimeError(f"v3 runtime update rejected with {result}")
+    _runtime_frame_generation = generation
+    return config
+
+
+def _ensure_runtime_for_scene(scene):
+    """Create and publish the first scene before any other native mutation."""
+    _runtime_create()
+    return _runtime_update(scene)
+
+
+def _destroy_runtime():
+    """Destroy the v3 owner; retain the handle on every failure."""
+    global g_runtime_handle
+    if not _runtime_handle_value():
         return True
+    if g_dll is None:
+        raise RuntimeError("v3 runtime owner retained without DLL")
     try:
-        if not g_dll.SIM_initialize_runtime():
-            return False
-        g_runtime_initialized = True
-    except AttributeError:
-        pass
+        result = int(g_dll.GPUCloth_v3_runtime_destroy(g_runtime_handle))
+    except Exception:
+        raise
+    if result != CType.GPUCLOTH_ABI_OK:
+        raise RuntimeError(f"v3 runtime destroy rejected with {result}")
+    g_runtime_handle = CType.GPUClothV3RuntimeHandle(0)
     return True
 
 
@@ -4010,11 +4109,8 @@ def free_gpu_memory(context=None, shutdown_runtime=False):
     global g_dll, g_scene, g_obj, g_mesh, g_clmd
     global g_clothOBJs, g_simulationOBJs, g_clothCollisionOBJs, g_proxy_handles
     global _teardown_failure, _collider_history
-    global g_runtime_initialized
 
-    if (g_dll is None and (
-            _runtime_owners_retained() or
-            (shutdown_runtime and g_runtime_initialized))):
+    if g_dll is None and _runtime_owners_retained():
         print(
             "free_gpu_memory: native DLL unavailable while runtime or "
             "owners are retained")
@@ -4040,23 +4136,9 @@ def free_gpu_memory(context=None, shutdown_runtime=False):
             return False
 
         try:
-            if shutdown_runtime and g_runtime_initialized:
-                try:
-                    solver_freed = bool(g_dll.SIM_shutdown_runtime())
-                except AttributeError:
-                    solver_freed = bool(g_dll.FreeSolverData())
-                if solver_freed:
-                    g_runtime_initialized = False
-            else:
-                solver_freed = bool(g_dll.FreeSolverData())
+            _destroy_runtime()
         except Exception as e:
-            print(f"free_gpu_memory: native teardown failed: {e}")
-            _teardown_failure = True
-            return False
-        if not solver_freed:
-            print(
-                "free_gpu_memory: native teardown returned false; "
-                "owners retained")
+            print(f"free_gpu_memory: v3 runtime teardown failed: {e}")
             _teardown_failure = True
             return False
 
@@ -4199,12 +4281,6 @@ class GPUCloth_LoadDLL(bpy.types.Operator):
 
             # ── Существующие функции ─────────────────────────────────────────
 
-            g_dll.FillSolverData.argtypes = [POINTER(CType.Scene)]
-            g_dll.FillSolverData.restype  = c_bool
-
-            g_dll.FreeSolverData.argtypes = []
-            g_dll.FreeSolverData.restype  = c_bool
-
             g_dll.BuildClothSprings.argtypes = [
                 POINTER(CType.ClothModifierData), POINTER(CType.Mesh)]
             g_dll.BuildClothSprings.restype = c_bool
@@ -4226,9 +4302,6 @@ class GPUCloth_LoadDLL(bpy.types.Operator):
                 POINTER(CType.Object),
             ]
             g_dll.RemoveCloth.restype = c_bool
-
-            g_dll.UpdateScene.argtypes = [POINTER(CType.Scene)]
-            g_dll.UpdateScene.restype  = c_bool
 
             # ── Readback позиций вершин ──────────────────────────────────────
             #
@@ -4469,12 +4542,6 @@ class GPUCloth_LoadDLL(bpy.types.Operator):
 
             g_dll.Cache_has_frame.argtypes = [c_int, c_char_p]
             g_dll.Cache_has_frame.restype  = c_bool
-
-            _bind_optional_runtime_hooks(g_dll)
-            if not _initialize_runtime_if_available():
-                self.report({'ERROR'}, "SIM_initialize_runtime() failed.")
-                g_dll = None
-                _close_dll_directories()
 
         except OSError as e:
             self.report({'ERROR'}, f"Не удалось загрузить DLL: {e}")
@@ -5083,6 +5150,17 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
             bpy.ops.object.mode_set(mode=mode)
             return {'CANCELLED'}
 
+        # The first native mutation is owned by the v3 runtime update.  Keep
+        # all Blender extraction above this boundary; cache setup follows it.
+        self.fill_Scene(context)
+        try:
+            _ensure_runtime_for_scene(context.scene)
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+            self.report({'ERROR'}, f"v3 runtime setup failed: {exc}")
+            free_gpu_memory(context)
+            bpy.ops.object.mode_set(mode=mode)
+            return {'CANCELLED'}
+
         try:
             requested_cache_playback = bool(
                 context.scene.gpu_cloth_helper.playback_mode)
@@ -5124,13 +5202,6 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
             return {'FINISHED'}
 
         # 7. Live simulation owns the native scene and solver state.
-        self.fill_Scene(context)
-        if not g_dll.FillSolverData(g_scene):
-            self.report({'ERROR'}, "FillSolverData вернул ошибку")
-            free_gpu_memory(context)
-            bpy.ops.object.mode_set(mode=mode)
-            return {'CANCELLED'}
-
         for i in range(len(g_clothOBJs)):
             try:
                 _configure_simulation_features(
@@ -6724,7 +6795,7 @@ def register():
     # Сбрасываем глобальное состояние при регистрации
     # OGC contact-bounds visualiser — register once, draw callback checks flag
 def unregister():
-    global g_dll, g_runtime_initialized
+    global g_dll
     if not ensure_native_teardown(shutdown_runtime=True):
         print(
             "GPUCloth unregister retained handlers, classes, DLL, and "
@@ -6747,6 +6818,5 @@ def unregister():
 
     # Очищаем состояние
     g_dll                = None
-    g_runtime_initialized = False
     _close_dll_directories()
     return True
