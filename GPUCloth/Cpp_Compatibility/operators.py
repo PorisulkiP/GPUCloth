@@ -70,11 +70,27 @@ _pin_snapshot_states = []
 _dynamic_mesh_states = []
 _collection_snapshots = []
 _effector_weight_states = []
+_effector_publication_state = {
+    "payload_build_count": 0,
+    "snapshot_build_count": 0,
+    "snapshot_reuse_count": 0,
+    "weight_owner_build_count": 0,
+    "verification_round_trip_count": 0,
+}
 _collider_history = {}
 _drape_status_by_uid = {}
 _teardown_failure = False
 _MODIFIER_VISIBILITY = (
     "show_viewport", "show_render", "show_in_editmode", "show_on_cage")
+
+
+def _effector_publication_metrics():
+    return dict(_effector_publication_state)
+
+
+def _reset_effector_publication_metrics():
+    for name in _effector_publication_state:
+        _effector_publication_state[name] = 0
 
 
 def _runtime_owners_retained():
@@ -802,7 +818,7 @@ def _validate_product_abi(dll):
     actual = (
         int(version.abi_major), int(version.abi_minor),
         int(version.abi_patch), int(version.feature_schema_version))
-    expected = (2, 0, 0, 4)
+    expected = (2, 1, 0, 4)
     if actual != expected:
         raise RuntimeError(
             f"native product ABI {actual} does not match required "
@@ -2830,6 +2846,35 @@ def _matrix_payload(matrix):
     return (c_float * 16)(*values)
 
 
+_EFFECTOR_SIGNATURE_FIELDS = (
+    "field_type", "shape", "falloff", "z_direction", "strength",
+    "flow", "noise", "size", "damping", "seed", "falloff_power",
+    "use_min_distance", "distance_min", "use_max_distance",
+    "distance_max", "use_absorption",
+)
+
+
+def _effector_payload_signature(
+        occurrence, field, collection_id, cloth_inverse):
+    source = occurrence["source_object"]
+    settings_values = _validate_effector_field(field, source)
+    matrix = _cloth_local_matrix(
+        cloth_inverse, occurrence["matrix_world"],
+        f"effector {source.name_full!r}")
+    inverse = _matrix_inverse(
+        matrix, f"effector {source.name_full!r} cloth-local transform")
+    return (
+        int(_collection_object_type(source)),
+        int(occurrence["record_flags"]),
+        int(occurrence["object_id"]),
+        int(occurrence["instance_id"]),
+        int(collection_id),
+        tuple(settings_values[name] for name in _EFFECTOR_SIGNATURE_FIELDS),
+        _matrix_signature(matrix, "effector cloth-local matrix"),
+        _matrix_signature(inverse, "effector cloth-local inverse"),
+    )
+
+
 def _capture_effector_payload(
         occurrence, field, collection_id, snapshot_generation,
         cloth_inverse):
@@ -2840,6 +2885,7 @@ def _capture_effector_payload(
         f"effector {source.name_full!r}")
     inverse = _matrix_inverse(
         matrix, f"effector {source.name_full!r} cloth-local transform")
+    _effector_publication_state["payload_build_count"] += 1
     matrix_array = _matrix_payload(matrix)
     inverse_array = _matrix_payload(inverse)
     named_values_list = _effector_named_values(settings_values)
@@ -2892,8 +2938,30 @@ def _capture_effector_payload(
     }
 
 
+def _retarget_effector_snapshot_owner(owner, snapshot_generation):
+    if (owner["collection_kind"] !=
+            CType.GPUCLOTH_COLLECTION_EFFECTOR):
+        raise RuntimeError("cached effector owner has the wrong kind")
+    generation = int(snapshot_generation)
+    config = owner["config"]
+    config.snapshot_generation = generation
+    if owner["records"]:
+        config.records.generation = generation
+    for index, payload in enumerate(owner["payloads"]):
+        payload["config"].generation = generation
+        payload["config"].object_matrix.generation = generation
+        payload["config"].inverse_matrix.generation = generation
+        payload["record"].geometry_generation = generation
+        owner["records"][index].geometry_generation = generation
+    owner["snapshot_generation"] = generation
+    _effector_publication_state["snapshot_reuse_count"] += 1
+    return owner
+
+
 def _collection_snapshot_owner(
         cloth_obj, selection, collection_kind, snapshot_generation, payloads):
+    if collection_kind == CType.GPUCLOTH_COLLECTION_EFFECTOR:
+        _effector_publication_state["snapshot_build_count"] += 1
     records_type = CType.GPUClothCollectionRecord * len(payloads)
     records = records_type(
         *(payload["record"] for payload in payloads))
@@ -2927,12 +2995,15 @@ def _collection_snapshot_owner(
 
 def _prepare_collection_snapshots(
         context, depsgraph, cloth_objects, snapshot_generation,
-        collider_history):
+        collider_history, effector_states=None):
+    if (effector_states is not None and
+            len(effector_states) != len(cloth_objects)):
+        raise RuntimeError("cached effector owners are not aligned")
     cloth_ids = {
         _blender_session_uid(_original_object(obj), "cloth object")
         for obj in cloth_objects}
     prepared = []
-    for cloth_obj in cloth_objects:
+    for cloth_index, cloth_obj in enumerate(cloth_objects):
         cloth_owner_id = _blender_session_uid(cloth_obj, "cloth object")
         settings = cloth_obj.GPUCloth
         try:
@@ -2969,6 +3040,8 @@ def _prepare_collection_snapshots(
                 snapshot_generation, collider_history, cloth_inverse))
 
         effector_payloads = []
+        effector_sources = []
+        effector_signatures = []
         for occurrence in _depsgraph_occurrences(
                 depsgraph, effector_selection, "effector"):
             source = occurrence["source_object"]
@@ -2978,32 +3051,72 @@ def _prepare_collection_snapshots(
             field_type = getattr(field, "type", "NONE")
             if field_type == 'NONE':
                 continue
-            effector_payloads.append(_capture_effector_payload(
-                occurrence, field,
+            collection_id = (
                 effector_selection["collection_id"]
-                if effector_selection is not None else 0,
-                snapshot_generation, cloth_inverse))
+                if effector_selection is not None else 0)
+            effector_sources.append((occurrence, field))
+            effector_signatures.append(_effector_payload_signature(
+                occurrence, field, collection_id, cloth_inverse))
+
+        semantic_signature = tuple(effector_signatures)
+        cached_state = (
+            effector_states[cloth_index]
+            if effector_states is not None else None)
+        cached_owner = (
+            cached_state.get("snapshot_owner")
+            if cached_state is not None else None)
+        if (
+                cached_owner is not None and
+                tuple(cached_state["snapshot_signature"]) ==
+                    semantic_signature):
+            effector_owner = _retarget_effector_snapshot_owner(
+                cached_owner, snapshot_generation)
+        else:
+            effector_payloads = [
+                _capture_effector_payload(
+                    occurrence, field,
+                    effector_selection["collection_id"]
+                    if effector_selection is not None else 0,
+                    snapshot_generation, cloth_inverse)
+                for occurrence, field in effector_sources]
+            effector_owner = _collection_snapshot_owner(
+                cloth_obj, effector_selection,
+                CType.GPUCLOTH_COLLECTION_EFFECTOR,
+                snapshot_generation, effector_payloads)
+        effector_owner["semantic_signature"] = semantic_signature
 
         effector_collection_id = (
             effector_selection["collection_id"]
             if effector_selection is not None else 0)
+        if cached_state is not None:
+            current_weights = _make_effector_weights(
+                settings.effector_weights)
+            if (
+                    int(cached_state["collection_id"]) !=
+                        int(effector_collection_id) or
+                    tuple(cached_state["weights"]) !=
+                        tuple(current_weights)):
+                raise RuntimeError(
+                    "effector weights or collection changed; reprepare is "
+                    "required")
+            effector_weights = cached_state["weights_owner"]
+        else:
+            effector_weights = _prepare_effector_weights(
+                settings, effector_collection_id)
 
         prepared.append({
             "collision": _collection_snapshot_owner(
                 cloth_obj, collision_selection,
                 CType.GPUCLOTH_COLLECTION_COLLISION,
                 snapshot_generation, collision_payloads),
-            "effector": _collection_snapshot_owner(
-                cloth_obj, effector_selection,
-                CType.GPUCLOTH_COLLECTION_EFFECTOR,
-                snapshot_generation, effector_payloads),
-            "effector_weights": _prepare_effector_weights(
-                settings, effector_collection_id),
+            "effector": effector_owner,
+            "effector_weights": effector_weights,
         })
     return prepared
 
 
 def _prepare_effector_weights(settings, collection_id):
+    _effector_publication_state["weight_owner_build_count"] += 1
     config = CType.GPUClothEffectorWeightsConfig()
     config.header.struct_size = sizeof(config)
     config.header.feature_id = CType.GPUCLOTH_FEATURE_EFFECTOR_WEIGHTS
@@ -3131,7 +3244,8 @@ def _next_collider_history(prepared_collections):
 
 def _commit_frame_inputs(
         dll, clmds, prepared_collections, prepared_pins,
-        prepared_dynamic_meshes, source_generation):
+        prepared_dynamic_meshes, source_generation,
+        verify_committed_state=False):
     global _collider_history
     if not (
             len(clmds) == len(prepared_collections) ==
@@ -3193,8 +3307,13 @@ def _commit_frame_inputs(
                     f"collection transaction abort rejected with "
                     f"{abort_result}")
 
+    if not verify_committed_state:
+        return None
+
     snapshots = []
     for clmd, owners in zip(clmds, prepared_collections):
+        _effector_publication_state[
+            "verification_round_trip_count"] += 1
         status = CType.GPUClothCollectionStatus()
         status.struct_size = sizeof(status)
         status.status_version = 1
@@ -3207,6 +3326,10 @@ def _commit_frame_inputs(
             dll, clmd, owners["collision"], transaction_id.value)
         effector = _query_collection_snapshot(
             dll, clmd, owners["effector"], transaction_id.value)
+        _effector_publication_state[
+            "verification_round_trip_count"] += (
+                2 + int(bool(owners["collision"]["records"])) +
+                int(bool(owners["effector"]["records"])))
         status_flags = int(status.status_flags)
         if ((status_flags &
                 CType.GPUCLOTH_COLLECTION_STATUS_CONFIGURED) == 0 or
@@ -3274,7 +3397,7 @@ def _publish_frame_inputs(context, depsgraph):
         capture_depsgraph = context.evaluated_depsgraph_get()
         prepared_collections = _prepare_collection_snapshots(
             context, capture_depsgraph, g_clothOBJs, generation,
-            _collider_history)
+            _collider_history, _effector_weight_states)
         prepared_pins = []
         prepared_dynamic_meshes = []
         for index, (cloth_obj, simulation_obj) in enumerate(zip(
@@ -3322,8 +3445,15 @@ def _publish_frame_inputs(context, depsgraph):
     committed_collections = _commit_frame_inputs(
         g_dll, g_clmd, prepared_collections, prepared_pin_owners,
         prepared_dynamic_owners, generation)
-    _collection_snapshots.clear()
-    _collection_snapshots.extend(committed_collections)
+    if committed_collections is not None:
+        _collection_snapshots.clear()
+        _collection_snapshots.extend(committed_collections)
+
+    for state, owners in zip(
+            _effector_weight_states, prepared_collections):
+        state["snapshot_owner"] = owners["effector"]
+        state["snapshot_signature"] = tuple(
+            owners["effector"]["semantic_signature"])
 
     for index, snapshot in enumerate(prepared_pins):
         _pin_snapshot_states[index]["frame_generation"] = generation
@@ -3754,6 +3884,7 @@ def free_gpu_memory(context=None, shutdown_runtime=False):
     _dynamic_mesh_states.clear()
     _collection_snapshots.clear()
     _effector_weight_states.clear()
+    _reset_effector_publication_metrics()
     _collider_history = {}
     _drape_status_by_uid.clear()
     _initial_positions.clear()
@@ -4884,7 +5015,8 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
                     g_dll, clmd, owners["effector_weights"])
             _collection_snapshots.extend(_commit_frame_inputs(
                 g_dll, g_clmd, prepared_collections,
-                prepared_pin_owners, prepared_dynamic_owners, 1))
+                prepared_pin_owners, prepared_dynamic_owners, 1,
+                verify_committed_state=True))
             for index, clmd in enumerate(g_clmd):
                 _validate_native_preparation(
                     g_dll, clmd,
@@ -4894,6 +5026,10 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
                     owners["effector_weights"]["collection_id"]),
                 "weights": tuple(
                     owners["effector_weights"]["weights"]),
+                "weights_owner": owners["effector_weights"],
+                "snapshot_owner": owners["effector"],
+                "snapshot_signature": tuple(
+                    owners["effector"]["semantic_signature"]),
             } for owners in prepared_collections)
             _pin_snapshot_states.extend({
                 "topology_generation": int(snapshot.topology_generation),

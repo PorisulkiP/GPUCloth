@@ -577,7 +577,10 @@ struct GPUClothCollectionStatus {
     uint32_t record_count;
     uint32_t reserved0;
     uint64_t commit_generation;
-    uint64_t reserved[4];
+    uint64_t effector_state_generation;
+    uint64_t effector_applied_generation;
+    uint64_t effector_upload_count;
+    uint64_t effector_allocation_count;
 };
 
 enum GPUClothVertexChannel : uint32_t {

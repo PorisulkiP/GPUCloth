@@ -908,7 +908,10 @@ class GPUClothCollectionStatus(Structure):
         ("record_count", c_uint),
         ("reserved0", c_uint),
         ("commit_generation", c_uint64),
-        ("reserved", c_uint64 * 4),
+        ("effector_state_generation", c_uint64),
+        ("effector_applied_generation", c_uint64),
+        ("effector_upload_count", c_uint64),
+        ("effector_allocation_count", c_uint64),
     ]
 
 
