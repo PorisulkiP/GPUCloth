@@ -1014,6 +1014,7 @@ struct GPUClothDrapeStatus {
 using GPUClothV3RuntimeHandle = uint64_t;
 using GPUClothV3ClothHandle = uint64_t;
 using GPUClothV3ProxyHandle = uint64_t;
+using GPUClothV3TransactionHandle = uint64_t;
 
 enum GPUClothV3RuntimeFlags : uint32_t {
     GPUCLOTH_V3_RUNTIME_NONE = 0,
