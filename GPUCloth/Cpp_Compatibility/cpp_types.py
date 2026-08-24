@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-from ctypes import c_float, c_short, c_char, c_char_p, c_uint, c_uint16, c_uint32, c_int64, c_uint64, c_int, c_void_p, c_ubyte, c_size_t, Structure, POINTER
+from ctypes import c_float, c_short, c_char, c_char_p, c_uint, c_uint16, c_uint32, c_int32, c_int64, c_uint64, c_int, c_void_p, c_ubyte, c_size_t, Structure, POINTER
 
 PHYS_GLOBAL_GRAVITY = 1
 
@@ -311,6 +311,9 @@ GPUCLOTH_ELEMENT_SEWING_RECORD = 5
 GPUCLOTH_ELEMENT_DIAGNOSTIC_EVENT = 6
 GPUCLOTH_ELEMENT_COLLECTION_RECORD = 7
 GPUCLOTH_ELEMENT_FLOAT2 = 8
+GPUCLOTH_ELEMENT_MESH_EDGE = 9
+GPUCLOTH_ELEMENT_MESH_FACE = 10
+GPUCLOTH_ELEMENT_MESH_CORNER = 11
 
 GPUCLOTH_ABI_UNSUPPORTED = 4
 GPUCLOTH_ABI_OK = 0
@@ -322,6 +325,35 @@ GPUCLOTH_ABI_VERSION_MISMATCH = 6
 GPUCLOTH_ABI_COUNT_MISMATCH = 7
 GPUCLOTH_ABI_INVALID_VALUE = 8
 GPUCLOTH_ABI_INVALID_STATE = 9
+GPUCLOTH_ABI_INVALID_HANDLE = 10
+GPUCLOTH_ABI_ALREADY_EXISTS = 11
+GPUCLOTH_ABI_BUFFER_TOO_SMALL = 12
+GPUCLOTH_ABI_BACKEND_UNAVAILABLE = 13
+GPUCLOTH_ABI_SOLVE_FAILED = 14
+GPUCLOTH_ABI_INTERNAL_ERROR = 15
+
+# ABI v3 exposes product modes, not implementation solver names.
+GPUCLOTH_V3_BACKEND_NONE = 0
+GPUCLOTH_V3_BACKEND_FAST = 1
+GPUCLOTH_V3_BACKEND_ACCURACY = 2
+GPUCLOTH_V3_BACKEND_MASK_NONE = 0
+GPUCLOTH_V3_BACKEND_MASK_FAST = 1 << 0
+GPUCLOTH_V3_BACKEND_MASK_ACCURACY = 1 << 1
+GPUCLOTH_V3_BACKEND_MASK_ALL = (
+    GPUCLOTH_V3_BACKEND_MASK_FAST |
+    GPUCLOTH_V3_BACKEND_MASK_ACCURACY)
+GPUCLOTH_V3_RUNTIME_NONE = 0
+GPUCLOTH_V3_CLOTH_NONE = 0
+GPUCLOTH_V3_CLOTH_CREATED = 1
+GPUCLOTH_V3_CLOTH_BUILT = 2
+GPUCLOTH_V3_CLOTH_RUNNABLE = 3
+GPUCLOTH_V3_READBACK_POSITIONS = 1 << 0
+GPUCLOTH_V3_READBACK_VELOCITIES = 1 << 1
+
+GPUClothV3RuntimeHandle = c_uint64
+GPUClothV3ClothHandle = c_uint64
+GPUClothV3ProxyHandle = c_uint64
+GPUClothV3TransactionHandle = c_uint64
 
 GPUCLOTH_FEATURE_PIN_GOAL = 10
 GPUCLOTH_FEATURE_ANIMATED_PIN = 11
@@ -635,6 +667,146 @@ class GPUClothBufferView(Structure):
         ("data_address", c_uint64),
         ("generation", c_uint64),
     ]
+
+
+class GPUClothV3ABIInfo(Structure):
+    _fields_ = [
+        ("struct_size", c_uint),
+        ("struct_version", c_uint),
+        ("abi_major", c_uint),
+        ("abi_minor", c_uint),
+        ("abi_patch", c_uint),
+        ("feature_schema_version", c_uint),
+        ("feature_count", c_uint),
+        ("backend_mask", c_uint),
+        ("pointer_width_bits", c_uint),
+        ("little_endian", c_uint),
+        ("export_manifest_version", c_uint),
+        ("reserved0", c_uint),
+        ("reserved", c_uint64 * 2),
+    ]
+
+
+class GPUClothV3RuntimeConfig(Structure):
+    _fields_ = [
+        ("struct_size", c_uint),
+        ("config_version", c_uint),
+        ("runtime_flags", c_uint),
+        ("device_ordinal", c_uint),
+        ("application_id", c_uint64),
+        ("reserved", c_uint64 * 5),
+    ]
+
+
+class GPUClothV3FrameConfig(Structure):
+    _fields_ = [
+        ("struct_size", c_uint),
+        ("config_version", c_uint),
+        ("frame", c_int32),
+        ("frame_flags", c_uint),
+        ("frame_generation", c_uint64),
+        ("fps_numerator", c_uint),
+        ("fps_denominator", c_uint),
+        ("subframe", c_float),
+        ("gravity", c_float * 3),
+        ("reserved", c_uint64 * 2),
+    ]
+
+
+class GPUClothV3MeshEdge(Structure):
+    _fields_ = [
+        ("vertex_a", c_uint),
+        ("vertex_b", c_uint),
+        ("edge_flags", c_uint),
+        ("reserved", c_uint),
+    ]
+
+
+class GPUClothV3MeshFace(Structure):
+    _fields_ = [
+        ("first_corner", c_uint),
+        ("corner_count", c_uint),
+        ("face_flags", c_uint),
+        ("reserved", c_uint),
+    ]
+
+
+class GPUClothV3MeshCorner(Structure):
+    _fields_ = [
+        ("vertex_index", c_uint),
+        ("edge_index", c_uint),
+    ]
+
+
+class GPUClothV3ClothCreateConfig(Structure):
+    _fields_ = [
+        ("struct_size", c_uint),
+        ("config_version", c_uint),
+        ("cloth_flags", c_uint),
+        ("backend", c_uint),
+        ("object_id", c_uint64),
+        ("topology_generation", c_uint64),
+        ("geometry_generation", c_uint64),
+        ("vertex_count", c_uint),
+        ("edge_count", c_uint),
+        ("face_count", c_uint),
+        ("corner_count", c_uint),
+        ("positions", GPUClothBufferView),
+        ("edges", GPUClothBufferView),
+        ("faces", GPUClothBufferView),
+        ("corners", GPUClothBufferView),
+        ("object_to_world", c_float * 16),
+        ("world_to_object", c_float * 16),
+        ("reserved", c_uint64 * 3),
+    ]
+
+
+class GPUClothV3ReadbackConfig(Structure):
+    _fields_ = [
+        ("struct_size", c_uint),
+        ("config_version", c_uint),
+        ("readback_flags", c_uint),
+        ("reserved0", c_uint),
+        ("frame_generation", c_uint64),
+        ("positions", GPUClothBufferView),
+        ("velocities", GPUClothBufferView),
+        ("reserved", c_uint64 * 2),
+    ]
+
+
+class GPUClothV3ClothStatus(Structure):
+    _fields_ = [
+        ("struct_size", c_uint),
+        ("status_version", c_uint),
+        ("state", c_uint),
+        ("backend", c_uint),
+        ("cloth_handle", c_uint64),
+        ("object_id", c_uint64),
+        ("topology_generation", c_uint64),
+        ("geometry_generation", c_uint64),
+        ("accepted_frame_generation", c_uint64),
+        ("vertex_count", c_uint),
+        ("edge_count", c_uint),
+        ("face_count", c_uint),
+        ("corner_count", c_uint),
+        ("sewing_record_count", c_uint),
+        ("last_error", c_uint),
+        ("solve_count", c_uint64),
+        ("reserved", c_uint64 * 3),
+    ]
+
+
+GPUCLOTH_V3_STRUCT_SIZES = {
+    "GPUClothV3ABIInfo": 64,
+    "GPUClothV3RuntimeConfig": 64,
+    "GPUClothV3FrameConfig": 64,
+    "GPUClothV3MeshEdge": 16,
+    "GPUClothV3MeshFace": 16,
+    "GPUClothV3MeshCorner": 8,
+    "GPUClothV3ClothCreateConfig": 368,
+    "GPUClothV3ReadbackConfig": 120,
+    "GPUClothV3ClothStatus": 112,
+}
 
 
 class GPUClothNamedValue(Structure):

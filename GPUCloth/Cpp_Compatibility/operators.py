@@ -767,16 +767,145 @@ def _configure_solver_diagnostics(dll, clmd, event_capacity=16):
     return result
 
 
+_GPUCLOTH_V3_EXPORT_SIGNATURES = {
+    "GPUCloth_v3_get_abi_info": [
+        POINTER(CType.GPUClothV3ABIInfo)],
+    "GPUCloth_v3_get_descriptor_layout": [
+        POINTER(CType.GPUClothDescriptorLayout)],
+    "GPUCloth_v3_get_feature_count": [POINTER(c_uint64)],
+    "GPUCloth_v3_get_feature_info": [
+        c_uint64, POINTER(CType.GPUClothFeatureInfo)],
+    "GPUCloth_v3_query_feature": [
+        c_uint, POINTER(CType.GPUClothFeatureInfo)],
+    "GPUCloth_v3_runtime_create": [
+        POINTER(CType.GPUClothV3RuntimeConfig),
+        POINTER(CType.GPUClothV3RuntimeHandle)],
+    "GPUCloth_v3_runtime_update": [
+        CType.GPUClothV3RuntimeHandle,
+        POINTER(CType.GPUClothV3FrameConfig)],
+    "GPUCloth_v3_runtime_destroy": [CType.GPUClothV3RuntimeHandle],
+    "GPUCloth_v3_cloth_create": [
+        CType.GPUClothV3RuntimeHandle,
+        POINTER(CType.GPUClothV3ClothCreateConfig),
+        POINTER(CType.GPUClothV3ClothHandle)],
+    "GPUCloth_v3_cloth_configure": [
+        CType.GPUClothV3ClothHandle,
+        POINTER(CType.GPUClothFeatureConfigHeader)],
+    "GPUCloth_v3_cloth_set_vertex_channel": [
+        CType.GPUClothV3ClothHandle,
+        POINTER(CType.GPUClothVertexChannelConfig)],
+    "GPUCloth_v3_cloth_set_pin_snapshot": [
+        CType.GPUClothV3ClothHandle,
+        POINTER(CType.GPUClothPinSnapshotConfig)],
+    "GPUCloth_v3_collection_transaction_begin": [
+        CType.GPUClothV3RuntimeHandle,
+        POINTER(CType.GPUClothCollectionTransactionConfig),
+        POINTER(CType.GPUClothV3TransactionHandle)],
+    "GPUCloth_v3_collection_stage_snapshot": [
+        CType.GPUClothV3TransactionHandle,
+        CType.GPUClothV3ClothHandle,
+        POINTER(CType.GPUClothCollectionSnapshotConfig)],
+    "GPUCloth_v3_collection_stage_pin_snapshot": [
+        CType.GPUClothV3TransactionHandle,
+        CType.GPUClothV3ClothHandle,
+        POINTER(CType.GPUClothPinSnapshotConfig)],
+    "GPUCloth_v3_collection_stage_mesh_state": [
+        CType.GPUClothV3TransactionHandle,
+        CType.GPUClothV3ClothHandle,
+        POINTER(CType.GPUClothMeshStateConfig)],
+    "GPUCloth_v3_collection_transaction_commit": [
+        CType.GPUClothV3RuntimeHandle,
+        CType.GPUClothV3TransactionHandle],
+    "GPUCloth_v3_collection_transaction_abort": [
+        CType.GPUClothV3RuntimeHandle,
+        CType.GPUClothV3TransactionHandle],
+    "GPUCloth_v3_cloth_query_collection": [
+        CType.GPUClothV3ClothHandle,
+        POINTER(CType.GPUClothCollectionQuery)],
+    "GPUCloth_v3_cloth_get_collection_status": [
+        CType.GPUClothV3ClothHandle,
+        POINTER(CType.GPUClothCollectionStatus)],
+    "GPUCloth_v3_cloth_get_diagnostics": [
+        CType.GPUClothV3ClothHandle,
+        POINTER(CType.GPUClothDiagnosticsStatus)],
+    "GPUCloth_v3_cloth_validate_initial_state": [
+        CType.GPUClothV3ClothHandle,
+        POINTER(CType.GPUClothPreparationConfig),
+        POINTER(CType.GPUClothPreparationStatus)],
+    "GPUCloth_v3_cloth_get_preparation_status": [
+        CType.GPUClothV3ClothHandle,
+        POINTER(CType.GPUClothPreparationStatus)],
+    "GPUCloth_v3_cloth_get_invariant_status": [
+        CType.GPUClothV3ClothHandle,
+        POINTER(CType.GPUClothInvariantWitness)],
+    "GPUCloth_v3_cloth_begin_drape": [
+        CType.GPUClothV3ClothHandle,
+        POINTER(CType.GPUClothDrapeConfig),
+        POINTER(CType.GPUClothDrapeStatus)],
+    "GPUCloth_v3_cloth_step_drape": [
+        CType.GPUClothV3ClothHandle,
+        POINTER(CType.GPUClothDrapeStatus)],
+    "GPUCloth_v3_cloth_apply_drape": [
+        CType.GPUClothV3ClothHandle,
+        POINTER(CType.GPUClothDrapeStatus)],
+    "GPUCloth_v3_cloth_cancel_drape": [
+        CType.GPUClothV3ClothHandle,
+        POINTER(CType.GPUClothDrapeStatus)],
+    "GPUCloth_v3_cloth_build": [CType.GPUClothV3ClothHandle],
+    "GPUCloth_v3_cloth_destroy": [CType.GPUClothV3ClothHandle],
+    "GPUCloth_v3_cloth_step": [CType.GPUClothV3ClothHandle],
+    "GPUCloth_v3_cloth_readback": [
+        CType.GPUClothV3ClothHandle,
+        POINTER(CType.GPUClothV3ReadbackConfig)],
+    "GPUCloth_v3_cloth_get_status": [
+        CType.GPUClothV3ClothHandle,
+        POINTER(CType.GPUClothV3ClothStatus)],
+}
+
+
+def _bind_gpucloth_v3_exports(dll):
+    for name, argtypes in _GPUCLOTH_V3_EXPORT_SIGNATURES.items():
+        # No default: missing v3 export raises and aborts DLL load.
+        function = getattr(dll, name)
+        function.argtypes = argtypes
+        function.restype = c_uint
+
+
 def _validate_descriptor_layout(dll):
     layout = CType.GPUClothDescriptorLayout()
     layout.struct_size = sizeof(layout)
-    if not dll.SIM_get_descriptor_layout(pointer(layout)):
-        raise RuntimeError("native descriptor layout query failed")
+    result = int(dll.GPUCloth_v3_get_descriptor_layout(pointer(layout)))
+    if result != CType.GPUCLOTH_ABI_OK:
+        raise RuntimeError(
+            f"native v3 descriptor layout query failed: result={result}")
     expected = {
+        "feature_config_header_size": sizeof(
+            CType.GPUClothFeatureConfigHeader),
+        "buffer_view_size": sizeof(CType.GPUClothBufferView),
+        "named_value_size": sizeof(CType.GPUClothNamedValue),
+        "simulation_config_size": sizeof(CType.GPUClothSimulationConfig),
         "material_config_size": sizeof(CType.GPUClothMaterialConfig),
+        "pin_config_size": sizeof(CType.GPUClothPinConfig),
+        "constraint_config_size": sizeof(CType.GPUClothConstraintConfig),
+        "pressure_config_size": sizeof(CType.GPUClothPressureConfig),
         "collision_config_size": sizeof(CType.GPUClothCollisionConfig),
         "collider_config_size": sizeof(CType.GPUClothColliderConfig),
         "mesh_state_config_size": sizeof(CType.GPUClothMeshStateConfig),
+        "effector_config_size": sizeof(CType.GPUClothEffectorConfig),
+        "effector_weights_config_size": sizeof(
+            CType.GPUClothEffectorWeightsConfig),
+        "cache_config_size": sizeof(CType.GPUClothCacheConfig),
+        "cache_status_update_size": sizeof(
+            CType.GPUClothCacheStatusUpdate),
+        "cache_status_size": sizeof(CType.GPUClothCacheStatus),
+        "sewing_record_size": sizeof(CType.GPUClothSewingRecord),
+        "sewing_config_size": sizeof(CType.GPUClothSewingConfig),
+        "vertex_channel_config_size": sizeof(
+            CType.GPUClothVertexChannelConfig),
+        "collision_filter_config_size": sizeof(
+            CType.GPUClothCollisionFilterConfig),
+        "proxy_config_size": sizeof(CType.GPUClothProxyConfig),
+        "diagnostics_config_size": sizeof(CType.GPUClothDiagnosticsConfig),
         "diagnostics_event_size": sizeof(CType.GPUClothDiagnosticsEvent),
         "diagnostics_status_size": sizeof(CType.GPUClothDiagnosticsStatus),
         "pin_snapshot_config_size": sizeof(
@@ -804,26 +933,88 @@ def _validate_descriptor_layout(dll):
         if int(getattr(layout, name)) != expected_size]
     if (int(layout.struct_size) != sizeof(layout) or
             int(layout.schema_version) != 4 or
-            int(layout.legacy_reserved0) != 0 or mismatches):
+            int(layout.legacy_reserved0) != 0 or
+            any(int(value) != 0 for value in layout.reserved) or
+            mismatches):
         detail = "; ".join(mismatches) if mismatches else "header mismatch"
-        raise RuntimeError(f"native descriptor ABI mismatch: {detail}")
+        raise RuntimeError(f"native v3 descriptor ABI mismatch: {detail}")
     return layout
 
 
 def _validate_product_abi(dll):
-    version = CType.GPUClothABIVersion()
-    version.struct_size = sizeof(version)
-    if not dll.SIM_get_product_abi_version(pointer(version)):
-        raise RuntimeError("native product ABI query failed")
-    actual = (
-        int(version.abi_major), int(version.abi_minor),
-        int(version.abi_patch), int(version.feature_schema_version))
-    expected = (2, 1, 0, 4)
-    if actual != expected:
+    info = CType.GPUClothV3ABIInfo()
+    info.struct_size = sizeof(info)
+    result = int(dll.GPUCloth_v3_get_abi_info(pointer(info)))
+    if result != CType.GPUCLOTH_ABI_OK:
         raise RuntimeError(
-            f"native product ABI {actual} does not match required "
-            f"{expected}")
-    return version
+            f"native v3 ABI query failed: result={result}")
+
+    expected = {
+        "struct_size": sizeof(info),
+        "struct_version": 1,
+        "abi_major": 3,
+        "abi_minor": 0,
+        "abi_patch": 0,
+        "feature_schema_version": 5,
+        "backend_mask": CType.GPUCLOTH_V3_BACKEND_MASK_ALL,
+        "pointer_width_bits": 64,
+        "little_endian": 1,
+        "export_manifest_version": 1,
+        "reserved0": 0,
+    }
+    mismatches = [
+        f"{name}={int(getattr(info, name))}, expected={expected_value}"
+        for name, expected_value in expected.items()
+        if int(getattr(info, name)) != expected_value]
+    if sys.byteorder != "little":
+        mismatches.append(f"host_byteorder={sys.byteorder}, expected=little")
+    if any(int(value) != 0 for value in info.reserved):
+        mismatches.append("reserved fields are non-zero")
+    if mismatches:
+        raise RuntimeError("native v3 ABI mismatch: " + "; ".join(mismatches))
+
+    count = c_uint64()
+    result = int(dll.GPUCloth_v3_get_feature_count(pointer(count)))
+    if result != CType.GPUCLOTH_ABI_OK:
+        raise RuntimeError(
+            f"native v3 feature-count query failed: result={result}")
+    native_count = int(count.value)
+    declared_count = int(info.feature_count)
+    if (native_count == 0 or native_count > 0xffffffff or
+            declared_count != native_count):
+        raise RuntimeError(
+            "native v3 feature count mismatch: "
+            f"abi={declared_count}, native={native_count}")
+
+    feature_ids = set()
+    for index in range(native_count):
+        indexed = CType.GPUClothFeatureInfo()
+        indexed.struct_size = sizeof(indexed)
+        result = int(dll.GPUCloth_v3_get_feature_info(
+            c_uint64(index), pointer(indexed)))
+        if result != CType.GPUCLOTH_ABI_OK:
+            raise RuntimeError(
+                f"native v3 feature-info query failed: index={index}, "
+                f"result={result}")
+        if int(indexed.struct_size) != sizeof(indexed):
+            raise RuntimeError(
+                f"native v3 feature-info size mismatch: index={index}, "
+                f"native={int(indexed.struct_size)}, "
+                f"expected={sizeof(indexed)}")
+        feature_id = int(indexed.feature_id)
+        if feature_id in feature_ids:
+            raise RuntimeError(
+                f"native v3 feature manifest duplicate id: {feature_id}")
+        feature_ids.add(feature_id)
+        queried = CType.GPUClothFeatureInfo()
+        queried.struct_size = sizeof(queried)
+        result = int(dll.GPUCloth_v3_query_feature(
+            c_uint(feature_id), pointer(queried)))
+        if result != CType.GPUCLOTH_ABI_OK or bytes(queried) != bytes(indexed):
+            raise RuntimeError(
+                f"native v3 feature query mismatch: index={index}, "
+                f"feature_id={feature_id}, result={result}")
+    return info
 
 
 def _validate_native_preparation(
@@ -4063,28 +4254,9 @@ class GPUCloth_LoadDLL(bpy.types.Operator):
             g_dll.SIM_offsetof_cloth_vertex_x.argtypes = []
             g_dll.SIM_offsetof_cloth_vertex_x.restype = c_size_t
 
-            g_dll.SIM_get_product_abi_version.argtypes = [
-                POINTER(CType.GPUClothABIVersion)]
-            g_dll.SIM_get_product_abi_version.restype = c_bool
-
             g_dll.SIM_get_host_layout.argtypes = [
                 POINTER(CType.GPUClothHostLayout)]
             g_dll.SIM_get_host_layout.restype = c_bool
-
-            g_dll.SIM_get_descriptor_layout.argtypes = [
-                POINTER(CType.GPUClothDescriptorLayout)]
-            g_dll.SIM_get_descriptor_layout.restype = c_bool
-
-            g_dll.SIM_get_feature_count.argtypes = []
-            g_dll.SIM_get_feature_count.restype = c_size_t
-
-            g_dll.SIM_get_feature_info.argtypes = [
-                c_size_t, POINTER(CType.GPUClothFeatureInfo)]
-            g_dll.SIM_get_feature_info.restype = c_bool
-
-            g_dll.SIM_query_feature.argtypes = [
-                c_uint, POINTER(CType.GPUClothFeatureInfo)]
-            g_dll.SIM_query_feature.restype = c_bool
 
             g_dll.SIM_configure_feature.argtypes = [
                 POINTER(CType.GPUClothFeatureConfigHeader)]
@@ -4207,6 +4379,7 @@ class GPUCloth_LoadDLL(bpy.types.Operator):
                 POINTER(CType.GPUClothDrapeStatus),
             ]
             g_dll.SIM_cancel_cloth_drape.restype = c_uint
+            _bind_gpucloth_v3_exports(g_dll)
             _validate_product_abi(g_dll)
             _validate_descriptor_layout(g_dll)
 
