@@ -163,6 +163,12 @@ enum GPUClothABIResult : uint32_t {
     GPUCLOTH_ABI_COUNT_MISMATCH = 7,
     GPUCLOTH_ABI_INVALID_VALUE = 8,
     GPUCLOTH_ABI_INVALID_STATE = 9,
+    GPUCLOTH_ABI_INVALID_HANDLE = 10,
+    GPUCLOTH_ABI_ALREADY_EXISTS = 11,
+    GPUCLOTH_ABI_BUFFER_TOO_SMALL = 12,
+    GPUCLOTH_ABI_BACKEND_UNAVAILABLE = 13,
+    GPUCLOTH_ABI_SOLVE_FAILED = 14,
+    GPUCLOTH_ABI_INTERNAL_ERROR = 15,
 };
 
 struct GPUClothABIVersion {
@@ -234,6 +240,9 @@ enum GPUClothBufferElementType : uint32_t {
     GPUCLOTH_ELEMENT_DIAGNOSTIC_EVENT,
     GPUCLOTH_ELEMENT_COLLECTION_RECORD,
     GPUCLOTH_ELEMENT_FLOAT2,
+    GPUCLOTH_ELEMENT_MESH_EDGE,
+    GPUCLOTH_ELEMENT_MESH_FACE,
+    GPUCLOTH_ELEMENT_MESH_CORNER,
 };
 
 struct GPUClothBufferView {
@@ -581,6 +590,23 @@ struct GPUClothCollectionStatus {
     uint64_t effector_applied_generation;
     uint64_t effector_upload_count;
     uint64_t effector_allocation_count;
+};
+
+// ABI v3 exposes product modes, not implementation solver names. Fast is
+// backed by PD; Accuracy is backed by Mil2. XPBD is not a product backend.
+enum GPUClothV3Backend : uint32_t {
+    GPUCLOTH_V3_BACKEND_NONE = 0,
+    GPUCLOTH_V3_BACKEND_FAST = 1,
+    GPUCLOTH_V3_BACKEND_ACCURACY = 2,
+};
+
+enum GPUClothV3BackendMask : uint32_t {
+    GPUCLOTH_V3_BACKEND_MASK_NONE = 0,
+    GPUCLOTH_V3_BACKEND_MASK_FAST = 1u << 0,
+    GPUCLOTH_V3_BACKEND_MASK_ACCURACY = 1u << 1,
+    GPUCLOTH_V3_BACKEND_MASK_ALL =
+        GPUCLOTH_V3_BACKEND_MASK_FAST |
+        GPUCLOTH_V3_BACKEND_MASK_ACCURACY,
 };
 
 enum GPUClothVertexChannel : uint32_t {
@@ -980,6 +1006,143 @@ struct GPUClothDrapeStatus {
     uint64_t reserved[5];
 };
 
+// -------------------------------------------------------------------------
+// ABI v3 stable host boundary
+// -------------------------------------------------------------------------
+// All public identities are monotonic 64-bit tokens. No Blender DNA or C++
+// object address crosses the DLL boundary.
+using GPUClothV3RuntimeHandle = uint64_t;
+using GPUClothV3ClothHandle = uint64_t;
+using GPUClothV3ProxyHandle = uint64_t;
+
+enum GPUClothV3RuntimeFlags : uint32_t {
+    GPUCLOTH_V3_RUNTIME_NONE = 0,
+};
+
+enum GPUClothV3ClothFlags : uint32_t {
+    GPUCLOTH_V3_CLOTH_NONE = 0,
+};
+
+enum GPUClothV3ClothState : uint32_t {
+    GPUCLOTH_V3_CLOTH_CREATED = 1,
+    GPUCLOTH_V3_CLOTH_BUILT = 2,
+    GPUCLOTH_V3_CLOTH_RUNNABLE = 3,
+};
+
+struct GPUClothV3ABIInfo {
+    uint32_t struct_size;
+    uint32_t struct_version;
+    uint32_t abi_major;
+    uint32_t abi_minor;
+    uint32_t abi_patch;
+    uint32_t feature_schema_version;
+    uint32_t feature_count;
+    uint32_t backend_mask;
+    uint32_t pointer_width_bits;
+    uint32_t little_endian;
+    uint32_t export_manifest_version;
+    uint32_t reserved0;
+    uint64_t reserved[2];
+};
+
+struct GPUClothV3RuntimeConfig {
+    uint32_t struct_size;
+    uint32_t config_version;
+    uint32_t runtime_flags;
+    uint32_t device_ordinal;
+    uint64_t application_id;
+    uint64_t reserved[5];
+};
+
+struct GPUClothV3FrameConfig {
+    uint32_t struct_size;
+    uint32_t config_version;
+    int32_t frame;
+    uint32_t frame_flags;
+    uint64_t frame_generation;
+    uint32_t fps_numerator;
+    uint32_t fps_denominator;
+    float subframe;
+    float gravity[3];
+    uint64_t reserved[2];
+};
+
+struct GPUClothV3MeshEdge {
+    uint32_t vertex_a;
+    uint32_t vertex_b;
+    uint32_t edge_flags;
+    uint32_t reserved;
+};
+
+struct GPUClothV3MeshFace {
+    uint32_t first_corner;
+    uint32_t corner_count;
+    uint32_t face_flags;
+    uint32_t reserved;
+};
+
+struct GPUClothV3MeshCorner {
+    uint32_t vertex_index;
+    uint32_t edge_index;
+};
+
+struct GPUClothV3ClothCreateConfig {
+    uint32_t struct_size;
+    uint32_t config_version;
+    uint32_t cloth_flags;
+    uint32_t backend;
+    uint64_t object_id;
+    uint64_t topology_generation;
+    uint64_t geometry_generation;
+    uint32_t vertex_count;
+    uint32_t edge_count;
+    uint32_t face_count;
+    uint32_t corner_count;
+    GPUClothBufferView positions;
+    GPUClothBufferView edges;
+    GPUClothBufferView faces;
+    GPUClothBufferView corners;
+    float object_to_world[16];
+    float world_to_object[16];
+    uint64_t reserved[3];
+};
+
+enum GPUClothV3ReadbackFlags : uint32_t {
+    GPUCLOTH_V3_READBACK_POSITIONS = 1u << 0,
+    GPUCLOTH_V3_READBACK_VELOCITIES = 1u << 1,
+};
+
+struct GPUClothV3ReadbackConfig {
+    uint32_t struct_size;
+    uint32_t config_version;
+    uint32_t readback_flags;
+    uint32_t reserved0;
+    uint64_t frame_generation;
+    GPUClothBufferView positions;
+    GPUClothBufferView velocities;
+    uint64_t reserved[2];
+};
+
+struct GPUClothV3ClothStatus {
+    uint32_t struct_size;
+    uint32_t status_version;
+    uint32_t state;
+    uint32_t backend;
+    uint64_t cloth_handle;
+    uint64_t object_id;
+    uint64_t topology_generation;
+    uint64_t geometry_generation;
+    uint64_t accepted_frame_generation;
+    uint32_t vertex_count;
+    uint32_t edge_count;
+    uint32_t face_count;
+    uint32_t corner_count;
+    uint32_t sewing_record_count;
+    uint32_t last_error;
+    uint64_t solve_count;
+    uint64_t reserved[3];
+};
+
 struct GPUClothDescriptorLayout {
     uint32_t struct_size;
     uint32_t schema_version;
@@ -1061,4 +1224,13 @@ static_assert(sizeof(GPUClothPreparationConfig) == 96, "GPUClothPreparationConfi
 static_assert(sizeof(GPUClothPreparationStatus) == 96, "GPUClothPreparationStatus ABI drift");
 static_assert(sizeof(GPUClothDrapeConfig) == 96, "GPUClothDrapeConfig ABI drift");
 static_assert(sizeof(GPUClothDrapeStatus) == 96, "GPUClothDrapeStatus ABI drift");
+static_assert(sizeof(GPUClothV3ABIInfo) == 64, "GPUClothV3ABIInfo ABI drift");
+static_assert(sizeof(GPUClothV3RuntimeConfig) == 64, "GPUClothV3RuntimeConfig ABI drift");
+static_assert(sizeof(GPUClothV3FrameConfig) == 64, "GPUClothV3FrameConfig ABI drift");
+static_assert(sizeof(GPUClothV3MeshEdge) == 16, "GPUClothV3MeshEdge ABI drift");
+static_assert(sizeof(GPUClothV3MeshFace) == 16, "GPUClothV3MeshFace ABI drift");
+static_assert(sizeof(GPUClothV3MeshCorner) == 8, "GPUClothV3MeshCorner ABI drift");
+static_assert(sizeof(GPUClothV3ClothCreateConfig) == 368, "GPUClothV3ClothCreateConfig ABI drift");
+static_assert(sizeof(GPUClothV3ReadbackConfig) == 120, "GPUClothV3ReadbackConfig ABI drift");
+static_assert(sizeof(GPUClothV3ClothStatus) == 112, "GPUClothV3ClothStatus ABI drift");
 static_assert(sizeof(GPUClothDescriptorLayout) == 168, "GPUClothDescriptorLayout ABI drift");
