@@ -4365,6 +4365,11 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
         sim_parms = CType.ClothSimSettings()
         gs       = OBJ.GPUCloth
         gs_scene = context.scene.gpu_cloth_helper
+        cloth_id = _blender_session_uid(OBJ, "cloth native owner")
+        if cloth_id > 0xffffffff:
+            raise RuntimeError(
+                "Blender cloth session UID exceeds native uint32 owner ID")
+        clmd.id = cloth_id
 
         # ── Базовые параметры ─────────────────────────────────────────────
         sim_parms.mingoal        = gs.mingoal
