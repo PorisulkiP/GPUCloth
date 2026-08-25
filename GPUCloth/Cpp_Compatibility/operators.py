@@ -136,8 +136,6 @@ def _reject_unsupported_v3_owners(scene, cloth_objects):
             unsupported.append(f"dynamic_mesh:{cloth_obj.name_full}")
         if bool(getattr(settings, "use_anisotropy", False)):
             unsupported.append(f"anisotropy:{cloth_obj.name_full}")
-        if str(getattr(settings, "shapekey_rest", "")):
-            unsupported.append(f"rest_shape_key:{cloth_obj.name_full}")
         if (str(getattr(settings, "solver_type", "")) == "PD" and
                 str(getattr(settings, "bending_model", "")) == "SDB"):
             unsupported.append(f"SDB_bending:{cloth_obj.name_full}")
@@ -1871,7 +1869,9 @@ def _rest_shape_key_positions(settings_owner, simulation_obj):
     return key_block.name, positions
 
 
-def _upload_rest_shape_key(dll, cloth_handle, prepared_rest_shape):
+def _upload_rest_shape_key(
+        dll, cloth_handle, prepared_rest_shape,
+        object_id, topology_generation, geometry_generation):
     if prepared_rest_shape is None:
         return CType.GPUCLOTH_ABI_OK
 
@@ -1888,6 +1888,9 @@ def _upload_rest_shape_key(dll, cloth_handle, prepared_rest_shape):
     config.header.struct_size = sizeof(config)
     config.header.feature_id = CType.GPUCLOTH_FEATURE_REST_SHAPE_KEY
     config.header.config_version = 1
+    config.object_id = int(object_id)
+    config.topology_generation = int(topology_generation)
+    config.geometry_generation = int(geometry_generation)
     config.rest_generation = generation
     config.rest_positions.struct_size = sizeof(CType.GPUClothBufferView)
     config.rest_positions.element_type = CType.GPUCLOTH_ELEMENT_FLOAT3
@@ -4846,7 +4849,10 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
                 _upload_stiffness_channels(
                     g_dll, cloth_handle, prepared_stiffness_channels[i])
                 _upload_rest_shape_key(
-                    g_dll, cloth_handle, prepared_rest_shapes[i])
+                    g_dll, cloth_handle, prepared_rest_shapes[i],
+                    _cloth_input_owners[i]["object_id"],
+                    _cloth_input_owners[i]["topology_generation"],
+                    _cloth_input_owners[i]["geometry_generation"])
                 _upload_shrink_weights(
                     g_dll, cloth_handle, g_clothOBJs[i], g_simulationOBJs[i])
             except (OSError, RuntimeError, VertexChannelError) as exc:
