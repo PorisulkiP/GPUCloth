@@ -1,2 +1,12 @@
+/.gitattributes text eol=lf
+/.editorconfig text eol=lf
+tools/gpu_runtime/core/src/*.cs text eol=lf
 *.sh text eol=lf
 *.bat text eol=crlf
+*.ps1 text eol=crlf
+*.psm1 text eol=crlf
+*.psd1 text eol=crlf
+*.json text eol=lf working-tree-encoding=UTF-8
+*.jsonl text eol=lf working-tree-encoding=UTF-8
+# JSON/JSONL protocol artifacts are written with UTF8Encoding(false); Git
+# attributes preserve LF but cannot manufacture or remove a BOM.
