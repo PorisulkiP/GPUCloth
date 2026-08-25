@@ -349,11 +349,15 @@ GPUCLOTH_V3_CLOTH_BUILT = 2
 GPUCLOTH_V3_CLOTH_RUNNABLE = 3
 GPUCLOTH_V3_READBACK_POSITIONS = 1 << 0
 GPUCLOTH_V3_READBACK_VELOCITIES = 1 << 1
+GPUCLOTH_V3_CACHE_FRAME_NONE = 0
+GPUCLOTH_V3_CACHE_FRAME_WRITE = 1 << 0
+GPUCLOTH_V3_CACHE_FRAME_READ = 1 << 1
 
 GPUClothV3RuntimeHandle = c_uint64
 GPUClothV3ClothHandle = c_uint64
 GPUClothV3ProxyHandle = c_uint64
 GPUClothV3TransactionHandle = c_uint64
+GPUClothV3CacheHandle = c_uint64
 
 GPUCLOTH_FEATURE_PIN_GOAL = 10
 GPUCLOTH_FEATURE_ANIMATED_PIN = 11
@@ -774,6 +778,21 @@ class GPUClothV3ReadbackConfig(Structure):
     ]
 
 
+class GPUClothV3CacheFrameConfig(Structure):
+    _fields_ = [
+        ("struct_size", c_uint),
+        ("config_version", c_uint),
+        ("frame_flags", c_uint),
+        ("reserved0", c_uint),
+        ("frame", c_int32),
+        ("vertex_count", c_uint),
+        ("frame_generation", c_uint64),
+        ("cache_id", c_uint64),
+        ("positions", GPUClothBufferView),
+        ("reserved", c_uint64 * 3),
+    ]
+
+
 class GPUClothV3ClothStatus(Structure):
     _fields_ = [
         ("struct_size", c_uint),
@@ -805,6 +824,7 @@ GPUCLOTH_V3_STRUCT_SIZES = {
     "GPUClothV3MeshCorner": 8,
     "GPUClothV3ClothCreateConfig": 368,
     "GPUClothV3ReadbackConfig": 120,
+    "GPUClothV3CacheFrameConfig": 104,
     "GPUClothV3ClothStatus": 112,
 }
 

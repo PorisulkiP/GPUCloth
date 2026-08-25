@@ -1015,6 +1015,7 @@ using GPUClothV3RuntimeHandle = uint64_t;
 using GPUClothV3ClothHandle = uint64_t;
 using GPUClothV3ProxyHandle = uint64_t;
 using GPUClothV3TransactionHandle = uint64_t;
+using GPUClothV3CacheHandle = uint64_t;
 
 enum GPUClothV3RuntimeFlags : uint32_t {
     GPUCLOTH_V3_RUNTIME_NONE = 0,
@@ -1122,6 +1123,29 @@ struct GPUClothV3ReadbackConfig {
     GPUClothBufferView positions;
     GPUClothBufferView velocities;
     uint64_t reserved[2];
+};
+
+// Cache configuration reuses GPUClothCacheConfig: its header, fixed-width
+// fields, and UTF-8 addresses are already versioned and size-gated.  The v3
+// handle-scoped entry points below never expose those addresses as an
+// unowned global descriptor; native code copies both strings before return.
+enum GPUClothV3CacheFrameFlags : uint32_t {
+    GPUCLOTH_V3_CACHE_FRAME_NONE = 0,
+    GPUCLOTH_V3_CACHE_FRAME_WRITE = 1u << 0,
+    GPUCLOTH_V3_CACHE_FRAME_READ = 1u << 1,
+};
+
+struct GPUClothV3CacheFrameConfig {
+    uint32_t struct_size;
+    uint32_t config_version;
+    uint32_t frame_flags;
+    uint32_t reserved0;
+    int32_t frame;
+    uint32_t vertex_count;
+    uint64_t frame_generation;
+    uint64_t cache_id;
+    GPUClothBufferView positions;
+    uint64_t reserved[3];
 };
 
 struct GPUClothV3ClothStatus {
@@ -1233,5 +1257,6 @@ static_assert(sizeof(GPUClothV3MeshFace) == 16, "GPUClothV3MeshFace ABI drift");
 static_assert(sizeof(GPUClothV3MeshCorner) == 8, "GPUClothV3MeshCorner ABI drift");
 static_assert(sizeof(GPUClothV3ClothCreateConfig) == 368, "GPUClothV3ClothCreateConfig ABI drift");
 static_assert(sizeof(GPUClothV3ReadbackConfig) == 120, "GPUClothV3ReadbackConfig ABI drift");
+static_assert(sizeof(GPUClothV3CacheFrameConfig) == 104, "GPUClothV3CacheFrameConfig ABI drift");
 static_assert(sizeof(GPUClothV3ClothStatus) == 112, "GPUClothV3ClothStatus ABI drift");
 static_assert(sizeof(GPUClothDescriptorLayout) == 168, "GPUClothDescriptorLayout ABI drift");

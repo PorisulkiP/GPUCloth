@@ -54,6 +54,8 @@ if sys.gettrace() is not None:
 
 g_dll                = None   # Загруженная DLL / .so
 g_runtime_handle     = CType.GPUClothV3RuntimeHandle(0)
+g_cache_handle       = CType.GPUClothV3CacheHandle(0)
+g_cache_owner        = None   # copied v3 cache identity/config; no hot-path query
 _runtime_frame_generation = 0
 _V3_RUNTIME_DEVICE_ORDINAL = 0
 _V3_RUNTIME_APPLICATION_ID = 0x475055434C4F5448
@@ -106,25 +108,20 @@ def _reset_effector_publication_metrics():
 
 def _runtime_owners_retained():
     return bool(
-        _runtime_handle_value() or g_cloth_handles or
+        _runtime_handle_value() or _cache_handle_value() or g_cloth_handles or
         _cloth_input_owners or _readback_owners or
         g_clothOBJs or g_simulationOBJs or g_clothCollisionOBJs or
         g_proxy_handles or _collision_keepalive or _solver_diagnostics or
         _pin_snapshot_states or _dynamic_mesh_states or
         _collection_snapshots or _effector_weight_states or
         _collider_history or
-        _initial_positions or _live_arrays)
+        _initial_positions)
 
 
 def _reject_unsupported_v3_owners(scene, cloth_objects):
     """Reject owners without a v3 ABI surface before native mutation."""
     unsupported = []
     helper = scene.gpu_cloth_helper
-    if (bool(getattr(helper, "use_disk_cache", False)) or
-            bool(getattr(helper, "use_external_cache", False)) or
-            bool(getattr(helper, "playback_mode", False)) or
-            bool(getattr(helper, "is_baked", False))):
-        unsupported.append("cache")
     for cloth_obj in cloth_objects:
         settings = cloth_obj.GPUCloth
         if bool(getattr(settings, "use_proxy", False)):
@@ -150,6 +147,19 @@ def _reject_unsupported_v3_owners(scene, cloth_objects):
 def _runtime_handle_value():
     value = getattr(g_runtime_handle, "value", g_runtime_handle)
     return int(value or 0)
+
+
+def _cache_handle_value():
+    owner = g_cache_owner
+    handle = owner.get("handle") if owner is not None else g_cache_handle
+    value = getattr(handle, "value", handle)
+    return int(value or 0)
+
+
+def _cache_handle_owner():
+    """Return configure-time owned handle; global fallback only for cleanup."""
+    owner = g_cache_owner
+    return owner["handle"] if owner is not None else g_cache_handle
 
 
 def _opaque_handle_value(handle):
@@ -781,7 +791,28 @@ def _active_cache_path(scene):
     return os.path.join(root, f"cache_{cache_index:08x}_{suffix}")
 
 
+def _validate_external_cache_playback_source(scene):
+    """Reject an incomplete external source before any native owner exists."""
+    helper = scene.gpu_cloth_helper
+    root = _active_cache_path(scene)
+    start = int(helper.bake_start)
+    end = int(helper.bake_end)
+    if start < 0 or end < start:
+        raise RuntimeError("external cache frame range is invalid")
+    missing = [
+        os.path.join(root, f"frame_{frame:06d}.bin")
+        for frame in range(start, end + 1)
+        if not os.path.isfile(os.path.join(root, f"frame_{frame:06d}.bin"))]
+    if missing:
+        raise RuntimeError(
+            "external cache source is incomplete; missing frame " +
+            os.path.basename(missing[0]))
+
+
 def _configure_cache_features(dll, scene):
+    global g_cache_handle, g_cache_owner
+    if _runtime_handle_value() == 0:
+        raise RuntimeError("v3 cache requires a live runtime owner")
     helper = scene.gpu_cloth_helper
     path_bytes = _active_cache_path(scene).encode('utf-8')
     if not path_bytes:
@@ -828,8 +859,6 @@ def _configure_cache_features(dll, scene):
         name_bytes)
     config.path_utf8_address = addressof(path_buffer)
     config.name_utf8_address = addressof(name_buffer)
-    header = cast(
-        pointer(config), POINTER(CType.GPUClothFeatureConfigHeader))
     if helper.use_external_cache:
         storage_feature = CType.GPUCLOTH_FEATURE_CACHE_EXTERNAL
     else:
@@ -837,22 +866,43 @@ def _configure_cache_features(dll, scene):
             CType.GPUCLOTH_FEATURE_CACHE_DISK
             if helper.use_disk_cache
             else CType.GPUCLOTH_FEATURE_CACHE_MEMORY)
-    for feature in (
-            storage_feature,
-            *(
-                (CType.GPUCLOTH_FEATURE_CACHE_COMPRESSION,)
-                if config.storage_mode == CType.GPUCLOTH_CACHE_STORAGE_DISK
-                else ()),
-            CType.GPUCLOTH_FEATURE_BAKE_RANGE,
-            CType.GPUCLOTH_FEATURE_CALCULATE_TO_FRAME,
-            CType.GPUCLOTH_FEATURE_CACHE_STATUS,
-            CType.GPUCLOTH_FEATURE_CACHE_MULTIPLE):
-        config.header.feature_id = feature
-        result = int(dll.SIM_configure_feature(header))
-        if result != CType.GPUCLOTH_ABI_OK:
-            raise RuntimeError(
-                f"typed cache feature {feature} rejected with {result}")
+    config.header.feature_id = storage_feature
+    out_cache = CType.GPUClothV3CacheHandle(0)
+    result = int(dll.GPUCloth_v3_cache_configure(
+        g_runtime_handle, pointer(config), pointer(out_cache)))
+    if result != CType.GPUCLOTH_ABI_OK or not out_cache.value:
+        raise RuntimeError(f"v3 cache configure rejected with {result}")
+    # Native copied every pointer-bearing field before returning.  Keep a
+    # pointer-free config identity locally so frame operations never query the
+    # ABI and never retain dead ctypes string addresses.
+    owned_config = CType.GPUClothCacheConfig.from_buffer_copy(bytes(config))
+    owned_config.path_utf8_address = 0
+    owned_config.name_utf8_address = 0
+    g_cache_handle = out_cache
+    g_cache_owner = {
+        "handle": out_cache,
+        "cache_id": int(config.cache_id),
+        "config": owned_config,
+        "path": bytes(path_bytes),
+        "name": bytes(name_bytes),
+    }
     return CType.GPUCLOTH_ABI_OK
+
+
+def _cache_requested_for_prepare(scene):
+    """Cache owner is created only for an active cache session.
+
+    `use_disk_cache` is a PointCache storage preference, not a request to
+    write every live viewport frame.  Bake/playback, external ownership, or
+    an existing cached session explicitly request the v3 owner.
+    """
+    helper = scene.gpu_cloth_helper
+    return bool(
+        getattr(helper, "use_external_cache", False) or
+        getattr(helper, "playback_mode", False) or
+        getattr(helper, "is_baked", False) or
+        getattr(helper, "is_baking", False) or
+        int(getattr(helper, "cached_frame_count", 0)) > 0)
 
 
 def _v3_configure_feature(dll, cloth_handle, config):
@@ -1036,6 +1086,55 @@ _GPUCLOTH_V3_EXPORT_SIGNATURES = {
     "GPUCloth_v3_cloth_get_status": [
         CType.GPUClothV3ClothHandle,
         POINTER(CType.GPUClothV3ClothStatus)],
+    "GPUCloth_v3_cache_configure": [
+        CType.GPUClothV3RuntimeHandle,
+        POINTER(CType.GPUClothCacheConfig),
+        POINTER(CType.GPUClothV3CacheHandle)],
+    "GPUCloth_v3_cache_query": [
+        CType.GPUClothV3RuntimeHandle,
+        CType.GPUClothV3CacheHandle,
+        POINTER(CType.GPUClothCacheConfig)],
+    "GPUCloth_v3_cache_destroy": [
+        CType.GPUClothV3RuntimeHandle,
+        CType.GPUClothV3CacheHandle],
+    "GPUCloth_v3_cache_update_status": [
+        CType.GPUClothV3RuntimeHandle,
+        CType.GPUClothV3CacheHandle,
+        POINTER(CType.GPUClothCacheStatusUpdate)],
+    "GPUCloth_v3_cache_get_status": [
+        CType.GPUClothV3RuntimeHandle,
+        CType.GPUClothV3CacheHandle,
+        POINTER(CType.GPUClothCacheStatus)],
+    "GPUCloth_v3_cache_write_frame_async": [
+        CType.GPUClothV3RuntimeHandle,
+        CType.GPUClothV3CacheHandle,
+        POINTER(CType.GPUClothV3CacheFrameConfig)],
+    "GPUCloth_v3_cache_prefetch_frame": [
+        CType.GPUClothV3RuntimeHandle,
+        CType.GPUClothV3CacheHandle,
+        POINTER(CType.GPUClothV3CacheFrameConfig)],
+    "GPUCloth_v3_cache_is_frame_ready": [
+        CType.GPUClothV3RuntimeHandle,
+        CType.GPUClothV3CacheHandle,
+        POINTER(CType.GPUClothV3CacheFrameConfig), POINTER(c_uint)],
+    "GPUCloth_v3_cache_read_frame": [
+        CType.GPUClothV3RuntimeHandle,
+        CType.GPUClothV3CacheHandle,
+        POINTER(CType.GPUClothV3CacheFrameConfig)],
+    "GPUCloth_v3_cache_free_frame": [
+        CType.GPUClothV3RuntimeHandle,
+        CType.GPUClothV3CacheHandle,
+        POINTER(CType.GPUClothV3CacheFrameConfig)],
+    "GPUCloth_v3_cache_has_frame": [
+        CType.GPUClothV3RuntimeHandle,
+        CType.GPUClothV3CacheHandle,
+        POINTER(CType.GPUClothV3CacheFrameConfig), POINTER(c_uint)],
+    "GPUCloth_v3_cache_clear": [
+        CType.GPUClothV3RuntimeHandle,
+        CType.GPUClothV3CacheHandle],
+    "GPUCloth_v3_cache_flush": [
+        CType.GPUClothV3RuntimeHandle,
+        CType.GPUClothV3CacheHandle],
 }
 
 
@@ -2058,10 +2157,6 @@ def _upload_self_collision_mask(dll, cloth_handle, prepared_mask):
         dll, CType, cloth_handle,
         CType.GPUCLOTH_FEATURE_SELF_COLLISION_VERTEX_GROUP,
         CType.GPUCLOTH_VERTEX_SELF_COLLISION_MASK, 1, prepared_mask)
-
-# Защита от GC для ctypes-массивов, переданных в Cache_write_frame_async
-# C++ пишет в фоне — массив должен жить до завершения записи
-_live_arrays         = []     # list[c_float array]
 
 def _close_dll_directories():
     for directory_handle in _dll_directory_handles:
@@ -3958,6 +4053,12 @@ def _cache_source_generation(scene):
 
 
 def _cache_status_update(operation, scene, error_code=0, frame=-1):
+    if not _runtime_handle_value():
+        raise RuntimeError("v3 cache owner requires a live runtime")
+    if not _cache_handle_value():
+        if g_dll is None:
+            raise RuntimeError("v3 cache owner is not live")
+        _configure_cache_features(g_dll, scene)
     generation = _cache_source_generation(scene)
     if (operation == CType.GPUCLOTH_CACHE_STATUS_SOURCE_CHANGED and
             frame < 0):
@@ -3970,7 +4071,8 @@ def _cache_status_update(operation, scene, error_code=0, frame=-1):
     update.frame = int(frame)
     update.error_code = int(error_code)
     update.source_generation = generation
-    result = int(g_dll.SIM_update_cache_status(pointer(update)))
+    result = int(g_dll.GPUCloth_v3_cache_update_status(
+        g_runtime_handle, _cache_handle_owner(), pointer(update)))
     if result != CType.GPUCLOTH_ABI_OK:
         raise RuntimeError(
             f"typed cache status update {operation} rejected with {result}")
@@ -3979,10 +4081,13 @@ def _cache_status_update(operation, scene, error_code=0, frame=-1):
 
 
 def _query_cache_status():
+    if not _runtime_handle_value() or not _cache_handle_value():
+        raise RuntimeError("v3 cache owner is not live")
     status = CType.GPUClothCacheStatus()
     status.struct_size = sizeof(status)
     status.status_version = 1
-    result = int(g_dll.SIM_get_cache_status(pointer(status)))
+    result = int(g_dll.GPUCloth_v3_cache_get_status(
+        g_runtime_handle, _cache_handle_owner(), pointer(status)))
     if result != CType.GPUCLOTH_ABI_OK:
         raise RuntimeError(f"typed cache status query rejected with {result}")
     return status
@@ -3990,6 +4095,8 @@ def _query_cache_status():
 
 def _sync_cache_status(scene):
     status = _query_cache_status()
+    if int(status.source_generation):
+        _cache_source_state['generation'] = int(status.source_generation)
     helper = scene.gpu_cloth_helper
     helper.is_baking = bool(
         status.flags & CType.GPUCLOTH_CACHE_STATUS_BAKING)
@@ -4089,7 +4196,12 @@ def _runtime_update(scene, generation=None):
     config.fps_numerator = fps_numerator
     config.fps_denominator = fps_denominator
     config.subframe = float(scene.frame_subframe)
-    config.gravity[:] = tuple(float(value) for value in scene.gravity)
+    helper = scene.gpu_cloth_helper
+    config.gravity[:] = (
+        float(helper.gravity_x),
+        float(helper.gravity_y),
+        float(helper.gravity_z),
+    )
     config.reserved[:] = (0, 0)
     result = int(g_dll.GPUCloth_v3_runtime_update(
         g_runtime_handle, pointer(config)))
@@ -4107,13 +4219,19 @@ def _ensure_runtime_for_scene(scene, generation=None):
     return _runtime_update(scene, generation=generation)
 
 
-def _destroy_runtime():
+def _destroy_runtime(shutdown_runtime=False):
     """Destroy the v3 owner; retain the handle on every failure."""
-    global g_runtime_handle
+    global g_runtime_handle, g_cache_handle, g_cache_owner
     if not _runtime_handle_value():
         return True
     if g_dll is None:
         raise RuntimeError("v3 runtime owner retained without DLL")
+    if shutdown_runtime and _cache_handle_value():
+        cache_result = int(g_dll.GPUCloth_v3_cache_destroy(
+            g_runtime_handle, _cache_handle_owner()))
+        if cache_result != CType.GPUCLOTH_ABI_OK:
+            raise RuntimeError(
+                f"v3 cache destroy rejected with {cache_result}")
     try:
         result = int(g_dll.GPUCloth_v3_runtime_destroy(g_runtime_handle))
     except Exception:
@@ -4121,6 +4239,8 @@ def _destroy_runtime():
     if result != CType.GPUCLOTH_ABI_OK:
         raise RuntimeError(f"v3 runtime destroy rejected with {result}")
     g_runtime_handle = CType.GPUClothV3RuntimeHandle(0)
+    g_cache_handle = CType.GPUClothV3CacheHandle(0)
+    g_cache_owner = None
     return True
 
 
@@ -4143,13 +4263,14 @@ def _restore_initial_positions():
 
 
 def _load_cached_frame(scene, depsgraph, frame):
-    cache_dir = _active_cache_path(scene).encode('utf-8')
-    if not g_dll.Cache_has_frame(frame, cache_dir):
+    if g_dll is None or not _runtime_handle_value() or not _cache_handle_value():
+        return False
+    if not _cache_has_frame(scene, frame):
         return False
     updated = False
     for i, cloth_obj in enumerate(g_clothOBJs):
         cached = _cached_frame_positions(
-            scene, frame, cloth_obj, cache_dir)
+            scene, frame, cloth_obj, None)
         if cached is not None:
             flat = np.frombuffer(cached, dtype=np.float32)
             cloth_obj.data.vertices.foreach_set("co", flat)
@@ -4163,14 +4284,91 @@ def _load_cached_frame(scene, depsgraph, frame):
 
 def _cached_frame_positions(scene, frame, cloth_obj, cache_dir):
     """Read one cached mesh without requiring a live solver owner."""
+    if g_dll is None or not _runtime_handle_value() or not _cache_handle_value():
+        return None
     nV = len(cloth_obj.data.vertices)
     pos = (c_float * (nV * 3))()
-    loaded = g_dll.Cache_prefetch_frame(
-        frame, c_size_t(nV), cache_dir)
-    if not loaded or not g_dll.Cache_get_frame_positions(
-            frame, pos, c_size_t(nV)):
+    request = _cache_frame_request(
+        scene, frame, nV, CType.GPUCLOTH_V3_CACHE_FRAME_NONE)
+    loaded = int(g_dll.GPUCloth_v3_cache_prefetch_frame(
+        g_runtime_handle, _cache_handle_owner(), pointer(request)))
+    if loaded != CType.GPUCLOTH_ABI_OK:
+        return None
+    request.frame_flags = CType.GPUCLOTH_V3_CACHE_FRAME_READ
+    request.positions.struct_size = sizeof(CType.GPUClothBufferView)
+    request.positions.element_type = CType.GPUCLOTH_ELEMENT_FLOAT3
+    request.positions.element_count = nV
+    request.positions.stride_bytes = sizeof(c_float) * 3
+    request.positions.data_address = addressof(pos)
+    request.positions.generation = int(request.frame_generation)
+    loaded = int(g_dll.GPUCloth_v3_cache_read_frame(
+        g_runtime_handle, _cache_handle_owner(), pointer(request)))
+    if loaded != CType.GPUCLOTH_ABI_OK:
         return None
     return pos
+
+
+def _cache_frame_request(scene, frame, vertex_count, flags):
+    if not _cache_handle_value() or not _runtime_handle_value():
+        raise RuntimeError("v3 cache owner is not live")
+    request = CType.GPUClothV3CacheFrameConfig()
+    request.struct_size = sizeof(request)
+    request.config_version = 1
+    request.frame_flags = int(flags)
+    request.frame = int(frame)
+    request.vertex_count = int(vertex_count)
+    request.frame_generation = int(_runtime_frame_generation)
+    request.cache_id = int(_cache_identity_value())
+    request.reserved[:] = (0, 0, 0)
+    return request
+
+
+def _cache_identity_value():
+    """Return the configure-time copied id; never dispatch a hot-path query."""
+    owner = g_cache_owner
+    if owner is None or not _cache_handle_value() or not _runtime_handle_value():
+        return 0
+    return int(owner["cache_id"])
+
+
+def _cache_has_frame(scene, frame):
+    cloth_count = len(g_simulationOBJs[0].data.vertices) if g_simulationOBJs else 0
+    if cloth_count <= 0:
+        return False
+    request = _cache_frame_request(
+        scene, frame, cloth_count, CType.GPUCLOTH_V3_CACHE_FRAME_NONE)
+    present = c_uint(0)
+    result = int(g_dll.GPUCloth_v3_cache_has_frame(
+        g_runtime_handle, _cache_handle_owner(), pointer(request),
+        pointer(present)))
+    return result == CType.GPUCLOTH_ABI_OK and bool(present.value)
+
+
+def _cache_buffer_address(values):
+    ctypes_view = getattr(values, "ctypes", None)
+    if ctypes_view is not None and hasattr(ctypes_view, "data"):
+        return int(ctypes_view.data)
+    return int(addressof(values))
+
+
+def _cache_prefetch_frame(scene, frame, vertex_count):
+    request = _cache_frame_request(
+        scene, frame, vertex_count, CType.GPUCLOTH_V3_CACHE_FRAME_NONE)
+    return int(g_dll.GPUCloth_v3_cache_prefetch_frame(
+        g_runtime_handle, _cache_handle_owner(), pointer(request)))
+
+
+def _cache_write_frame(scene, frame, values, vertex_count):
+    request = _cache_frame_request(
+        scene, frame, vertex_count, CType.GPUCLOTH_V3_CACHE_FRAME_WRITE)
+    request.positions.struct_size = sizeof(CType.GPUClothBufferView)
+    request.positions.element_type = CType.GPUCLOTH_ELEMENT_FLOAT3
+    request.positions.element_count = int(vertex_count)
+    request.positions.stride_bytes = sizeof(c_float) * 3
+    request.positions.data_address = _cache_buffer_address(values)
+    request.positions.generation = int(request.frame_generation)
+    return int(g_dll.GPUCloth_v3_cache_write_frame_async(
+        g_runtime_handle, _cache_handle_owner(), pointer(request)))
 
 
 def _cache_input_change_handler(scene, depsgraph):
@@ -4253,7 +4451,8 @@ def _frame_change_handler(scene, depsgraph):
 def free_gpu_memory(context=None, shutdown_runtime=False):
     """Release owners only after native solver teardown is confirmed."""
     global g_dll, g_cloth_handles, _cloth_input_owners
-    global _readback_owners, _runtime_frame_generation
+    global _readback_owners, _runtime_frame_generation, g_cache_handle
+    global g_cache_owner
     global g_clothOBJs, g_simulationOBJs, g_clothCollisionOBJs, g_proxy_handles
     global _teardown_failure, _collider_history
 
@@ -4283,7 +4482,7 @@ def free_gpu_memory(context=None, shutdown_runtime=False):
             return False
 
         try:
-            _destroy_runtime()
+            _destroy_runtime(shutdown_runtime=shutdown_runtime)
         except Exception as e:
             print(f"free_gpu_memory: v3 runtime teardown failed: {e}")
             _teardown_failure = True
@@ -4309,6 +4508,8 @@ def free_gpu_memory(context=None, shutdown_runtime=False):
     g_simulationOBJs     = []
     g_clothCollisionOBJs = []
     g_proxy_handles      = []
+    g_cache_handle       = CType.GPUClothV3CacheHandle(0)
+    g_cache_owner        = None
     _collision_keepalive.clear()
     _solver_diagnostics.clear()
     _pin_snapshot_states.clear()
@@ -4319,7 +4520,6 @@ def free_gpu_memory(context=None, shutdown_runtime=False):
     _collider_history = {}
     _drape_status_by_uid.clear()
     _initial_positions.clear()
-    _live_arrays.clear()
     _simulation_frame_state['last_solved'] = None
     _cache_source_state['generation'] = 0
     _input_generation['value'] = 0
@@ -4424,22 +4624,6 @@ class GPUCloth_LoadDLL(bpy.types.Operator):
             g_dll = cdll.LoadLibrary(filename)
             self.report({'INFO'}, f"DLL загружена: {filename}")
 
-            g_dll.SIM_configure_feature.argtypes = [
-                POINTER(CType.GPUClothFeatureConfigHeader)]
-            g_dll.SIM_configure_feature.restype = c_uint
-
-            g_dll.SIM_get_cache_feature_config.argtypes = [
-                POINTER(CType.GPUClothCacheConfig)]
-            g_dll.SIM_get_cache_feature_config.restype = c_uint
-
-            g_dll.SIM_update_cache_status.argtypes = [
-                POINTER(CType.GPUClothCacheStatusUpdate)]
-            g_dll.SIM_update_cache_status.restype = c_uint
-
-            g_dll.SIM_get_cache_status.argtypes = [
-                POINTER(CType.GPUClothCacheStatus)]
-            g_dll.SIM_get_cache_status.restype = c_uint
-
             # Host layout probes remain ABI diagnostics only; production cloth
             # ownership uses opaque v3 handles exclusively.
             g_dll.SIM_sizeof_cloth_vertex.argtypes = []
@@ -4485,53 +4669,6 @@ class GPUCloth_LoadDLL(bpy.types.Operator):
 
             g_dll.ProxySim_free.argtypes = [c_void_p]
             g_dll.ProxySim_free.restype  = None
-
-            # ── Cache API ────────────────────────────────────────────────────
-            #
-            #   ЗАПИСЬ (Phase 1, CPU-destination):
-            #     v3 readback positions → Cache_write_frame_async
-            #     C++ пишет в фоне: pinned RAM → DMA → NVMe
-            #
-            #   ЧТЕНИЕ (Phase 2, GPU-destination, zero-copy):
-            #     Cache_load_frame_gpu: NVMe → DMA → D3D12 resource (VRAM)
-            #       → CUDA external memory (view, не копирование)
-            #       → scatter_gpu_kernel → ClothVertex.x
-            #       → cudaMemcpyAsync D2H → h_flat → foreach_set (viewport)
-
-            g_dll.Cache_write_frame_async.argtypes = [
-                c_int,              # frame
-                POINTER(c_float),   # positions [nVerts*3]
-                c_size_t,           # nVerts
-                c_char_p,           # cache_dir (UTF-8)
-            ]
-            g_dll.Cache_write_frame_async.restype = c_bool
-
-            g_dll.Cache_prefetch_frame.argtypes = [
-                c_int,      # frame
-                c_size_t,   # nVerts
-                c_char_p,   # cache_dir
-            ]
-            g_dll.Cache_prefetch_frame.restype = c_bool
-
-            g_dll.Cache_is_frame_ready.argtypes = [c_int]
-            g_dll.Cache_is_frame_ready.restype  = c_bool
-
-            # После Cache_load_frame_gpu (GPU-direct): D2H для foreach_set
-            g_dll.Cache_get_frame_positions.argtypes = [
-                c_int,              # frame
-                POINTER(c_float),   # out_positions [nVerts*3]
-                c_size_t,           # nVerts
-            ]
-            g_dll.Cache_get_frame_positions.restype = c_bool
-
-            g_dll.Cache_free_frame.argtypes = [c_int]
-            g_dll.Cache_free_frame.restype  = c_bool
-
-            g_dll.Cache_clear_all.argtypes = [c_char_p]
-            g_dll.Cache_clear_all.restype  = c_bool
-
-            g_dll.Cache_has_frame.argtypes = [c_int, c_char_p]
-            g_dll.Cache_has_frame.restype  = c_bool
 
         except OSError as e:
             self.report({'ERROR'}, f"Не удалось загрузить DLL: {e}")
@@ -4656,6 +4793,16 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
         except RuntimeError as exc:
             self.report({'ERROR'}, str(exc))
             return {'CANCELLED'}
+        helper = context.scene.gpu_cloth_helper
+        external_playback = bool(
+            getattr(helper, "use_external_cache", False) and
+            getattr(helper, "playback_mode", False))
+        if external_playback:
+            try:
+                _validate_external_cache_playback_source(context.scene)
+            except (OSError, RuntimeError, ValueError) as exc:
+                self.report({'ERROR'}, f"External cache preflight failed: {exc}")
+                return {'CANCELLED'}
 
         bindings = []
         try:
@@ -4786,11 +4933,28 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
         try:
             _ensure_runtime_for_scene(
                 context.scene, generation=initial_generation)
+            if _cache_requested_for_prepare(context.scene):
+                _configure_cache_features(g_dll, context.scene)
+                # Recreated disk/external owners restore persisted status and
+                # its source-generation baseline before handlers/playback.
+                _sync_cache_status(context.scene)
         except (OSError, RuntimeError, TypeError, ValueError) as exc:
             self.report({'ERROR'}, f"v3 runtime setup failed: {exc}")
             free_gpu_memory(context)
             bpy.ops.object.mode_set(mode=mode)
             return {'CANCELLED'}
+
+        if external_playback:
+            # External playback owns only the v3 runtime/cache and Blender
+            # mesh targets.  It must not allocate a cloth/solver owner.
+            bpy.ops.object.mode_set(mode=mode)
+            context.scene.gpu_cloth_springs_built = False
+            _store_initial_positions()
+            _bake_range['start'] = int(helper.bake_start)
+            _bake_range['end'] = int(helper.bake_end)
+            _simulation_frame_state['last_solved'] = max(
+                1, int(helper.bake_start) - 1)
+            return {'FINISHED'}
 
         try:
             for index, (cloth_obj, simulation_obj) in enumerate(zip(
@@ -5040,26 +5204,20 @@ class GPUCloth_UpdateSimulation(bpy.types.Operator):
             return {'FINISHED'}
 
         scene_s   = context.scene.gpu_cloth_helper
-        cache_dir = _active_cache_path(context.scene).encode('utf-8')
         frame     = context.scene.frame_current
 
         # ── РЕЖИМ ВОСПРОИЗВЕДЕНИЯ из кэша ───────────────────────────────────
         #
-        #   Phase 2 (GPU-destination, zero-copy):
-        #     Cache_load_frame_gpu: NVMe → D3D12 VRAM → CUDA external memory
-        #     → scatter_gpu_kernel → ClothVertex.x
-        #     Cache_get_frame_positions: D2H → h_flat → foreach_set
+        #   v3 cache prefetch/read owns the frame and returns a checked copy.
         #
         if scene_s.playback_mode and scene_s.is_baked:
             _load_cached_frame(
                 context.scene, context.evaluated_depsgraph_get(), frame)
             # Prefetch следующего кадра пока пользователь смотрит текущий
             for cloth_obj in g_clothOBJs:
-                g_dll.Cache_prefetch_frame(
-                    frame + 1,
-                    c_size_t(len(cloth_obj.data.vertices)),
-                    cache_dir,
-                )
+                _cache_prefetch_frame(
+                    context.scene, frame + 1,
+                    len(cloth_obj.data.vertices))
             return {'FINISHED'}
 
         last_solved = _simulation_frame_state['last_solved']
@@ -5073,7 +5231,7 @@ class GPUCloth_UpdateSimulation(bpy.types.Operator):
         #   GPUCloth_v3_cloth_step(handle) [GPU]
         #   GPUCloth_v3_cloth_readback(handle) [D2H]
         #   foreach_set() [Blender ~<1мс]
-        #   Cache_write_frame_async() ← возвращает немедленно, пишет в фоне
+        #   v3 cache write copies payload before return.
         #
 
         if not (len(g_clothOBJs) == len(g_simulationOBJs)
@@ -5163,15 +5321,14 @@ class GPUCloth_UpdateSimulation(bpy.types.Operator):
                 # 4. Обновляем меш в Blender (foreach_set, Blender 4.x safe)
                 self._apply_positions(cloth_obj, pos, nV)
 
-                # 5. Асинхронная запись кэша
-                #    Phase 1 (CPU-destination): C++ пишет в фоне
-                #    pinned RAM → DMA → NVMe
-                #    _live_arrays защищает pos от GC пока C++ работает
+                # 5. Handle-scoped v3 cache write. Native copies the payload
+                # before returning; Python owns no cache array after call.
                 if (not scene_s.is_baked and
-                        bool(getattr(scene_s, "use_disk_cache", False))):
-                    _live_arrays.append(pos)
-                    if not g_dll.Cache_write_frame_async(
-                            frame, pos, c_size_t(nV), cache_dir):
+                        not bool(getattr(scene_s, "use_external_cache", False))
+                        and _cache_handle_value()):
+                    if (_cache_write_frame(
+                            context.scene, frame, pos, nV) !=
+                            CType.GPUCLOTH_ABI_OK):
                         self.report(
                             {'ERROR'},
                             f"Cache write rejected at frame {frame}")
@@ -5539,8 +5696,8 @@ class GPUCloth_BakeSimulation(bpy.types.Operator):
         except (OSError, RuntimeError) as exc:
             self.report({'ERROR'}, f"Cache config failed: {exc}")
             return False
-        cache_dir = _active_cache_path(context.scene).encode('utf-8')
-        if not g_dll.Cache_clear_all(cache_dir):
+        if int(g_dll.GPUCloth_v3_cache_clear(
+                g_runtime_handle, _cache_handle_owner())) != CType.GPUCLOTH_ABI_OK:
             self.report({'ERROR'}, "Cannot initialize cache transaction")
             return False
         try:
@@ -5558,12 +5715,10 @@ class GPUCloth_BakeSimulation(bpy.types.Operator):
         _bake_range['end'] = s.bake_end
         _simulation_frame_state['last_solved'] = max(
             1, int(s.bake_start) - 1)
-        _live_arrays.clear()
         self._frame = s.bake_start
         return True
 
     def _step_frame(self, context, frame):
-        cache_dir = _active_cache_path(context.scene).encode('utf-8')
         _cache_playback_guard['active'] = True
         try:
             context.scene.frame_set(frame)
@@ -5572,7 +5727,7 @@ class GPUCloth_BakeSimulation(bpy.types.Operator):
         result = bpy.ops.gpucloth.update_simulation()
         return (
             'FINISHED' in result and
-            bool(g_dll.Cache_has_frame(frame, cache_dir))
+            _cache_has_frame(context.scene, frame)
         )
 
     def _finish(self, context, success: bool):
@@ -5595,8 +5750,8 @@ class GPUCloth_BakeSimulation(bpy.types.Operator):
             _bake_range['end']   = s.bake_end
         else:
             s.playback_mode = False
-            cache_dir = _active_cache_path(context.scene).encode('utf-8')
-            g_dll.Cache_clear_all(cache_dir)
+            g_dll.GPUCloth_v3_cache_clear(
+                g_runtime_handle, _cache_handle_owner())
             try:
                 _cache_status_update(
                     CType.GPUCLOTH_CACHE_STATUS_BAKE_CANCEL,
@@ -5607,7 +5762,6 @@ class GPUCloth_BakeSimulation(bpy.types.Operator):
             _sync_cache_status(context.scene)
         except (OSError, RuntimeError):
             s.is_baked = False
-        _live_arrays.clear()
         if success:
             self.report({'INFO'}, "Запекание завершено.")
         return success
@@ -5661,9 +5815,9 @@ class GPUCloth_FreeCache(bpy.types.Operator):
 
     def execute(self, context):
         s         = context.scene.gpu_cloth_helper
-        cache_dir = _active_cache_path(context.scene).encode('utf-8')
 
-        if not g_dll.Cache_clear_all(cache_dir):
+        if int(g_dll.GPUCloth_v3_cache_clear(
+                g_runtime_handle, _cache_handle_owner())) != CType.GPUCLOTH_ABI_OK:
             self.report({'ERROR'}, "Не удалось очистить кэш")
             return {'CANCELLED'}
 
