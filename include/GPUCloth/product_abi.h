@@ -150,6 +150,9 @@ enum GPUClothFeatureId : uint32_t {
     GPUCLOTH_FEATURE_MODIFIER_EVALUATION,
     GPUCLOTH_FEATURE_SOLVER_DIAGNOSTICS,
     GPUCLOTH_FEATURE_CACHE_STATUS,
+    // Explicit PD-only Stable Discrete Bending owner.  This is intentionally
+    // appended so existing feature ids remain ABI-stable.
+    GPUCLOTH_FEATURE_BENDING_SDB,
 };
 
 enum GPUClothABIResult : uint32_t {
@@ -1169,6 +1172,24 @@ struct GPUClothV3ClothStatus {
     uint64_t reserved[3];
 };
 
+// Handle-scoped status for the typed SDB owner.  Configuration is accepted
+// before build; applied becomes true only after the owning PD instance has
+// consumed the setting through PD_solver_set_sdb_enabled().
+struct GPUClothV3SDBStatus {
+    uint32_t struct_size;
+    uint32_t status_version;
+    uint32_t backend;
+    uint32_t requested;
+    uint32_t configured;
+    uint32_t applied;
+    uint32_t solver_mask;
+    uint32_t last_result;
+    uint64_t object_id;
+    uint64_t topology_generation;
+    uint64_t geometry_generation;
+    uint64_t apply_count;
+};
+
 // Lossless, handle-scoped material spring record. The complete native spring
 // type carries base kind plus WARP/WEFT direction bits; no host pointer crosses
 // the ABI.
@@ -1244,7 +1265,8 @@ struct GPUClothDescriptorLayout {
     uint32_t preparation_status_size;
     uint32_t drape_config_size;
     uint32_t drape_status_size;
-    uint32_t reserved[4];
+    uint32_t sdb_status_size;
+    uint32_t reserved[3];
 };
 
 static_assert(sizeof(GPUClothABIVersion) == 32, "GPUClothABIVersion ABI drift");
@@ -1295,6 +1317,8 @@ static_assert(sizeof(GPUClothV3ClothCreateConfig) == 368, "GPUClothV3ClothCreate
 static_assert(sizeof(GPUClothV3ReadbackConfig) == 120, "GPUClothV3ReadbackConfig ABI drift");
 static_assert(sizeof(GPUClothV3CacheFrameConfig) == 104, "GPUClothV3CacheFrameConfig ABI drift");
 static_assert(sizeof(GPUClothV3ClothStatus) == 112, "GPUClothV3ClothStatus ABI drift");
+static_assert(sizeof(GPUClothV3SDBStatus) == 64,
+    "GPUClothV3SDBStatus ABI drift");
 static_assert(sizeof(GPUClothV3MaterialSpringRecord) == 36,
     "GPUClothV3MaterialSpringRecord ABI drift");
 static_assert(sizeof(GPUClothV3MaterialStateQuery) == 136,

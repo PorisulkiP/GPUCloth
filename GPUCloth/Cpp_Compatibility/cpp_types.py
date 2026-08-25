@@ -409,6 +409,7 @@ GPUCLOTH_FEATURE_MASS_VERTEX_GROUP = 48
 GPUCLOTH_FEATURE_STIFFNESS_VERTEX_GROUPS = 49
 GPUCLOTH_FEATURE_SOLVER_DIAGNOSTICS = 55
 GPUCLOTH_FEATURE_CACHE_STATUS = 56
+GPUCLOTH_FEATURE_BENDING_SDB = 57
 
 GPUCLOTH_MATERIAL_ANISOTROPY_ENABLED = 1 << 0
 
@@ -816,6 +817,23 @@ class GPUClothV3ClothStatus(Structure):
     ]
 
 
+class GPUClothV3SDBStatus(Structure):
+    _fields_ = [
+        ("struct_size", c_uint),
+        ("status_version", c_uint),
+        ("backend", c_uint),
+        ("requested", c_uint),
+        ("configured", c_uint),
+        ("applied", c_uint),
+        ("solver_mask", c_uint),
+        ("last_result", c_uint),
+        ("object_id", c_uint64),
+        ("topology_generation", c_uint64),
+        ("geometry_generation", c_uint64),
+        ("apply_count", c_uint64),
+    ]
+
+
 class GPUClothV3MaterialSpringRecord(Structure):
     _fields_ = [
         ("spring_index", c_uint),
@@ -861,6 +879,7 @@ GPUCLOTH_V3_STRUCT_SIZES = {
     "GPUClothV3ReadbackConfig": 120,
     "GPUClothV3CacheFrameConfig": 104,
     "GPUClothV3ClothStatus": 112,
+    "GPUClothV3SDBStatus": 64,
     "GPUClothV3MaterialSpringRecord": 36,
     "GPUClothV3MaterialStateQuery": 136,
 }
@@ -1443,7 +1462,8 @@ class GPUClothDescriptorLayout(Structure):
         ("preparation_status_size", c_uint),
         ("drape_config_size", c_uint),
         ("drape_status_size", c_uint),
-        ("reserved", c_uint * 4),
+        ("sdb_status_size", c_uint),
+        ("reserved", c_uint * 3),
     ]
 
 class fmatrix3x3(Structure):

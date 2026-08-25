@@ -133,9 +133,14 @@ def _reject_unsupported_v3_owners(scene, cloth_objects):
                 str(getattr(settings, "shapekey_rest", ""))):
             unsupported.append(
                 f"rest_shape_key_dynamic_mesh:{cloth_obj.name_full}")
-        if (str(getattr(settings, "solver_type", "")) == "PD" and
-                str(getattr(settings, "bending_model", "")) == "SDB"):
-            unsupported.append(f"SDB_bending:{cloth_obj.name_full}")
+        if str(getattr(settings, "bending_model", "")) == "SDB":
+            solver_type = str(getattr(settings, "solver_type", ""))
+            if solver_type != "PD":
+                unsupported.append(
+                    f"SDB_bending_solver:{cloth_obj.name_full}:{solver_type}")
+            if bool(getattr(settings, "use_anisotropy", False)):
+                unsupported.append(
+                    f"SDB_bending_anisotropy:{cloth_obj.name_full}")
     if unsupported:
         raise RuntimeError(
             "NOT_CONFIGURABLE: ABI v3 has no owner for " +
@@ -1084,6 +1089,9 @@ _GPUCLOTH_V3_EXPORT_SIGNATURES = {
     "GPUCloth_v3_cloth_get_status": [
         CType.GPUClothV3ClothHandle,
         POINTER(CType.GPUClothV3ClothStatus)],
+    "GPUCloth_v3_cloth_get_sdb_status": [
+        CType.GPUClothV3ClothHandle,
+        POINTER(CType.GPUClothV3SDBStatus)],
     "GPUCloth_v3_cloth_query_material_state": [
         CType.GPUClothV3ClothHandle,
         POINTER(CType.GPUClothV3MaterialStateQuery)],
@@ -1204,13 +1212,14 @@ def _validate_descriptor_layout(dll):
             CType.GPUClothPreparationStatus),
         "drape_config_size": sizeof(CType.GPUClothDrapeConfig),
         "drape_status_size": sizeof(CType.GPUClothDrapeStatus),
+        "sdb_status_size": sizeof(CType.GPUClothV3SDBStatus),
     }
     mismatches = [
         f"{name}={int(getattr(layout, name))}, expected={expected_size}"
         for name, expected_size in expected.items()
         if int(getattr(layout, name)) != expected_size]
     if (int(layout.struct_size) != sizeof(layout) or
-            int(layout.schema_version) != 5 or
+            int(layout.schema_version) != 6 or
             any(int(value) != 0 for value in layout.reserved) or
             mismatches):
         detail = "; ".join(mismatches) if mismatches else "header mismatch"
@@ -1628,12 +1637,13 @@ def _bounded_float32(value, label, lower, upper):
 def _effective_bending_model(settings):
     bending_model = str(settings.bending_model)
     solver_type = str(settings.solver_type)
+    if solver_type != 'PD' and bending_model == 'SDB':
+        raise RuntimeError(
+            "NOT_CONFIGURABLE: SDB bending is only supported by PD")
     if solver_type == 'Mil2':
         return 'LINEAR'
     if solver_type == 'PD' and bending_model in {'', 'LINEAR'}:
         # Migrate old saved PD settings: linear bending is no longer exposed.
-        return 'ANGULAR'
-    if solver_type != 'PD' and bending_model == 'SDB':
         return 'ANGULAR'
     if bending_model not in {'LINEAR', 'ANGULAR', 'SDB'}:
         raise RuntimeError(f"unknown bending model {bending_model!r}")
@@ -1779,12 +1789,13 @@ def _publish_material_features(
             CType.GPUCLOTH_FEATURE_SHEAR,
             CType.GPUCLOTH_FEATURE_MATERIAL_DAMPING,
         ]
-        if owner["bending_model"] != 'SDB':
-            features.insert(
-                3,
-                (CType.GPUCLOTH_FEATURE_BENDING_ANGULAR
-                 if owner["bending_model"] == 'ANGULAR'
-                 else CType.GPUCLOTH_FEATURE_BENDING_LINEAR))
+        features.insert(
+            3,
+            (CType.GPUCLOTH_FEATURE_BENDING_SDB
+             if owner["bending_model"] == 'SDB' else
+             CType.GPUCLOTH_FEATURE_BENDING_ANGULAR
+             if owner["bending_model"] == 'ANGULAR' else
+             CType.GPUCLOTH_FEATURE_BENDING_LINEAR))
 
     for feature in features:
         config = CType.GPUClothMaterialConfig.from_buffer_copy(bytes(source))
