@@ -138,9 +138,6 @@ def _reject_unsupported_v3_owners(scene, cloth_objects):
             unsupported.append(f"anisotropy:{cloth_obj.name_full}")
         if str(getattr(settings, "shapekey_rest", "")):
             unsupported.append(f"rest_shape_key:{cloth_obj.name_full}")
-        for name, label in (("vgroup_shrink", "shrink_group"),):
-            if str(getattr(settings, name, "")):
-                unsupported.append(f"{label}:{cloth_obj.name_full}")
         if (str(getattr(settings, "solver_type", "")) == "PD" and
                 str(getattr(settings, "bending_model", "")) == "SDB"):
             unsupported.append(f"SDB_bending:{cloth_obj.name_full}")
