@@ -75,8 +75,8 @@ g_simulationOBJs     = []     # render owner -> mesh actually sent to solver
 g_clothCollisionOBJs = []     # list[POINTER(CType.Object)] — объекты столкновения
 _dll_directory_handles = []
 
-# Proxy-res: один handle на объект ткани (None если proxy не активен)
-g_proxy_handles      = []     # list[c_void_p | None]
+# Proxy v3: one persistent owner record per render/simulation binding.
+g_proxy_handles      = []     # list[dict | None]
 _collision_keepalive  = []     # prevent GC of collision ctypes data
 _solver_diagnostics = []
 _pin_snapshot_states = []
@@ -124,8 +124,6 @@ def _reject_unsupported_v3_owners(scene, cloth_objects):
     helper = scene.gpu_cloth_helper
     for cloth_obj in cloth_objects:
         settings = cloth_obj.GPUCloth
-        if bool(getattr(settings, "use_proxy", False)):
-            unsupported.append(f"proxy:{cloth_obj.name_full}")
         if str(getattr(settings, "solver_type", "")) not in ("PD", "Mil2"):
             unsupported.append(
                 f"solver:{cloth_obj.name_full}:{settings.solver_type}")
@@ -457,7 +455,8 @@ def _create_v3_cloth_owner(
         raise RuntimeError(
             "v3 cloth create requires non-empty vertices, edges, faces, "
             "and corners")
-    object_id = _blender_session_uid(cloth_obj, "v3 cloth object")
+    object_id = _blender_session_uid(
+        simulation_obj, "v3 cloth simulation object")
     topology_generation = int(topology_generation)
     geometry_generation = int(geometry_generation)
     if topology_generation <= 0 or geometry_generation <= 0:
@@ -560,6 +559,141 @@ def _create_v3_cloth_owner(
         "geometry_generation": geometry_generation,
         "vertex_count": vertex_count,
     }
+
+
+def _create_v3_proxy_owner(
+        dll, cloth_owner, render_obj, simulation_obj, settings,
+        readback_owner):
+    """Create one persistent typed proxy owner."""
+    if simulation_obj is render_obj:
+        raise RuntimeError("v3 proxy requires a distinct simulation object")
+    scene_type = int(getattr(settings, "proxy_scene_type", -1))
+    if scene_type in (0, 1):
+        proxy_flags = CType.GPUCLOTH_PROXY_LOCAL_FRAME
+    elif scene_type == 3:
+        proxy_flags = CType.GPUCLOTH_PROXY_DIRECT_BARYCENTRIC
+    else:
+        raise RuntimeError(
+            "v3 proxy scene type is not representable without legacy semantics")
+    render_x = int(getattr(settings, "hi_nx", 0))
+    render_y = int(getattr(settings, "hi_ny", 0))
+    proxy_x = int(getattr(settings, "proxy_nx", 0))
+    proxy_y = int(getattr(settings, "proxy_ny", 0))
+    sheets = int(getattr(settings, "num_sheets", 0))
+    if min(render_x, render_y, proxy_x, proxy_y, sheets) <= 0:
+        raise RuntimeError("v3 proxy grid settings must be positive")
+    render_count = len(render_obj.data.vertices)
+    proxy_count = len(simulation_obj.data.vertices)
+    expected_render = (render_x + 1) * (render_y + 1) * sheets
+    expected_proxy = (proxy_x + 1) * (proxy_y + 1) * sheets
+    if render_count != expected_render or proxy_count != expected_proxy:
+        raise RuntimeError(
+            "v3 proxy topology does not match grid dimensions and sheet count")
+    render_object_id = _blender_session_uid(
+        render_obj, "v3 proxy render object")
+    proxy_object_id = int(cloth_owner["object_id"])
+    topology_generation = int(cloth_owner["topology_generation"])
+    render_rest = (c_float * (render_count * 3))(
+        *(component for vertex in render_obj.data.vertices for component in vertex.co))
+    proxy_rest = (c_float * (proxy_count * 3))(
+        *(component for vertex in simulation_obj.data.vertices for component in vertex.co))
+    config = CType.GPUClothProxyConfig()
+    config.header.struct_size = sizeof(config)
+    config.header.feature_id = CType.GPUCLOTH_FEATURE_PROXY
+    config.header.config_version = 1
+    config.header.flags = 0
+    config.render_object_id = render_object_id
+    config.proxy_object_id = proxy_object_id
+    config.topology_generation = topology_generation
+    config.render_x_count = render_x
+    config.render_y_count = render_y
+    config.proxy_x_count = proxy_x
+    config.proxy_y_count = proxy_y
+    config.render_vertex_count = render_count
+    config.proxy_vertex_count = proxy_count
+    config.proxy_flags = proxy_flags
+    config.reserved0 = 0
+    _set_buffer_view(
+        config.render_rest_positions, CType.GPUCLOTH_ELEMENT_FLOAT3,
+        render_count, sizeof(c_float) * 3, addressof(render_rest),
+        topology_generation)
+    _set_buffer_view(
+        config.proxy_rest_positions, CType.GPUCLOTH_ELEMENT_FLOAT3,
+        proxy_count, sizeof(c_float) * 3, addressof(proxy_rest),
+        topology_generation)
+    config.reserved[:] = (0,)
+    out_handle = CType.GPUClothV3ProxyHandle(0)
+    result = int(dll.GPUCloth_v3_proxy_create(
+        g_runtime_handle, cloth_owner["handle"], pointer(config),
+        pointer(out_handle)))
+    if result != CType.GPUCLOTH_ABI_OK or not out_handle.value:
+        raise RuntimeError(f"v3 proxy create rejected with {result}")
+
+    input_view = CType.GPUClothBufferView()
+    output_view = CType.GPUClothBufferView()
+    output_positions = (c_float * (render_count * 3))()
+    _set_buffer_view(
+        input_view, CType.GPUCLOTH_ELEMENT_FLOAT3, proxy_count,
+        sizeof(c_float) * 3, addressof(readback_owner["readback_positions"]),
+        0)
+    _set_buffer_view(
+        output_view, CType.GPUCLOTH_ELEMENT_FLOAT3, render_count,
+        sizeof(c_float) * 3, addressof(output_positions), 0)
+    status = CType.GPUClothV3ProxyStatus()
+    status.struct_size = sizeof(status)
+    status.status_version = 1
+    result = int(dll.GPUCloth_v3_proxy_get_status(
+        out_handle, pointer(status)))
+    if result != CType.GPUCLOTH_ABI_OK:
+        int(dll.GPUCloth_v3_proxy_destroy(out_handle))
+        raise RuntimeError(f"v3 proxy status rejected with {result}")
+    if (int(status.render_vertex_count) != render_count or
+            int(status.proxy_vertex_count) != proxy_count or
+            int(status.topology_generation) != topology_generation or
+            int(status.proxy_flags) != proxy_flags):
+        int(dll.GPUCloth_v3_proxy_destroy(out_handle))
+        raise RuntimeError("v3 proxy status does not match prepared identity")
+    return {
+        "handle": out_handle,
+        "config": config,
+        "render_rest": render_rest,
+        "proxy_rest": proxy_rest,
+        "input_view": input_view,
+        "output_view": output_view,
+        "output_positions": output_positions,
+        "status": status,
+        "readback_owner": readback_owner,
+        "render_object_id": render_object_id,
+        "proxy_object_id": proxy_object_id,
+        "topology_generation": topology_generation,
+        "render_vertex_count": render_count,
+        "proxy_vertex_count": proxy_count,
+        "allocation_count": 3,
+    }
+
+
+def _apply_v3_proxy(owner, frame_generation):
+    generation = int(frame_generation)
+    if generation <= 0:
+        raise RuntimeError("v3 proxy frame generation must be positive")
+    owner["input_view"].generation = generation
+    owner["output_view"].generation = generation
+    result = int(g_dll.GPUCloth_v3_proxy_apply(
+        owner["handle"], pointer(owner["input_view"]),
+        pointer(owner["output_view"])))
+    if result != CType.GPUCLOTH_ABI_OK:
+        raise RuntimeError(f"v3 proxy apply rejected with {result}")
+    status = owner["status"]
+    status.struct_size = sizeof(status)
+    status.status_version = 1
+    result = int(g_dll.GPUCloth_v3_proxy_get_status(
+        owner["handle"], pointer(status)))
+    if (result != CType.GPUCLOTH_ABI_OK or
+            int(status.last_generation) != generation or
+            int(status.apply_count) <= int(owner.get("apply_count", 0))):
+        raise RuntimeError("v3 proxy status did not accept applied frame")
+    owner["apply_count"] = int(status.apply_count)
+    return owner["output_positions"]
 
 
 def _collection_selection(collection, label):
@@ -1089,6 +1223,19 @@ _GPUCLOTH_V3_EXPORT_SIGNATURES = {
     "GPUCloth_v3_cloth_get_status": [
         CType.GPUClothV3ClothHandle,
         POINTER(CType.GPUClothV3ClothStatus)],
+    "GPUCloth_v3_proxy_create": [
+        CType.GPUClothV3RuntimeHandle,
+        CType.GPUClothV3ClothHandle,
+        POINTER(CType.GPUClothProxyConfig),
+        POINTER(CType.GPUClothV3ProxyHandle)],
+    "GPUCloth_v3_proxy_apply": [
+        CType.GPUClothV3ProxyHandle,
+        POINTER(CType.GPUClothBufferView),
+        POINTER(CType.GPUClothBufferView)],
+    "GPUCloth_v3_proxy_get_status": [
+        CType.GPUClothV3ProxyHandle,
+        POINTER(CType.GPUClothV3ProxyStatus)],
+    "GPUCloth_v3_proxy_destroy": [CType.GPUClothV3ProxyHandle],
     "GPUCloth_v3_cloth_get_sdb_status": [
         CType.GPUClothV3ClothHandle,
         POINTER(CType.GPUClothV3SDBStatus)],
@@ -1213,13 +1360,14 @@ def _validate_descriptor_layout(dll):
         "drape_config_size": sizeof(CType.GPUClothDrapeConfig),
         "drape_status_size": sizeof(CType.GPUClothDrapeStatus),
         "sdb_status_size": sizeof(CType.GPUClothV3SDBStatus),
+        "proxy_status_size": sizeof(CType.GPUClothV3ProxyStatus),
     }
     mismatches = [
         f"{name}={int(getattr(layout, name))}, expected={expected_size}"
         for name, expected_size in expected.items()
         if int(getattr(layout, name)) != expected_size]
     if (int(layout.struct_size) != sizeof(layout) or
-            int(layout.schema_version) != 6 or
+            int(layout.schema_version) != 7 or
             any(int(value) != 0 for value in layout.reserved) or
             mismatches):
         detail = "; ".join(mismatches) if mismatches else "header mismatch"
@@ -2087,7 +2235,7 @@ def _capture_pin_snapshot(
         simulation_obj, depsgraph, settings_owner.GPUCloth,
         topology_generation, frame_generation,
         expected_vertex_count=len(simulation_obj.data.vertices),
-        identity_obj=settings_owner)
+        identity_obj=simulation_obj)
 
 
 def _publish_prepared_pin_snapshot(dll, cloth_handle, snapshot):
@@ -3425,7 +3573,8 @@ def _retarget_effector_snapshot_owner(owner, snapshot_generation):
 
 
 def _collection_snapshot_owner(
-        cloth_obj, selection, collection_kind, snapshot_generation, payloads):
+        cloth_obj, owner_obj, selection, collection_kind,
+        snapshot_generation, payloads):
     if collection_kind == CType.GPUCLOTH_COLLECTION_EFFECTOR:
         _effector_publication_state["snapshot_build_count"] += 1
     records_type = CType.GPUClothCollectionRecord * len(payloads)
@@ -3438,7 +3587,7 @@ def _collection_snapshot_owner(
         if collection_kind == CType.GPUCLOTH_COLLECTION_COLLISION
         else CType.GPUCLOTH_FEATURE_EFFECTOR_COLLECTION)
     config.header.config_version = 1
-    config.cloth_id = _blender_session_uid(cloth_obj, "cloth object")
+    config.cloth_id = _blender_session_uid(owner_obj, "cloth simulation object")
     config.collection_id = (
         selection["collection_id"] if selection is not None else 0)
     config.snapshot_generation = snapshot_generation
@@ -3461,16 +3610,22 @@ def _collection_snapshot_owner(
 
 def _prepare_collection_snapshots(
         context, depsgraph, cloth_objects, snapshot_generation,
-        collider_history, effector_states=None):
+        collider_history, effector_states=None, owner_objects=None):
     if (effector_states is not None and
             len(effector_states) != len(cloth_objects)):
         raise RuntimeError("cached effector owners are not aligned")
+    if owner_objects is None:
+        owner_objects = cloth_objects
+    if len(owner_objects) != len(cloth_objects):
+        raise RuntimeError("cloth and simulation owners are not aligned")
     cloth_ids = {
         _blender_session_uid(_original_object(obj), "cloth object")
-        for obj in cloth_objects}
+        for obj in tuple(cloth_objects) + tuple(owner_objects)}
     prepared = []
-    for cloth_index, cloth_obj in enumerate(cloth_objects):
-        cloth_owner_id = _blender_session_uid(cloth_obj, "cloth object")
+    for cloth_index, (cloth_obj, owner_obj) in enumerate(
+            zip(cloth_objects, owner_objects)):
+        cloth_owner_id = _blender_session_uid(
+            owner_obj, "cloth simulation object")
         settings = cloth_obj.GPUCloth
         try:
             evaluated_cloth = cloth_obj.evaluated_get(depsgraph)
@@ -3546,7 +3701,7 @@ def _prepare_collection_snapshots(
                     snapshot_generation, cloth_inverse)
                 for occurrence, field in effector_sources]
             effector_owner = _collection_snapshot_owner(
-                cloth_obj, effector_selection,
+                cloth_obj, owner_obj, effector_selection,
                 CType.GPUCLOTH_COLLECTION_EFFECTOR,
                 snapshot_generation, effector_payloads)
         effector_owner["semantic_signature"] = semantic_signature
@@ -3572,7 +3727,7 @@ def _prepare_collection_snapshots(
 
         prepared.append({
             "collision": _collection_snapshot_owner(
-                cloth_obj, collision_selection,
+                cloth_obj, owner_obj, collision_selection,
                 CType.GPUCLOTH_COLLECTION_COLLISION,
                 snapshot_generation, collision_payloads),
             "effector": effector_owner,
@@ -3866,7 +4021,8 @@ def _publish_frame_inputs(context, depsgraph):
         capture_depsgraph = context.evaluated_depsgraph_get()
         prepared_collections = _prepare_collection_snapshots(
             context, capture_depsgraph, g_clothOBJs, generation,
-            _collider_history, _effector_weight_states)
+            _collider_history, _effector_weight_states,
+            owner_objects=g_simulationOBJs)
         prepared_pins = []
         prepared_dynamic_meshes = []
         for index, (cloth_obj, simulation_obj) in enumerate(zip(
@@ -4477,23 +4633,6 @@ def free_gpu_memory(context=None, shutdown_runtime=False):
         return False
 
     if g_dll is not None:
-        proxy_failed = False
-        for index, handle in enumerate(g_proxy_handles):
-            if handle is None:
-                continue
-            try:
-                g_dll.ProxySim_free(handle)
-                g_proxy_handles[index] = None
-            except Exception as exc:
-                print(f"free_gpu_memory: ProxySim_free() failed: {exc}")
-                proxy_failed = True
-        if proxy_failed:
-            print(
-                "free_gpu_memory: proxy teardown incomplete; "
-                "backing owners retained")
-            _teardown_failure = True
-            return False
-
         try:
             _destroy_runtime(shutdown_runtime=shutdown_runtime)
         except Exception as e:
@@ -4650,38 +4789,6 @@ class GPUCloth_LoadDLL(bpy.types.Operator):
             _bind_gpucloth_v3_exports(g_dll)
             _validate_product_abi(g_dll)
             _validate_descriptor_layout(g_dll)
-
-            # ── ProxySim API ─────────────────────────────────────────────────
-            #
-            #   Симуляция грубого proxy-меша + апсэмплинг до hi-res.
-            #   GPU path: v3 readback positions -> ProxySim_apply
-            #             → hi-res позиции → foreach_set
-
-            g_dll.ProxySim_create.argtypes = [
-                c_int, c_int,           # hi_NX,    hi_NY
-                c_int, c_int,           # proxy_NX, proxy_NY
-                c_int, c_int,           # num_sheets, scene_type
-                POINTER(c_float),       # proxy_rest_pos  [nProxy*3]
-                POINTER(c_float),       # hi_rest_pos     [nHi*3]
-                c_int, c_int,           # nProxy, nHi
-            ]
-            g_dll.ProxySim_create.restype = c_void_p  # ProxySimHandle*
-
-            g_dll.ProxySim_apply.argtypes = [
-                c_void_p,           # ProxySimHandle*
-                POINTER(c_float),   # proxy_pos  [nProxy*3]  — вход
-                POINTER(c_float),   # hi_out     [nHi*3]     — выход
-            ]
-            g_dll.ProxySim_apply.restype = None
-
-            g_dll.ProxySim_hi_count.argtypes    = [c_void_p]
-            g_dll.ProxySim_hi_count.restype     = c_int
-
-            g_dll.ProxySim_proxy_count.argtypes = [c_void_p]
-            g_dll.ProxySim_proxy_count.restype  = c_int
-
-            g_dll.ProxySim_free.argtypes = [c_void_p]
-            g_dll.ProxySim_free.restype  = None
 
         except OSError as e:
             self.report({'ERROR'}, f"Не удалось загрузить DLL: {e}")
@@ -4907,7 +5014,8 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
                 _prepare_dynamic_mesh_state(snapshot, None)
                 for snapshot in prepared_dynamic_meshes]
             prepared_collections = _prepare_collection_snapshots(
-                context, depsgraph, active_cloth, initial_generation, {})
+                context, depsgraph, active_cloth, initial_generation, {},
+                owner_objects=simulation_objects)
         except (RuntimeError, VertexChannelError) as exc:
             self.report({'ERROR'}, f"Blender input preflight failed: {exc}")
             return {'CANCELLED'}
@@ -5112,33 +5220,15 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
             bpy.ops.object.mode_set(mode=mode)
             return {'CANCELLED'}
 
-        # 8. Create one upsample owner per render/simulation binding.
+        # 8. Create one typed v3 proxy owner per render/simulation binding.
         g_proxy_handles.clear()
-        for cloth_obj in g_clothOBJs:
+        for index, cloth_obj in enumerate(g_clothOBJs):
             s = cloth_obj.GPUCloth
             if s.use_proxy and s.proxy_object is not None:
-                nProxy = len(s.proxy_object.data.vertices)
-                nHi    = len(cloth_obj.data.vertices)
-
-                proxy_rest = (c_float * (nProxy * 3))(
-                    *[c for v in s.proxy_object.data.vertices for c in v.co])
-                hi_rest = (c_float * (nHi * 3))(
-                    *[c for v in cloth_obj.data.vertices for c in v.co])
-
-                handle = g_dll.ProxySim_create(
-                    s.hi_nx,   s.hi_ny,
-                    s.proxy_nx, s.proxy_ny,
-                    s.num_sheets, s.proxy_scene_type,
-                    proxy_rest, hi_rest,
-                    nProxy, nHi,
-                )
-                g_proxy_handles.append(handle)
-                if handle is None:
-                    self.report({'ERROR'},
-                        f"ProxySim_create вернул NULL для {cloth_obj.name}")
-                    free_gpu_memory(context)
-                    bpy.ops.object.mode_set(mode=mode)
-                    return {'CANCELLED'}
+                proxy_owner = _create_v3_proxy_owner(
+                    g_dll, _cloth_input_owners[index], cloth_obj,
+                    g_simulationOBJs[index], s, _readback_owners[index])
+                g_proxy_handles.append(proxy_owner)
             else:
                 g_proxy_handles.append(None)
 
@@ -5311,22 +5401,17 @@ class GPUCloth_UpdateSimulation(bpy.types.Operator):
                 # 2. Persistent v3 readback positions/velocities.
                 simulation_pos = self._readback(i)
 
-                # 3. Proxy upsampling (если активен)
-                #    proxy_pos заполняется из результатов симуляции proxy-меша
-                handle = (g_proxy_handles[i]
-                          if i < len(g_proxy_handles) else None)
-                if handle is not None:
-                    nP = g_dll.ProxySim_proxy_count(handle)
-                    if nP != n_sim:
-                        self.report({'ERROR'},
-                            f"ProxySim count changed: handle={nP}, mesh={n_sim}")
-                        bpy.ops.screen.animation_cancel()
-                        return {'CANCELLED'}
-                    self._apply_positions(simulation_obj, simulation_pos, nP)
-                    nV = g_dll.ProxySim_hi_count(handle)
-                    out_hi = (c_float * (nV * 3))()
-                    g_dll.ProxySim_apply(handle, simulation_pos, out_hi)
-                    pos = out_hi
+                # 3. Handle-scoped v3 proxy apply into the persistent output.
+                proxy_owner = (g_proxy_handles[i]
+                               if i < len(g_proxy_handles) else None)
+                if proxy_owner is not None:
+                    if int(proxy_owner["proxy_vertex_count"]) != n_sim:
+                        raise RuntimeError(
+                            "v3 proxy status count differs from simulation mesh")
+                    self._apply_positions(simulation_obj, simulation_pos, n_sim)
+                    pos = _apply_v3_proxy(
+                        proxy_owner, _runtime_frame_generation)
+                    nV = int(proxy_owner["render_vertex_count"])
                 else:
                     pos = simulation_pos
                     nV = n_sim
@@ -5401,17 +5486,17 @@ def _readback_drape_preview(index):
     simulation_obj.data.vertices.foreach_set("co", flat)
     simulation_obj.data.update()
 
-    handle = g_proxy_handles[index] if index < len(g_proxy_handles) else None
-    if handle is None:
+    proxy_owner = (
+        g_proxy_handles[index] if index < len(g_proxy_handles) else None)
+    if proxy_owner is None:
         if cloth_obj is not simulation_obj:
             cloth_obj.data.vertices.foreach_set("co", flat)
             cloth_obj.data.update()
         return
-    if int(g_dll.ProxySim_proxy_count(handle)) != n_sim:
-        raise RuntimeError("Drape proxy vertex count changed")
-    n_hi = int(g_dll.ProxySim_hi_count(handle))
-    high_positions = (c_float * (n_hi * 3))()
-    g_dll.ProxySim_apply(handle, positions, high_positions)
+    if int(proxy_owner["proxy_vertex_count"]) != n_sim:
+        raise RuntimeError("Drape v3 proxy vertex count changed")
+    high_positions = _apply_v3_proxy(
+        proxy_owner, _runtime_frame_generation)
     cloth_obj.data.vertices.foreach_set(
         "co", np.frombuffer(high_positions, dtype=np.float32))
     cloth_obj.data.update()

@@ -1035,6 +1035,15 @@ enum GPUClothV3ClothState : uint32_t {
     GPUCLOTH_V3_CLOTH_RUNNABLE = 3,
 };
 
+enum GPUClothProxyFlags : uint32_t {
+    GPUCLOTH_PROXY_LOCAL_FRAME = 0u,
+    GPUCLOTH_PROXY_DIRECT_BARYCENTRIC = 1u << 0,
+};
+
+enum GPUClothV3ProxyState : uint32_t {
+    GPUCLOTH_V3_PROXY_READY = 1u,
+};
+
 struct GPUClothV3ABIInfo {
     uint32_t struct_size;
     uint32_t struct_version;
@@ -1172,6 +1181,31 @@ struct GPUClothV3ClothStatus {
     uint64_t reserved[3];
 };
 
+// Handle-scoped proxy lifecycle/status.  The owner retains the validated
+// topology and rest payload; only opaque handles and typed counts cross ABI.
+struct GPUClothV3ProxyStatus {
+    uint32_t struct_size;
+    uint32_t status_version;
+    uint32_t state;
+    uint32_t last_result;
+    uint64_t runtime_handle;
+    uint64_t cloth_handle;
+    uint64_t proxy_handle;
+    uint64_t render_object_id;
+    uint64_t proxy_object_id;
+    uint64_t topology_generation;
+    uint32_t render_x_count;
+    uint32_t render_y_count;
+    uint32_t proxy_x_count;
+    uint32_t proxy_y_count;
+    uint32_t render_vertex_count;
+    uint32_t proxy_vertex_count;
+    uint32_t proxy_flags;
+    uint32_t reserved0;
+    uint64_t apply_count;
+    uint64_t last_generation;
+};
+
 // Handle-scoped status for the typed SDB owner.  Configuration is accepted
 // before build; applied becomes true only after the owning PD instance has
 // consumed the setting through PD_solver_set_sdb_enabled().
@@ -1266,7 +1300,8 @@ struct GPUClothDescriptorLayout {
     uint32_t drape_config_size;
     uint32_t drape_status_size;
     uint32_t sdb_status_size;
-    uint32_t reserved[3];
+    uint32_t proxy_status_size;
+    uint32_t reserved[2];
 };
 
 static_assert(sizeof(GPUClothABIVersion) == 32, "GPUClothABIVersion ABI drift");
@@ -1317,6 +1352,8 @@ static_assert(sizeof(GPUClothV3ClothCreateConfig) == 368, "GPUClothV3ClothCreate
 static_assert(sizeof(GPUClothV3ReadbackConfig) == 120, "GPUClothV3ReadbackConfig ABI drift");
 static_assert(sizeof(GPUClothV3CacheFrameConfig) == 104, "GPUClothV3CacheFrameConfig ABI drift");
 static_assert(sizeof(GPUClothV3ClothStatus) == 112, "GPUClothV3ClothStatus ABI drift");
+static_assert(sizeof(GPUClothV3ProxyStatus) == 112,
+    "GPUClothV3ProxyStatus ABI drift");
 static_assert(sizeof(GPUClothV3SDBStatus) == 64,
     "GPUClothV3SDBStatus ABI drift");
 static_assert(sizeof(GPUClothV3MaterialSpringRecord) == 36,

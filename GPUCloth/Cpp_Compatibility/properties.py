@@ -1254,7 +1254,7 @@ class GPUClothObjectSettings(PropertyGroup):
 
     proxy_scene_type: IntProperty(
         name="Scene Type",
-        description="ProxySim test scene: 0=DrapeOnSphere, 1=TwistTest, 2=MultiLayerDrop, 3=CushionDrop",
+        description="Typed proxy mode: 0/1=local-frame interpolation, 3=direct barycentric; 2 is unsupported",
         default=0,
         min=0,
         max=3,

@@ -54,12 +54,6 @@ SOLVER_OGC    = 4   # Offset Geometric Contact — самостолкновен�
 # OGC — солвер самостолкновений, не основной физический солвер.
 # Self-collision response is selected explicitly by GPUClothCollisionConfig.
 
-# ---------------------------------------------------------------------------
-#  Непрозрачный указатель на C++ объект ProxySimHandle
-#  (создаётся через ProxySim_create, освобождается через ProxySim_free)
-# ---------------------------------------------------------------------------
-ProxySimHandle = c_void_p
-
 class MVert(Structure):
     _fields_ = [
         ("co", c_float*3),
@@ -353,6 +347,9 @@ GPUCLOTH_V3_READBACK_VELOCITIES = 1 << 1
 GPUCLOTH_V3_CACHE_FRAME_NONE = 0
 GPUCLOTH_V3_CACHE_FRAME_WRITE = 1 << 0
 GPUCLOTH_V3_CACHE_FRAME_READ = 1 << 1
+GPUCLOTH_PROXY_LOCAL_FRAME = 0
+GPUCLOTH_PROXY_DIRECT_BARYCENTRIC = 1 << 0
+GPUCLOTH_V3_PROXY_READY = 1
 
 GPUClothV3RuntimeHandle = c_uint64
 GPUClothV3ClothHandle = c_uint64
@@ -405,6 +402,7 @@ GPUCLOTH_FEATURE_CACHE_MULTIPLE = 38
 GPUCLOTH_FEATURE_CACHE_COMPRESSION = 39
 GPUCLOTH_FEATURE_BAKE_RANGE = 40
 GPUCLOTH_FEATURE_CALCULATE_TO_FRAME = 41
+GPUCLOTH_FEATURE_PROXY = 42
 GPUCLOTH_FEATURE_MASS_VERTEX_GROUP = 48
 GPUCLOTH_FEATURE_STIFFNESS_VERTEX_GROUPS = 49
 GPUCLOTH_FEATURE_SOLVER_DIAGNOSTICS = 55
@@ -834,6 +832,31 @@ class GPUClothV3SDBStatus(Structure):
     ]
 
 
+class GPUClothV3ProxyStatus(Structure):
+    _fields_ = [
+        ("struct_size", c_uint),
+        ("status_version", c_uint),
+        ("state", c_uint),
+        ("last_result", c_uint),
+        ("runtime_handle", c_uint64),
+        ("cloth_handle", c_uint64),
+        ("proxy_handle", c_uint64),
+        ("render_object_id", c_uint64),
+        ("proxy_object_id", c_uint64),
+        ("topology_generation", c_uint64),
+        ("render_x_count", c_uint),
+        ("render_y_count", c_uint),
+        ("proxy_x_count", c_uint),
+        ("proxy_y_count", c_uint),
+        ("render_vertex_count", c_uint),
+        ("proxy_vertex_count", c_uint),
+        ("proxy_flags", c_uint),
+        ("reserved0", c_uint),
+        ("apply_count", c_uint64),
+        ("last_generation", c_uint64),
+    ]
+
+
 class GPUClothV3MaterialSpringRecord(Structure):
     _fields_ = [
         ("spring_index", c_uint),
@@ -879,6 +902,7 @@ GPUCLOTH_V3_STRUCT_SIZES = {
     "GPUClothV3ReadbackConfig": 120,
     "GPUClothV3CacheFrameConfig": 104,
     "GPUClothV3ClothStatus": 112,
+    "GPUClothV3ProxyStatus": 112,
     "GPUClothV3SDBStatus": 64,
     "GPUClothV3MaterialSpringRecord": 36,
     "GPUClothV3MaterialStateQuery": 136,
@@ -1463,7 +1487,8 @@ class GPUClothDescriptorLayout(Structure):
         ("drape_config_size", c_uint),
         ("drape_status_size", c_uint),
         ("sdb_status_size", c_uint),
-        ("reserved", c_uint * 3),
+        ("proxy_status_size", c_uint),
+        ("reserved", c_uint * 2),
     ]
 
 class fmatrix3x3(Structure):
