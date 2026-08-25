@@ -132,10 +132,12 @@ def _reject_unsupported_v3_owners(scene, cloth_objects):
         if str(getattr(settings, "solver_type", "")) not in ("PD", "Mil2"):
             unsupported.append(
                 f"solver:{cloth_obj.name_full}:{settings.solver_type}")
-        if bool(getattr(settings, "use_dynamic_mesh", False)):
-            unsupported.append(f"dynamic_mesh:{cloth_obj.name_full}")
         if bool(getattr(settings, "use_anisotropy", False)):
             unsupported.append(f"anisotropy:{cloth_obj.name_full}")
+        if (bool(getattr(settings, "use_dynamic_mesh", False)) and
+                str(getattr(settings, "shapekey_rest", ""))):
+            unsupported.append(
+                f"rest_shape_key_dynamic_mesh:{cloth_obj.name_full}")
         if (str(getattr(settings, "solver_type", "")) == "PD" and
                 str(getattr(settings, "bending_model", "")) == "SDB"):
             unsupported.append(f"SDB_bending:{cloth_obj.name_full}")
