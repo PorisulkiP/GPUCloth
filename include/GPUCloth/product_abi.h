@@ -243,6 +243,7 @@ enum GPUClothBufferElementType : uint32_t {
     GPUCLOTH_ELEMENT_MESH_EDGE,
     GPUCLOTH_ELEMENT_MESH_FACE,
     GPUCLOTH_ELEMENT_MESH_CORNER,
+    GPUCLOTH_ELEMENT_MATERIAL_SPRING,
 };
 
 struct GPUClothBufferView {
@@ -1168,6 +1169,42 @@ struct GPUClothV3ClothStatus {
     uint64_t reserved[3];
 };
 
+// Lossless, handle-scoped material spring record. The complete native spring
+// type carries base kind plus WARP/WEFT direction bits; no host pointer crosses
+// the ABI.
+struct GPUClothV3MaterialSpringRecord {
+    uint32_t spring_index;
+    uint32_t endpoint_a;
+    uint32_t endpoint_b;
+    uint32_t spring_type;
+    uint32_t spring_flags;
+    float linear_stiffness;
+    float angular_stiffness;
+    uint32_t reserved[2];
+};
+
+// Versioned in/out query. Caller supplies record capacity/stride/address and
+// receives accepted anisotropy state plus exact spring records after build.
+// BUFFER_TOO_SMALL reports required_record_count without writing records.
+struct GPUClothV3MaterialStateQuery {
+    uint32_t struct_size;
+    uint32_t query_version;
+    uint32_t record_element_type;
+    uint32_t flags;
+    uint64_t topology_generation;
+    uint64_t geometry_generation;
+    uint64_t required_record_count;
+    uint64_t returned_record_count;
+    uint64_t record_capacity;
+    uint64_t record_stride_bytes;
+    uint64_t records_address;
+    float directional_stiffness[6];
+    float directional_stiffness_max[6];
+    uint32_t bending_model;
+    uint32_t material_flags;
+    uint32_t reserved[2];
+};
+
 struct GPUClothDescriptorLayout {
     uint32_t struct_size;
     uint32_t schema_version;
@@ -1193,8 +1230,7 @@ struct GPUClothDescriptorLayout {
     uint32_t collision_filter_config_size;
     uint32_t proxy_config_size;
     uint32_t diagnostics_config_size;
-    // ABI 1.25 and earlier exposed this word as reserved at offset 96.
-    uint32_t legacy_reserved0;
+    uint32_t material_state_query_size;
     uint32_t diagnostics_event_size;
     uint32_t diagnostics_status_size;
     uint32_t pin_snapshot_config_size;
@@ -1259,4 +1295,8 @@ static_assert(sizeof(GPUClothV3ClothCreateConfig) == 368, "GPUClothV3ClothCreate
 static_assert(sizeof(GPUClothV3ReadbackConfig) == 120, "GPUClothV3ReadbackConfig ABI drift");
 static_assert(sizeof(GPUClothV3CacheFrameConfig) == 104, "GPUClothV3CacheFrameConfig ABI drift");
 static_assert(sizeof(GPUClothV3ClothStatus) == 112, "GPUClothV3ClothStatus ABI drift");
+static_assert(sizeof(GPUClothV3MaterialSpringRecord) == 36,
+    "GPUClothV3MaterialSpringRecord ABI drift");
+static_assert(sizeof(GPUClothV3MaterialStateQuery) == 136,
+    "GPUClothV3MaterialStateQuery ABI drift");
 static_assert(sizeof(GPUClothDescriptorLayout) == 168, "GPUClothDescriptorLayout ABI drift");

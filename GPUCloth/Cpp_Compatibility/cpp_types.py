@@ -314,6 +314,7 @@ GPUCLOTH_ELEMENT_FLOAT2 = 8
 GPUCLOTH_ELEMENT_MESH_EDGE = 9
 GPUCLOTH_ELEMENT_MESH_FACE = 10
 GPUCLOTH_ELEMENT_MESH_CORNER = 11
+GPUCLOTH_ELEMENT_MATERIAL_SPRING = 12
 
 GPUCLOTH_ABI_UNSUPPORTED = 4
 GPUCLOTH_ABI_OK = 0
@@ -815,6 +816,40 @@ class GPUClothV3ClothStatus(Structure):
     ]
 
 
+class GPUClothV3MaterialSpringRecord(Structure):
+    _fields_ = [
+        ("spring_index", c_uint),
+        ("endpoint_a", c_uint),
+        ("endpoint_b", c_uint),
+        ("spring_type", c_uint),
+        ("spring_flags", c_uint),
+        ("linear_stiffness", c_float),
+        ("angular_stiffness", c_float),
+        ("reserved", c_uint * 2),
+    ]
+
+
+class GPUClothV3MaterialStateQuery(Structure):
+    _fields_ = [
+        ("struct_size", c_uint),
+        ("query_version", c_uint),
+        ("record_element_type", c_uint),
+        ("flags", c_uint),
+        ("topology_generation", c_uint64),
+        ("geometry_generation", c_uint64),
+        ("required_record_count", c_uint64),
+        ("returned_record_count", c_uint64),
+        ("record_capacity", c_uint64),
+        ("record_stride_bytes", c_uint64),
+        ("records_address", c_uint64),
+        ("directional_stiffness", c_float * 6),
+        ("directional_stiffness_max", c_float * 6),
+        ("bending_model", c_uint),
+        ("material_flags", c_uint),
+        ("reserved", c_uint * 2),
+    ]
+
+
 GPUCLOTH_V3_STRUCT_SIZES = {
     "GPUClothV3ABIInfo": 64,
     "GPUClothV3RuntimeConfig": 64,
@@ -826,6 +861,8 @@ GPUCLOTH_V3_STRUCT_SIZES = {
     "GPUClothV3ReadbackConfig": 120,
     "GPUClothV3CacheFrameConfig": 104,
     "GPUClothV3ClothStatus": 112,
+    "GPUClothV3MaterialSpringRecord": 36,
+    "GPUClothV3MaterialStateQuery": 136,
 }
 
 
@@ -1392,7 +1429,7 @@ class GPUClothDescriptorLayout(Structure):
         ("collision_filter_config_size", c_uint),
         ("proxy_config_size", c_uint),
         ("diagnostics_config_size", c_uint),
-        ("legacy_reserved0", c_uint),
+        ("material_state_query_size", c_uint),
         ("diagnostics_event_size", c_uint),
         ("diagnostics_status_size", c_uint),
         ("pin_snapshot_config_size", c_uint),

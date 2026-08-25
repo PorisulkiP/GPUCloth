@@ -129,8 +129,6 @@ def _reject_unsupported_v3_owners(scene, cloth_objects):
         if str(getattr(settings, "solver_type", "")) not in ("PD", "Mil2"):
             unsupported.append(
                 f"solver:{cloth_obj.name_full}:{settings.solver_type}")
-        if bool(getattr(settings, "use_anisotropy", False)):
-            unsupported.append(f"anisotropy:{cloth_obj.name_full}")
         if (bool(getattr(settings, "use_dynamic_mesh", False)) and
                 str(getattr(settings, "shapekey_rest", ""))):
             unsupported.append(
@@ -1086,6 +1084,9 @@ _GPUCLOTH_V3_EXPORT_SIGNATURES = {
     "GPUCloth_v3_cloth_get_status": [
         CType.GPUClothV3ClothHandle,
         POINTER(CType.GPUClothV3ClothStatus)],
+    "GPUCloth_v3_cloth_query_material_state": [
+        CType.GPUClothV3ClothHandle,
+        POINTER(CType.GPUClothV3MaterialStateQuery)],
     "GPUCloth_v3_cache_configure": [
         CType.GPUClothV3RuntimeHandle,
         POINTER(CType.GPUClothCacheConfig),
@@ -1181,6 +1182,8 @@ def _validate_descriptor_layout(dll):
             CType.GPUClothCollisionFilterConfig),
         "proxy_config_size": sizeof(CType.GPUClothProxyConfig),
         "diagnostics_config_size": sizeof(CType.GPUClothDiagnosticsConfig),
+        "material_state_query_size": sizeof(
+            CType.GPUClothV3MaterialStateQuery),
         "diagnostics_event_size": sizeof(CType.GPUClothDiagnosticsEvent),
         "diagnostics_status_size": sizeof(CType.GPUClothDiagnosticsStatus),
         "pin_snapshot_config_size": sizeof(
@@ -1207,8 +1210,7 @@ def _validate_descriptor_layout(dll):
         for name, expected_size in expected.items()
         if int(getattr(layout, name)) != expected_size]
     if (int(layout.struct_size) != sizeof(layout) or
-            int(layout.schema_version) != 4 or
-            int(layout.legacy_reserved0) != 0 or
+            int(layout.schema_version) != 5 or
             any(int(value) != 0 for value in layout.reserved) or
             mismatches):
         detail = "; ".join(mismatches) if mismatches else "header mismatch"
@@ -1627,7 +1629,7 @@ def _effective_bending_model(settings):
     bending_model = str(settings.bending_model)
     solver_type = str(settings.solver_type)
     if solver_type == 'Mil2':
-        return 'ANGULAR'
+        return 'LINEAR'
     if solver_type == 'PD' and bending_model in {'', 'LINEAR'}:
         # Migrate old saved PD settings: linear bending is no longer exposed.
         return 'ANGULAR'

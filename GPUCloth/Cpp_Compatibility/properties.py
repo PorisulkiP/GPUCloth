@@ -293,7 +293,8 @@ def _on_solver_change(self, context):
     """Re-apply preset when solver changes (values differ per solver)."""
     if self.material_preset != 'CUSTOM':
         _apply_preset(self, context)
-    elif self.solver_type == 'Mil2' or (
+    elif (self.solver_type == 'Mil2' and
+          self.bending_model not in {'LINEAR', 'ANGULAR'}) or (
             self.solver_type == 'PD' and
             self.bending_model not in {'ANGULAR', 'SDB'}):
         self.bending_model = 'ANGULAR'
@@ -317,6 +318,9 @@ def _bending_model_items(self, context):
         ]
     if self.solver_type == 'Mil2':
         return [
+            ('LINEAR', _t("Linear", "Линейный"),
+             _t("Linear bending stiffness",
+                "Линейная жёсткость изгиба")),
             ('ANGULAR', _t("Angular", "Угловой"),
              _t("Standard Mil2 dihedral-angle bending constraint",
                 "Стандартное ограничение изгиба Mil2 по двугранному углу")),
