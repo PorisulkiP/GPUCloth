@@ -334,11 +334,11 @@ def prepare_pin_snapshot(types, snapshot):
     }
 
 
-def publish_pin_snapshot(dll, types, clmd, snapshot):
+def publish_pin_snapshot(dll, types, cloth_handle, snapshot):
     """Compatibility direct publication; frame paths stage transactions."""
     owner = prepare_pin_snapshot(types, snapshot)
-    result = int(dll.SIM_set_cloth_pin_snapshot(
-        clmd, ctypes.byref(owner["config"])))
+    result = int(dll.GPUCloth_v3_cloth_set_pin_snapshot(
+        cloth_handle, ctypes.byref(owner["config"])))
     if result != types.GPUCLOTH_ABI_OK:
         raise VertexChannelError(
             f"native pin snapshot rejected: "
@@ -451,7 +451,7 @@ def evaluated_local_positions(obj, depsgraph):
     return positions
 
 
-def apply_float_channel(dll, types, clmd, feature_id, channel,
+def apply_float_channel(dll, types, cloth_handle, feature_id, channel,
                         element_width, values):
     if element_width <= 0 or len(values) % element_width:
         raise VertexChannelError("vertex channel width does not divide data")
@@ -465,7 +465,8 @@ def apply_float_channel(dll, types, clmd, feature_id, channel,
     config.element_width = element_width
     config.element_count = len(values) // element_width
     config.data_address = ctypes.addressof(payload)
-    result = int(dll.SIM_set_cloth_vertex_channel(clmd, ctypes.byref(config)))
+    result = int(dll.GPUCloth_v3_cloth_set_vertex_channel(
+        cloth_handle, ctypes.byref(config)))
     if result != types.GPUCLOTH_ABI_OK:
         raise VertexChannelError(
             f"native vertex channel rejected: "

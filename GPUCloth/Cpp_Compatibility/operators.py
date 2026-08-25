@@ -28,7 +28,7 @@ from fractions import Fraction
 import numpy as np
 from ctypes import (
     addressof, cdll, windll, POINTER, pointer, cast,
-    c_bool, c_float, c_short, c_int, c_uint, c_uint64, c_void_p, c_size_t,
+    c_bool, c_float, c_int, c_uint, c_uint64, c_void_p, c_size_t,
     c_char_p,
     create_string_buffer, sizeof,
 )
@@ -65,10 +65,9 @@ _V3_FPS_NUMERATOR_MAX = 0x7FFF
 _V3_FPS_DENOMINATOR_MAX = 0xFFFFFFFF
 _V3_FPS_INPUT_DENOMINATOR_MAX = min(_V3_FPS_DENOMINATOR_MAX, 1 << 12)
 _V3_FPS_RATE_TOLERANCE = 4.0 * (2.0 ** -23)
-g_scene              = None   # Указатель на CType.Scene
-g_obj                = []     # list[POINTER(CType.Object)]  — объекты ткани
-g_clmd               = []     # list[POINTER(CType.ClothModifierData)]
-g_mesh               = []     # list[POINTER(CType.Mesh)]
+g_cloth_handles      = []     # list[GPUClothV3ClothHandle]
+_cloth_input_owners  = []     # persistent v3 create/config payloads
+_readback_owners     = []     # persistent v3 positions/velocities payloads
 g_clothOBJs          = []     # list[bpy.types.Object]  — Blender-объекты ткани
 g_simulationOBJs     = []     # render owner -> mesh actually sent to solver
 g_clothCollisionOBJs = []     # list[POINTER(CType.Object)] — объекты столкновения
@@ -107,7 +106,8 @@ def _reset_effector_publication_metrics():
 
 def _runtime_owners_retained():
     return bool(
-        _runtime_handle_value() or g_scene is not None or g_obj or g_mesh or g_clmd or
+        _runtime_handle_value() or g_cloth_handles or
+        _cloth_input_owners or _readback_owners or
         g_clothOBJs or g_simulationOBJs or g_clothCollisionOBJs or
         g_proxy_handles or _collision_keepalive or _solver_diagnostics or
         _pin_snapshot_states or _dynamic_mesh_states or
@@ -116,8 +116,53 @@ def _runtime_owners_retained():
         _initial_positions or _live_arrays)
 
 
+def _reject_unsupported_v3_owners(scene, cloth_objects):
+    """Reject owners without a v3 ABI surface before native mutation."""
+    unsupported = []
+    helper = scene.gpu_cloth_helper
+    if (bool(getattr(helper, "use_disk_cache", False)) or
+            bool(getattr(helper, "use_external_cache", False)) or
+            bool(getattr(helper, "playback_mode", False)) or
+            bool(getattr(helper, "is_baked", False))):
+        unsupported.append("cache")
+    for cloth_obj in cloth_objects:
+        settings = cloth_obj.GPUCloth
+        if bool(getattr(settings, "use_proxy", False)):
+            unsupported.append(f"proxy:{cloth_obj.name_full}")
+        if str(getattr(settings, "solver_type", "")) not in ("PD", "Mil2"):
+            unsupported.append(
+                f"solver:{cloth_obj.name_full}:{settings.solver_type}")
+        if bool(getattr(settings, "use_dynamic_mesh", False)):
+            unsupported.append(f"dynamic_mesh:{cloth_obj.name_full}")
+        if bool(getattr(settings, "use_anisotropy", False)):
+            unsupported.append(f"anisotropy:{cloth_obj.name_full}")
+        if str(getattr(settings, "shapekey_rest", "")):
+            unsupported.append(f"rest_shape_key:{cloth_obj.name_full}")
+        for name, label in (
+                ("vgroup_struct", "structural_stiffness_group"),
+                ("vgroup_shear", "shear_stiffness_group"),
+                ("vgroup_bend", "bending_stiffness_group"),
+                ("vgroup_intern", "internal_stiffness_group"),
+                ("vgroup_shrink", "shrink_group")):
+            if str(getattr(settings, name, "")):
+                unsupported.append(f"{label}:{cloth_obj.name_full}")
+        if (str(getattr(settings, "solver_type", "")) == "PD" and
+                str(getattr(settings, "bending_model", "")) == "SDB"):
+            unsupported.append(f"SDB_bending:{cloth_obj.name_full}")
+    if unsupported:
+        raise RuntimeError(
+            "NOT_CONFIGURABLE: ABI v3 has no owner for " +
+            ", ".join(unsupported))
+
+
 def _runtime_handle_value():
     value = getattr(g_runtime_handle, "value", g_runtime_handle)
+    return int(value or 0)
+
+
+def _opaque_handle_value(handle):
+    """Read a ctypes v3 handle without relying on ctypes.__int__."""
+    value = getattr(handle, "value", handle)
     return int(value or 0)
 
 
@@ -392,6 +437,123 @@ def _capture_modifier_input_mesh(obj, depsgraph):
         **topology,
         "positions": tuple(positions),
         "capture_space": "CLOTH_INPUT_LOCAL",
+    }
+
+
+def _create_v3_cloth_owner(
+        dll, cloth_obj, simulation_obj, mesh_snapshot, topology_generation,
+        backend, geometry_generation=1):
+    """Create one native v3 cloth; retain every caller-owned input buffer."""
+    vertex_count = int(mesh_snapshot["vertex_count"])
+    edges = tuple(mesh_snapshot["edges"])
+    polygons = tuple(mesh_snapshot["polygons"])
+    corners = tuple(mesh_snapshot["loops"])
+    if not edges or not polygons or not corners:
+        raise RuntimeError(
+            "v3 cloth create requires non-empty vertices, edges, faces, "
+            "and corners")
+    object_id = _blender_session_uid(cloth_obj, "v3 cloth object")
+    topology_generation = int(topology_generation)
+    geometry_generation = int(geometry_generation)
+    if topology_generation <= 0 or geometry_generation <= 0:
+        raise RuntimeError("v3 cloth generations must be positive")
+
+    positions = (c_float * (vertex_count * 3))(
+        *(component for position in mesh_snapshot["positions"]
+          for component in position))
+    edge_payload = (CType.GPUClothV3MeshEdge * len(edges))()
+    for index, (vertex_a, vertex_b) in enumerate(edges):
+        edge_payload[index].vertex_a = int(vertex_a)
+        edge_payload[index].vertex_b = int(vertex_b)
+        edge_payload[index].edge_flags = 0
+        edge_payload[index].reserved = 0
+    face_payload = (CType.GPUClothV3MeshFace * len(polygons))()
+    for index, (first_corner, corner_count) in enumerate(polygons):
+        face_payload[index].first_corner = int(first_corner)
+        face_payload[index].corner_count = int(corner_count)
+        face_payload[index].face_flags = 0
+        face_payload[index].reserved = 0
+    corner_payload = (CType.GPUClothV3MeshCorner * len(corners))()
+    for index, (vertex_index, edge_index) in enumerate(corners):
+        corner_payload[index].vertex_index = int(vertex_index)
+        corner_payload[index].edge_index = int(edge_index)
+
+    object_matrix = _matrix_signature(
+        simulation_obj.matrix_world,
+        f"{simulation_obj.name_full!r} world transform")
+    inverse_matrix = _matrix_signature(
+        _matrix_inverse(
+            simulation_obj.matrix_world,
+            f"{simulation_obj.name_full!r} world transform"),
+        f"{simulation_obj.name_full!r} inverse transform")
+    config = CType.GPUClothV3ClothCreateConfig()
+    config.struct_size = sizeof(config)
+    config.config_version = 1
+    config.cloth_flags = CType.GPUCLOTH_V3_CLOTH_NONE
+    config.backend = int(backend)
+    config.object_id = object_id
+    config.topology_generation = topology_generation
+    config.geometry_generation = geometry_generation
+    config.vertex_count = vertex_count
+    config.edge_count = len(edges)
+    config.face_count = len(polygons)
+    config.corner_count = len(corners)
+    _set_buffer_view(
+        config.positions, CType.GPUCLOTH_ELEMENT_FLOAT3, vertex_count,
+        sizeof(c_float) * 3, addressof(positions), geometry_generation)
+    _set_buffer_view(
+        config.edges, CType.GPUCLOTH_ELEMENT_MESH_EDGE, len(edges),
+        sizeof(CType.GPUClothV3MeshEdge), addressof(edge_payload),
+        topology_generation)
+    _set_buffer_view(
+        config.faces, CType.GPUCLOTH_ELEMENT_MESH_FACE, len(polygons),
+        sizeof(CType.GPUClothV3MeshFace), addressof(face_payload),
+        topology_generation)
+    _set_buffer_view(
+        config.corners, CType.GPUCLOTH_ELEMENT_MESH_CORNER, len(corners),
+        sizeof(CType.GPUClothV3MeshCorner), addressof(corner_payload),
+        topology_generation)
+    config.object_to_world[:] = object_matrix
+    config.world_to_object[:] = inverse_matrix
+    config.reserved[:] = (0, 0, 0)
+
+    out_handle = CType.GPUClothV3ClothHandle(0)
+    result = int(dll.GPUCloth_v3_cloth_create(
+        g_runtime_handle, pointer(config), pointer(out_handle)))
+    if result != CType.GPUCLOTH_ABI_OK or not out_handle.value:
+        raise RuntimeError(f"v3 cloth create rejected with {result}")
+
+    readback_positions = (c_float * (vertex_count * 3))()
+    readback_velocities = (c_float * (vertex_count * 3))()
+    readback = CType.GPUClothV3ReadbackConfig()
+    readback.struct_size = sizeof(readback)
+    readback.config_version = 1
+    readback.readback_flags = (
+        CType.GPUCLOTH_V3_READBACK_POSITIONS |
+        CType.GPUCLOTH_V3_READBACK_VELOCITIES)
+    readback.reserved0 = 0
+    readback.frame_generation = 0
+    _set_buffer_view(
+        readback.positions, CType.GPUCLOTH_ELEMENT_FLOAT3, vertex_count,
+        sizeof(c_float) * 3, addressof(readback_positions), 0)
+    _set_buffer_view(
+        readback.velocities, CType.GPUCLOTH_ELEMENT_FLOAT3, vertex_count,
+        sizeof(c_float) * 3, addressof(readback_velocities), 0)
+    readback.reserved[:] = (0, 0)
+    return {
+        "handle": out_handle,
+        "config": config,
+        "positions": positions,
+        "edges": edge_payload,
+        "faces": face_payload,
+        "corners": corner_payload,
+        "readback": readback,
+        "readback_positions": readback_positions,
+        "readback_velocities": readback_velocities,
+        "object_id": object_id,
+        "topology_generation": topology_generation,
+        "geometry_generation": geometry_generation,
+        "vertex_count": vertex_count,
     }
 
 
@@ -701,15 +863,23 @@ def _configure_cache_features(dll, scene):
     return CType.GPUCLOTH_ABI_OK
 
 
-def _configure_simulation_features(dll, clmd, scene, settings):
+def _v3_configure_feature(dll, cloth_handle, config):
+    header = cast(
+        pointer(config), POINTER(CType.GPUClothFeatureConfigHeader))
+    result = int(dll.GPUCloth_v3_cloth_configure(cloth_handle, header))
+    if result != CType.GPUCLOTH_ABI_OK:
+        raise RuntimeError(f"typed v3 cloth feature rejected with {result}")
+    return result
+
+
+def _configure_simulation_features(dll, cloth_handle, scene, settings):
     solver_mask = {
-        'XPBD': CType.GPUCLOTH_SOLVER_XPBD,
         'PD': CType.GPUCLOTH_SOLVER_PD,
         'Mil2': CType.GPUCLOTH_SOLVER_MIL2,
     }.get(settings.solver_type)
     if solver_mask is None:
         raise RuntimeError(
-            f"typed simulation config does not own solver "
+            f"typed simulation config owns only PD/Mil2; got "
             f"{settings.solver_type}")
 
     config = CType.GPUClothSimulationConfig()
@@ -735,21 +905,20 @@ def _configure_simulation_features(dll, clmd, scene, settings):
             CType.GPUCLOTH_FEATURE_SIMULATION_QUALITY,
             CType.GPUCLOTH_FEATURE_AIR_DAMPING):
         config.header.feature_id = feature
-        result = int(dll.SIM_configure_cloth_feature(clmd, header))
+        result = int(dll.GPUCloth_v3_cloth_configure(cloth_handle, header))
         if result != CType.GPUCLOTH_ABI_OK:
             raise RuntimeError(
                 f"typed simulation feature {feature} rejected with {result}")
     return CType.GPUCLOTH_ABI_OK
 
 
-def _configure_solver_diagnostics(dll, clmd, event_capacity=16):
+def _configure_solver_diagnostics(dll, cloth_handle, event_capacity=16):
     if event_capacity < 1 or event_capacity > 64:
         raise RuntimeError("diagnostic event capacity must be in [1, 64]")
     event_type = CType.GPUClothDiagnosticsEvent * event_capacity
     events = event_type()
-    generation = (
-        (int(addressof(clmd.contents)) ^
-         0x475055434C4F5448) & 0xffffffffffffffff) or 1
+    generation = ((_opaque_handle_value(cloth_handle) ^ 0x475055434C4C4F54) &
+                  0xffffffffffffffff) or 1
     config = CType.GPUClothDiagnosticsConfig()
     config.header.struct_size = sizeof(config)
     config.header.feature_id = CType.GPUCLOTH_FEATURE_SOLVER_DIAGNOSTICS
@@ -769,7 +938,7 @@ def _configure_solver_diagnostics(dll, clmd, event_capacity=16):
     config.event_buffer.generation = generation
     header = cast(
         pointer(config), POINTER(CType.GPUClothFeatureConfigHeader))
-    result = int(dll.SIM_configure_cloth_feature(clmd, header))
+    result = int(dll.GPUCloth_v3_cloth_configure(cloth_handle, header))
     if result != CType.GPUCLOTH_ABI_OK:
         raise RuntimeError(
             f"typed solver diagnostics rejected with {result}")
@@ -1033,7 +1202,7 @@ def _validate_product_abi(dll):
 
 
 def _validate_native_preparation(
-        dll, clmd, topology_generation, requested_generation):
+        dll, cloth_handle, topology_generation, requested_generation):
     config = CType.GPUClothPreparationConfig()
     config.struct_size = sizeof(config)
     config.config_version = 1
@@ -1043,8 +1212,8 @@ def _validate_native_preparation(
     status = CType.GPUClothPreparationStatus()
     status.struct_size = sizeof(status)
     status.status_version = 1
-    result = int(dll.SIM_validate_cloth_initial_state(
-        clmd, pointer(config), pointer(status)))
+    result = int(dll.GPUCloth_v3_cloth_validate_initial_state(
+        cloth_handle, pointer(config), pointer(status)))
     if (result != CType.GPUCLOTH_ABI_OK or
             int(status.result) != CType.GPUCLOTH_PREPARATION_RESULT_READY or
             not (int(status.status_flags) &
@@ -1052,8 +1221,8 @@ def _validate_native_preparation(
         witness = CType.GPUClothInvariantWitness()
         witness.struct_size = sizeof(witness)
         witness.witness_version = 1
-        witness_result = int(dll.SIM_get_cloth_invariant_status(
-            clmd, pointer(witness)))
+        witness_result = int(dll.GPUCloth_v3_cloth_get_invariant_status(
+            cloth_handle, pointer(witness)))
         detail = {
             "abi_result": result,
             "preparation_result": int(status.result),
@@ -1135,12 +1304,12 @@ def get_drape_ui_status(cloth_obj):
     return _drape_status_by_uid.get(uid)
 
 
-def _invariant_witness_data(clmd):
+def _invariant_witness_data(cloth_handle):
     witness = CType.GPUClothInvariantWitness()
     witness.struct_size = sizeof(witness)
     witness.witness_version = 1
-    result = int(g_dll.SIM_get_cloth_invariant_status(
-        clmd, pointer(witness)))
+    result = int(g_dll.GPUCloth_v3_cloth_get_invariant_status(
+        cloth_handle, pointer(witness)))
     if result != CType.GPUCLOTH_ABI_OK:
         raise RuntimeError(f"invariant status rejected with {result}")
     invariant = int(witness.invariant)
@@ -1194,7 +1363,7 @@ def get_invariant_ui_status(cloth_obj):
     if g_dll is None or index < 0:
         return None
     try:
-        return _invariant_witness_data(g_clmd[index])
+        return _invariant_witness_data(g_cloth_handles[index])
     except (OSError, RuntimeError):
         return None
 
@@ -1207,8 +1376,8 @@ def get_preparation_ui_status(cloth_obj):
     status.struct_size = sizeof(status)
     status.status_version = 1
     try:
-        result = int(g_dll.SIM_get_cloth_preparation_status(
-            g_clmd[index], pointer(status)))
+        result = int(g_dll.GPUCloth_v3_cloth_get_preparation_status(
+            g_cloth_handles[index], pointer(status)))
     except OSError:
         return None
     if result != CType.GPUCLOTH_ABI_OK:
@@ -1270,21 +1439,6 @@ def _ordered_diagnostic_events(owner, status):
     return ordered
 
 
-def _expose_solver_result(index, status):
-    if index < 0 or index >= len(g_clmd):
-        return
-    result_ptr = g_clmd[index].contents.solver_result
-    if not result_ptr:
-        return
-    result_ptr.contents.status = int(status.solver_result_status)
-    result_ptr.contents.max_iterations = int(status.max_iterations)
-    result_ptr.contents.min_iterations = int(status.min_iterations)
-    result_ptr.contents.avg_iterations = float(status.avg_iterations)
-    result_ptr.contents.max_error = float(status.max_error_value)
-    result_ptr.contents.min_error = float(status.min_error_value)
-    result_ptr.contents.avg_error = float(status.avg_error_value)
-
-
 def _solver_diagnostic_snapshot(index):
     if index < 0 or index >= len(_solver_diagnostics):
         return None
@@ -1292,8 +1446,10 @@ def _solver_diagnostic_snapshot(index):
     status = CType.GPUClothDiagnosticsStatus()
     status.struct_size = sizeof(status)
     status.status_version = 1
-    result = int(g_dll.SIM_get_cloth_solver_diagnostics(
-        g_clmd[index], pointer(status)))
+    if index >= len(g_cloth_handles):
+        return None
+    result = int(g_dll.GPUCloth_v3_cloth_get_diagnostics(
+        g_cloth_handles[index], pointer(status)))
     status_data = {
         "status_version": int(status.status_version),
         "status_flags": int(status.status_flags),
@@ -1330,7 +1486,6 @@ def _solver_diagnostic_snapshot(index):
             raise RuntimeError(
                 "diagnostic event generation changed behind caller buffer")
         events = _ordered_diagnostic_events(owner, status)
-        _expose_solver_result(index, status)
     snapshot = {
         "query_result": result,
         "status": status_data,
@@ -1518,7 +1673,7 @@ def _capture_material_features(settings, material_coordinates):
 
 
 def _publish_material_features(
-        dll, clmd, owner, publish_anisotropy=False):
+        dll, cloth_handle, owner, publish_anisotropy=False):
     source = owner["config"]
     if publish_anisotropy:
         if not owner["anisotropy"]:
@@ -1550,7 +1705,7 @@ def _publish_material_features(
             config.material_flags = 0
         header = cast(
             pointer(config), POINTER(CType.GPUClothFeatureConfigHeader))
-        result = int(dll.SIM_configure_cloth_feature(clmd, header))
+        result = int(dll.GPUCloth_v3_cloth_configure(cloth_handle, header))
         if result != CType.GPUCLOTH_ABI_OK:
             raise RuntimeError(
                 f"typed material feature {feature} rejected with {result}")
@@ -1611,12 +1766,12 @@ def _capture_internal_springs_config(settings):
     return config
 
 
-def _publish_internal_springs_config(dll, clmd, prepared_config):
+def _publish_internal_springs_config(dll, cloth_handle, prepared_config):
     config = CType.GPUClothConstraintConfig.from_buffer_copy(
         bytes(prepared_config))
     header = cast(
         pointer(config), POINTER(CType.GPUClothFeatureConfigHeader))
-    result = int(dll.SIM_configure_cloth_feature(clmd, header))
+    result = int(dll.GPUCloth_v3_cloth_configure(cloth_handle, header))
     if result != CType.GPUCLOTH_ABI_OK:
         raise RuntimeError(
             f"typed internal-springs config rejected with {result}")
@@ -1657,7 +1812,7 @@ def _capture_pressure_features(settings):
     return config, tuple(features)
 
 
-def _publish_pressure_features(dll, clmd, prepared):
+def _publish_pressure_features(dll, cloth_handle, prepared):
     if prepared is None:
         return CType.GPUCLOTH_ABI_OK
     prepared_config, features = prepared
@@ -1667,7 +1822,7 @@ def _publish_pressure_features(dll, clmd, prepared):
         pointer(config), POINTER(CType.GPUClothFeatureConfigHeader))
     for feature in features:
         config.header.feature_id = feature
-        result = int(dll.SIM_configure_cloth_feature(clmd, header))
+        result = int(dll.GPUCloth_v3_cloth_configure(cloth_handle, header))
         if result != CType.GPUCLOTH_ABI_OK:
             raise RuntimeError(
                 f"typed pressure feature {feature} rejected with {result}")
@@ -1724,7 +1879,7 @@ def _rest_shape_key_positions(settings_owner, simulation_obj):
     return key_block.name, positions
 
 
-def _upload_rest_shape_key(dll, clmd, prepared_rest_shape):
+def _upload_rest_shape_key(dll, cloth_handle, prepared_rest_shape):
     if prepared_rest_shape is None:
         return CType.GPUCLOTH_ABI_OK
 
@@ -1750,7 +1905,7 @@ def _upload_rest_shape_key(dll, clmd, prepared_rest_shape):
     config.rest_positions.generation = generation
     header = cast(
         pointer(config), POINTER(CType.GPUClothFeatureConfigHeader))
-    result = int(dll.SIM_configure_cloth_feature(clmd, header))
+    result = int(dll.GPUCloth_v3_cloth_configure(cloth_handle, header))
     if result != CType.GPUCLOTH_ABI_OK:
         raise RuntimeError(
             f"typed rest shape key config rejected with {result}")
@@ -1770,7 +1925,7 @@ def _blender_sewing_edges(settings_owner, simulation_obj):
     return loose_edges
 
 
-def _upload_sewing(dll, clmd, settings_owner, simulation_obj):
+def _upload_sewing(dll, cloth_handle, settings_owner, simulation_obj):
     loose_edges = _blender_sewing_edges(settings_owner, simulation_obj)
     if not loose_edges:
         return CType.GPUCLOTH_ABI_OK
@@ -1800,7 +1955,7 @@ def _upload_sewing(dll, clmd, settings_owner, simulation_obj):
     config.activation_speed = 0.0
     header = cast(
         pointer(config), POINTER(CType.GPUClothFeatureConfigHeader))
-    result = int(dll.SIM_configure_cloth_feature(clmd, header))
+    result = int(dll.GPUCloth_v3_cloth_configure(cloth_handle, header))
     if result != CType.GPUCLOTH_ABI_OK:
         raise RuntimeError(f"typed sewing config rejected with {result}")
     return result
@@ -1826,8 +1981,8 @@ def _capture_pin_snapshot(
         identity_obj=settings_owner)
 
 
-def _publish_prepared_pin_snapshot(dll, clmd, snapshot):
-    return publish_pin_snapshot(dll, CType, clmd, snapshot)
+def _publish_prepared_pin_snapshot(dll, cloth_handle, snapshot):
+    return publish_pin_snapshot(dll, CType, cloth_handle, snapshot)
 
 
 def _capture_stiffness_channels(settings_owner, simulation_obj):
@@ -1849,17 +2004,17 @@ def _capture_stiffness_channels(settings_owner, simulation_obj):
     return tuple(channels)
 
 
-def _upload_stiffness_channels(dll, clmd, prepared_channels):
+def _upload_stiffness_channels(dll, cloth_handle, prepared_channels):
     for channel, weights in prepared_channels:
         apply_float_channel(
-            dll, CType, clmd,
+            dll, CType, cloth_handle,
             CType.GPUCLOTH_FEATURE_STIFFNESS_VERTEX_GROUPS,
             channel, 1, weights)
     return CType.GPUCLOTH_ABI_OK
 
 
 def _upload_pressure_weights(
-        dll, clmd, settings_owner, simulation_obj):
+        dll, cloth_handle, settings_owner, simulation_obj):
     if not settings_owner.GPUCloth.use_pressure:
         return CType.GPUCLOTH_ABI_OK
     weights = vertex_group_weights(
@@ -1867,28 +2022,28 @@ def _upload_pressure_weights(
     if weights is None:
         return CType.GPUCLOTH_ABI_OK
     return apply_float_channel(
-        dll, CType, clmd, CType.GPUCLOTH_FEATURE_PRESSURE_VERTEX_GROUP,
+        dll, CType, cloth_handle, CType.GPUCLOTH_FEATURE_PRESSURE_VERTEX_GROUP,
         CType.GPUCLOTH_VERTEX_PRESSURE_WEIGHT, 1, weights)
 
 
 def _upload_shrink_weights(
-        dll, clmd, settings_owner, simulation_obj):
+        dll, cloth_handle, settings_owner, simulation_obj):
     weights = vertex_group_weights(
         simulation_obj, settings_owner.GPUCloth.vgroup_shrink, "shrink")
     if weights is None:
         return CType.GPUCLOTH_ABI_OK
     return apply_float_channel(
-        dll, CType, clmd, CType.GPUCLOTH_FEATURE_SHRINK,
+        dll, CType, cloth_handle, CType.GPUCLOTH_FEATURE_SHRINK,
         CType.GPUCLOTH_VERTEX_SHRINK_WEIGHT, 1, weights)
 
 
 def _upload_object_collision_mask(
-        dll, clmd, settings_owner, simulation_obj):
+        dll, cloth_handle, settings_owner, simulation_obj):
     mask = binary_exclusion_mask(
         simulation_obj, settings_owner.GPUCloth.vgroup_objcol,
         "object collision")
     return apply_float_channel(
-        dll, CType, clmd, CType.GPUCLOTH_FEATURE_COLLISION_VERTEX_GROUP,
+        dll, CType, cloth_handle, CType.GPUCLOTH_FEATURE_COLLISION_VERTEX_GROUP,
         CType.GPUCLOTH_VERTEX_OBJECT_COLLISION_MASK, 1, mask)
 
 
@@ -1899,11 +2054,11 @@ def _capture_self_collision_mask(settings_owner, simulation_obj):
     return None if weights is None else tuple(weights)
 
 
-def _upload_self_collision_mask(dll, clmd, prepared_mask):
+def _upload_self_collision_mask(dll, cloth_handle, prepared_mask):
     if prepared_mask is None:
         return CType.GPUCLOTH_ABI_OK
     return apply_float_channel(
-        dll, CType, clmd,
+        dll, CType, cloth_handle,
         CType.GPUCLOTH_FEATURE_SELF_COLLISION_VERTEX_GROUP,
         CType.GPUCLOTH_VERTEX_SELF_COLLISION_MASK, 1, prepared_mask)
 
@@ -2440,7 +2595,7 @@ def _capture_cloth_collision_config(settings):
     return config
 
 
-def _publish_cloth_collision_config(dll, clmd, prepared_config):
+def _publish_cloth_collision_config(dll, cloth_handle, prepared_config):
     for feature_id in (
             CType.GPUCLOTH_FEATURE_STATIC_OBJECT_COLLISION,
             CType.GPUCLOTH_FEATURE_COLLISION_FRICTION_DAMPING,
@@ -2450,8 +2605,8 @@ def _publish_cloth_collision_config(dll, clmd, prepared_config):
         config = CType.GPUClothCollisionConfig.from_buffer_copy(
             bytes(prepared_config))
         config.header.feature_id = feature_id
-        result = int(dll.SIM_configure_cloth_feature(
-            clmd,
+        result = int(dll.GPUCloth_v3_cloth_configure(
+            cloth_handle,
             cast(
                 pointer(config),
                 POINTER(CType.GPUClothFeatureConfigHeader))))
@@ -3338,10 +3493,10 @@ def _prepare_effector_weights(settings, collection_id):
     }
 
 
-def _configure_effector_weights(dll, clmd, owner):
+def _configure_effector_weights(dll, cloth_handle, owner):
     config = owner["config"]
-    result = int(dll.SIM_configure_cloth_feature(
-        clmd,
+    result = int(dll.GPUCloth_v3_cloth_configure(
+        cloth_handle,
         cast(pointer(config), POINTER(CType.GPUClothFeatureConfigHeader))))
     if result != CType.GPUCLOTH_ABI_OK:
         raise RuntimeError(
@@ -3363,14 +3518,14 @@ def _collection_record_identity(record):
     )
 
 
-def _query_collection_snapshot(dll, clmd, owner, transaction_id):
+def _query_collection_snapshot(dll, cloth_handle, owner, transaction_id):
     expected_records = owner["records"]
     query = CType.GPUClothCollectionQuery()
     query.struct_size = sizeof(query)
     query.query_version = 1
     query.collection_kind = owner["collection_kind"]
-    probe_result = int(dll.SIM_query_cloth_collection(
-        clmd, pointer(query)))
+    probe_result = int(dll.GPUCloth_v3_cloth_query_collection(
+        cloth_handle, pointer(query)))
     expected_probe_result = (
         CType.GPUCLOTH_ABI_COUNT_MISMATCH
         if expected_records else CType.GPUCLOTH_ABI_OK)
@@ -3385,8 +3540,8 @@ def _query_collection_snapshot(dll, clmd, owner, transaction_id):
     if expected_records:
         query.record_capacity = len(queried)
         query.records_address = addressof(queried)
-        result = int(dll.SIM_query_cloth_collection(
-            clmd, pointer(query)))
+        result = int(dll.GPUCloth_v3_cloth_query_collection(
+            cloth_handle, pointer(query)))
         if result != CType.GPUCLOTH_ABI_OK:
             raise RuntimeError(
                 f"collection query rejected with {result}")
@@ -3449,12 +3604,12 @@ def _next_collider_history(prepared_collections):
 
 
 def _commit_frame_inputs(
-        dll, clmds, prepared_collections, prepared_pins,
+        dll, cloth_handles, prepared_collections, prepared_pins,
         prepared_dynamic_meshes, source_generation,
         verify_committed_state=False):
     global _collider_history
     if not (
-            len(clmds) == len(prepared_collections) ==
+            len(cloth_handles) == len(prepared_collections) ==
             len(prepared_pins) == len(prepared_dynamic_meshes)):
         raise RuntimeError("staged frame input owners are not aligned")
     next_collider_history = _next_collider_history(
@@ -3464,39 +3619,40 @@ def _commit_frame_inputs(
     transaction.transaction_version = 1
     transaction.source_generation = int(source_generation)
     transaction_id = c_uint64()
-    result = int(dll.SIM_begin_collection_transaction(
-        pointer(transaction), pointer(transaction_id)))
+    result = int(dll.GPUCloth_v3_collection_transaction_begin(
+        g_runtime_handle, pointer(transaction), pointer(transaction_id)))
     if result != CType.GPUCLOTH_ABI_OK or not transaction_id.value:
         raise RuntimeError(
             f"collection transaction begin rejected with {result}")
 
     committed = False
     try:
-        for clmd, owners, pin_owner, dynamic_owner in zip(
-                clmds, prepared_collections, prepared_pins,
+        for cloth_handle, owners, pin_owner, dynamic_owner in zip(
+                cloth_handles, prepared_collections, prepared_pins,
                 prepared_dynamic_meshes):
             for key in ("collision", "effector"):
                 owner = owners[key]
-                result = int(dll.SIM_stage_cloth_collection(
-                    transaction_id.value, clmd, pointer(owner["config"])))
+                result = int(dll.GPUCloth_v3_collection_stage_snapshot(
+                    transaction_id.value, cloth_handle,
+                    pointer(owner["config"])))
                 if result != CType.GPUCLOTH_ABI_OK:
                     raise RuntimeError(
                         f"{key} collection stage rejected with {result}")
-            result = int(dll.SIM_stage_cloth_pin_snapshot(
-                transaction_id.value, clmd,
+            result = int(dll.GPUCloth_v3_collection_stage_pin_snapshot(
+                transaction_id.value, cloth_handle,
                 pointer(pin_owner["config"])))
             if result != CType.GPUCLOTH_ABI_OK:
                 raise RuntimeError(
                     f"pin snapshot stage rejected with {result}")
             if dynamic_owner is not None:
-                result = int(dll.SIM_stage_cloth_mesh_state(
-                    transaction_id.value, clmd,
+                result = int(dll.GPUCloth_v3_collection_stage_mesh_state(
+                    transaction_id.value, cloth_handle,
                     pointer(dynamic_owner["config"])))
                 if result != CType.GPUCLOTH_ABI_OK:
                     raise RuntimeError(
                         f"dynamic mesh stage rejected with {result}")
-        result = int(dll.SIM_commit_collection_transaction(
-            transaction_id.value))
+        result = int(dll.GPUCloth_v3_collection_transaction_commit(
+            g_runtime_handle, transaction_id.value))
         if result != CType.GPUCLOTH_ABI_OK:
             raise RuntimeError(
                 f"collection transaction commit rejected with {result}")
@@ -3506,8 +3662,8 @@ def _commit_frame_inputs(
         _input_generation["value"] = int(source_generation)
     finally:
         if not committed:
-            abort_result = int(dll.SIM_abort_collection_transaction(
-                transaction_id.value))
+            abort_result = int(dll.GPUCloth_v3_collection_transaction_abort(
+                g_runtime_handle, transaction_id.value))
             if abort_result != CType.GPUCLOTH_ABI_OK:
                 raise RuntimeError(
                     f"collection transaction abort rejected with "
@@ -3517,21 +3673,21 @@ def _commit_frame_inputs(
         return None
 
     snapshots = []
-    for clmd, owners in zip(clmds, prepared_collections):
+    for cloth_handle, owners in zip(cloth_handles, prepared_collections):
         _effector_publication_state[
             "verification_round_trip_count"] += 1
         status = CType.GPUClothCollectionStatus()
         status.struct_size = sizeof(status)
         status.status_version = 1
-        result = int(dll.SIM_get_cloth_collection_status(
-            clmd, pointer(status)))
+        result = int(dll.GPUCloth_v3_cloth_get_collection_status(
+            cloth_handle, pointer(status)))
         if result != CType.GPUCLOTH_ABI_OK:
             raise RuntimeError(
                 f"collection status rejected with {result}")
         collision = _query_collection_snapshot(
-            dll, clmd, owners["collision"], transaction_id.value)
+            dll, cloth_handle, owners["collision"], transaction_id.value)
         effector = _query_collection_snapshot(
-            dll, clmd, owners["effector"], transaction_id.value)
+            dll, cloth_handle, owners["effector"], transaction_id.value)
         _effector_publication_state[
             "verification_round_trip_count"] += (
                 2 + int(bool(owners["collision"]["records"])) +
@@ -3577,7 +3733,7 @@ def _commit_frame_inputs(
 def _publish_frame_inputs(context, depsgraph):
     if not (
             len(g_clothOBJs) == len(g_simulationOBJs) ==
-            len(g_clmd) == len(_pin_snapshot_states) ==
+            len(g_cloth_handles) == len(_pin_snapshot_states) ==
             len(_dynamic_mesh_states)):
         raise RuntimeError("frame input owners are not aligned")
     generation = max(
@@ -3650,8 +3806,10 @@ def _publish_frame_inputs(context, depsgraph):
             raise RuntimeError(
                 "effector weights or collection changed; reprepare is "
                 "required")
+    # v3 transaction source generation must match runtime's published frame.
+    _runtime_update(context.scene, generation=generation)
     committed_collections = _commit_frame_inputs(
-        g_dll, g_clmd, prepared_collections, prepared_pin_owners,
+        g_dll, g_cloth_handles, prepared_collections, prepared_pin_owners,
         prepared_dynamic_owners, generation)
     if committed_collections is not None:
         _collection_snapshots.clear()
@@ -3669,9 +3827,6 @@ def _publish_frame_inputs(context, depsgraph):
     for index, snapshot in enumerate(prepared_dynamic_meshes):
         _dynamic_mesh_states[index]["pending"] = snapshot
 
-    # Scene/frame ownership is v3-native; legacy cloth inputs below remain a
-    # temporary compatibility path under this already-live runtime.
-    _runtime_update(context.scene, generation=generation)
 
 
 def _accept_dynamic_mesh_snapshot(index):
@@ -3947,10 +4102,12 @@ def _runtime_update(scene, generation=None):
     return config
 
 
-def _ensure_runtime_for_scene(scene):
+def _ensure_runtime_for_scene(scene, generation=None):
     """Create and publish the first scene before any other native mutation."""
     _runtime_create()
-    return _runtime_update(scene)
+    if generation is None:
+        generation = _runtime_frame_generation + 1
+    return _runtime_update(scene, generation=generation)
 
 
 def _destroy_runtime():
@@ -3994,9 +4151,8 @@ def _load_cached_frame(scene, depsgraph, frame):
         return False
     updated = False
     for i, cloth_obj in enumerate(g_clothOBJs):
-        clmd = g_clmd[i] if i < len(g_clmd) else None
         cached = _cached_frame_positions(
-            scene, frame, cloth_obj, clmd, cache_dir)
+            scene, frame, cloth_obj, cache_dir)
         if cached is not None:
             flat = np.frombuffer(cached, dtype=np.float32)
             cloth_obj.data.vertices.foreach_set("co", flat)
@@ -4008,19 +4164,12 @@ def _load_cached_frame(scene, depsgraph, frame):
     return updated
 
 
-def _cached_frame_positions(scene, frame, cloth_obj, clmd, cache_dir):
+def _cached_frame_positions(scene, frame, cloth_obj, cache_dir):
     """Read one cached mesh without requiring a live solver owner."""
     nV = len(cloth_obj.data.vertices)
     pos = (c_float * (nV * 3))()
-    if scene.gpu_cloth_helper.use_external_cache or clmd is None:
-        loaded = g_dll.Cache_prefetch_frame(
-            frame, c_size_t(nV), cache_dir)
-    else:
-        loaded = g_dll.Cache_load_frame_gpu(
-            frame, clmd, c_size_t(nV), cache_dir)
-        if not loaded:
-            loaded = g_dll.Cache_prefetch_frame(
-                frame, c_size_t(nV), cache_dir)
+    loaded = g_dll.Cache_prefetch_frame(
+        frame, c_size_t(nV), cache_dir)
     if not loaded or not g_dll.Cache_get_frame_positions(
             frame, pos, c_size_t(nV)):
         return None
@@ -4106,7 +4255,8 @@ def _frame_change_handler(scene, depsgraph):
 
 def free_gpu_memory(context=None, shutdown_runtime=False):
     """Release owners only after native solver teardown is confirmed."""
-    global g_dll, g_scene, g_obj, g_mesh, g_clmd
+    global g_dll, g_cloth_handles, _cloth_input_owners
+    global _readback_owners, _runtime_frame_generation
     global g_clothOBJs, g_simulationOBJs, g_clothCollisionOBJs, g_proxy_handles
     global _teardown_failure, _collider_history
 
@@ -4155,10 +4305,9 @@ def free_gpu_memory(context=None, shutdown_runtime=False):
         _teardown_failure = True
         return False
 
-    g_scene              = None
-    g_obj                = []
-    g_clmd               = []
-    g_mesh               = []
+    g_cloth_handles      = []
+    _cloth_input_owners  = []
+    _readback_owners     = []
     g_clothOBJs          = []
     g_simulationOBJs     = []
     g_clothCollisionOBJs = []
@@ -4177,7 +4326,6 @@ def free_gpu_memory(context=None, shutdown_runtime=False):
     _simulation_frame_state['last_solved'] = None
     _cache_source_state['generation'] = 0
     _input_generation['value'] = 0
-
     if context is not None and hasattr(context.scene, 'gpu_cloth_springs_built'):
         context.scene.gpu_cloth_springs_built = False
 
@@ -4279,58 +4427,6 @@ class GPUCloth_LoadDLL(bpy.types.Operator):
             g_dll = cdll.LoadLibrary(filename)
             self.report({'INFO'}, f"DLL загружена: {filename}")
 
-            # ── Существующие функции ─────────────────────────────────────────
-
-            g_dll.BuildClothSprings.argtypes = [
-                POINTER(CType.ClothModifierData), POINTER(CType.Mesh)]
-            g_dll.BuildClothSprings.restype = c_bool
-
-            g_dll.SIM_solver_cloth.argtypes = [
-                POINTER(CType.ClothModifierData)]
-            g_dll.SIM_solver_cloth.restype = c_bool
-
-            g_dll.AddCloth.argtypes = [
-                POINTER(CType.ClothModifierData),
-                POINTER(CType.Mesh),
-                POINTER(CType.Object),
-            ]
-            g_dll.AddCloth.restype = c_bool
-
-            g_dll.RemoveCloth.argtypes = [
-                POINTER(CType.ClothModifierData),
-                POINTER(CType.Mesh),
-                POINTER(CType.Object),
-            ]
-            g_dll.RemoveCloth.restype = c_bool
-
-            # ── Readback позиций вершин ──────────────────────────────────────
-            #
-            #   void SIM_get_cloth_verts(const ClothModifierData* clmd,
-            #                            ClothVertex* out_verts, size_t count)
-            #   Вместо прямого чтения mesh_ptr.contents.mvert — единственно
-            #   корректный способ получить симулированные позиции.
-
-            g_dll.SIM_get_cloth_verts.argtypes = [
-                POINTER(CType.ClothModifierData),
-                POINTER(CType.ClothVertex),
-                c_size_t,
-            ]
-            g_dll.SIM_get_cloth_verts.restype = None
-
-            g_dll.SIM_get_cloth_sewing_count.argtypes = [
-                POINTER(CType.ClothModifierData)]
-            g_dll.SIM_get_cloth_sewing_count.restype = c_size_t
-
-            g_dll.SIM_sizeof_cloth_vertex.argtypes = []
-            g_dll.SIM_sizeof_cloth_vertex.restype = c_size_t
-
-            g_dll.SIM_offsetof_cloth_vertex_x.argtypes = []
-            g_dll.SIM_offsetof_cloth_vertex_x.restype = c_size_t
-
-            g_dll.SIM_get_host_layout.argtypes = [
-                POINTER(CType.GPUClothHostLayout)]
-            g_dll.SIM_get_host_layout.restype = c_bool
-
             g_dll.SIM_configure_feature.argtypes = [
                 POINTER(CType.GPUClothFeatureConfigHeader)]
             g_dll.SIM_configure_feature.restype = c_uint
@@ -4347,111 +4443,16 @@ class GPUCloth_LoadDLL(bpy.types.Operator):
                 POINTER(CType.GPUClothCacheStatus)]
             g_dll.SIM_get_cache_status.restype = c_uint
 
-            g_dll.SIM_configure_cloth_feature.argtypes = [
-                POINTER(CType.ClothModifierData),
-                POINTER(CType.GPUClothFeatureConfigHeader),
-            ]
-            g_dll.SIM_configure_cloth_feature.restype = c_uint
+            # Host layout probes remain ABI diagnostics only; production cloth
+            # ownership uses opaque v3 handles exclusively.
+            g_dll.SIM_sizeof_cloth_vertex.argtypes = []
+            g_dll.SIM_sizeof_cloth_vertex.restype = c_size_t
+            g_dll.SIM_offsetof_cloth_vertex_x.argtypes = []
+            g_dll.SIM_offsetof_cloth_vertex_x.restype = c_size_t
+            g_dll.SIM_get_host_layout.argtypes = [
+                POINTER(CType.GPUClothHostLayout)]
+            g_dll.SIM_get_host_layout.restype = c_bool
 
-            g_dll.SIM_get_cloth_solver_diagnostics.argtypes = [
-                POINTER(CType.ClothModifierData),
-                POINTER(CType.GPUClothDiagnosticsStatus),
-            ]
-            g_dll.SIM_get_cloth_solver_diagnostics.restype = c_uint
-
-            g_dll.SIM_set_cloth_vertex_channel.argtypes = [
-                POINTER(CType.ClothModifierData),
-                POINTER(CType.GPUClothVertexChannelConfig),
-            ]
-            g_dll.SIM_set_cloth_vertex_channel.restype = c_uint
-
-            g_dll.SIM_set_cloth_pin_snapshot.argtypes = [
-                POINTER(CType.ClothModifierData),
-                POINTER(CType.GPUClothPinSnapshotConfig),
-            ]
-            g_dll.SIM_set_cloth_pin_snapshot.restype = c_uint
-
-            g_dll.SIM_stage_cloth_pin_snapshot.argtypes = [
-                c_uint64,
-                POINTER(CType.ClothModifierData),
-                POINTER(CType.GPUClothPinSnapshotConfig),
-            ]
-            g_dll.SIM_stage_cloth_pin_snapshot.restype = c_uint
-
-            g_dll.SIM_stage_cloth_mesh_state.argtypes = [
-                c_uint64,
-                POINTER(CType.ClothModifierData),
-                POINTER(CType.GPUClothMeshStateConfig),
-            ]
-            g_dll.SIM_stage_cloth_mesh_state.restype = c_uint
-
-            g_dll.SIM_begin_collection_transaction.argtypes = [
-                POINTER(CType.GPUClothCollectionTransactionConfig),
-                POINTER(c_uint64),
-            ]
-            g_dll.SIM_begin_collection_transaction.restype = c_uint
-
-            g_dll.SIM_stage_cloth_collection.argtypes = [
-                c_uint64,
-                POINTER(CType.ClothModifierData),
-                POINTER(CType.GPUClothCollectionSnapshotConfig),
-            ]
-            g_dll.SIM_stage_cloth_collection.restype = c_uint
-
-            g_dll.SIM_commit_collection_transaction.argtypes = [c_uint64]
-            g_dll.SIM_commit_collection_transaction.restype = c_uint
-
-            g_dll.SIM_abort_collection_transaction.argtypes = [c_uint64]
-            g_dll.SIM_abort_collection_transaction.restype = c_uint
-
-            g_dll.SIM_query_cloth_collection.argtypes = [
-                POINTER(CType.ClothModifierData),
-                POINTER(CType.GPUClothCollectionQuery),
-            ]
-            g_dll.SIM_query_cloth_collection.restype = c_uint
-
-            g_dll.SIM_get_cloth_collection_status.argtypes = [
-                POINTER(CType.ClothModifierData),
-                POINTER(CType.GPUClothCollectionStatus),
-            ]
-            g_dll.SIM_get_cloth_collection_status.restype = c_uint
-            g_dll.SIM_validate_cloth_initial_state.argtypes = [
-                POINTER(CType.ClothModifierData),
-                POINTER(CType.GPUClothPreparationConfig),
-                POINTER(CType.GPUClothPreparationStatus),
-            ]
-            g_dll.SIM_validate_cloth_initial_state.restype = c_uint
-            g_dll.SIM_get_cloth_preparation_status.argtypes = [
-                POINTER(CType.ClothModifierData),
-                POINTER(CType.GPUClothPreparationStatus),
-            ]
-            g_dll.SIM_get_cloth_preparation_status.restype = c_uint
-            g_dll.SIM_get_cloth_invariant_status.argtypes = [
-                POINTER(CType.ClothModifierData),
-                POINTER(CType.GPUClothInvariantWitness),
-            ]
-            g_dll.SIM_get_cloth_invariant_status.restype = c_uint
-            g_dll.SIM_begin_cloth_drape.argtypes = [
-                POINTER(CType.ClothModifierData),
-                POINTER(CType.GPUClothDrapeConfig),
-                POINTER(CType.GPUClothDrapeStatus),
-            ]
-            g_dll.SIM_begin_cloth_drape.restype = c_uint
-            g_dll.SIM_step_cloth_drape.argtypes = [
-                POINTER(CType.ClothModifierData),
-                POINTER(CType.GPUClothDrapeStatus),
-            ]
-            g_dll.SIM_step_cloth_drape.restype = c_uint
-            g_dll.SIM_apply_cloth_drape.argtypes = [
-                POINTER(CType.ClothModifierData),
-                POINTER(CType.GPUClothDrapeStatus),
-            ]
-            g_dll.SIM_apply_cloth_drape.restype = c_uint
-            g_dll.SIM_cancel_cloth_drape.argtypes = [
-                POINTER(CType.ClothModifierData),
-                POINTER(CType.GPUClothDrapeStatus),
-            ]
-            g_dll.SIM_cancel_cloth_drape.restype = c_uint
             _bind_gpucloth_v3_exports(g_dll)
             _validate_product_abi(g_dll)
             _validate_descriptor_layout(g_dll)
@@ -4459,8 +4460,8 @@ class GPUCloth_LoadDLL(bpy.types.Operator):
             # ── ProxySim API ─────────────────────────────────────────────────
             #
             #   Симуляция грубого proxy-меша + апсэмплинг до hi-res.
-            #   GPU path: SIM_solver_cloth() -> ClothVertex.x (proxy)
-            #             → ProxySim_apply → hi-res позиции → foreach_set
+            #   GPU path: v3 readback positions -> ProxySim_apply
+            #             → hi-res позиции → foreach_set
 
             g_dll.ProxySim_create.argtypes = [
                 c_int, c_int,           # hi_NX,    hi_NY
@@ -4491,7 +4492,7 @@ class GPUCloth_LoadDLL(bpy.types.Operator):
             # ── Cache API ────────────────────────────────────────────────────
             #
             #   ЗАПИСЬ (Phase 1, CPU-destination):
-            #     SIM_get_cloth_verts → float[] → Cache_write_frame_async
+            #     v3 readback positions → Cache_write_frame_async
             #     C++ пишет в фоне: pinned RAM → DMA → NVMe
             #
             #   ЧТЕНИЕ (Phase 2, GPU-destination, zero-copy):
@@ -4507,14 +4508,6 @@ class GPUCloth_LoadDLL(bpy.types.Operator):
                 c_char_p,           # cache_dir (UTF-8)
             ]
             g_dll.Cache_write_frame_async.restype = c_bool
-
-            g_dll.Cache_load_frame_gpu.argtypes = [
-                c_int,                              # frame
-                POINTER(CType.ClothModifierData),   # clmd (для scatter в ClothVertex.x)
-                c_size_t,                           # nVerts
-                c_char_p,                           # cache_dir
-            ]
-            g_dll.Cache_load_frame_gpu.restype = c_bool
 
             g_dll.Cache_prefetch_frame.argtypes = [
                 c_int,      # frame
@@ -4615,340 +4608,10 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
 
     # ── Вспомогательные методы ───────────────────────────────────────────────
 
-    def fill_MVertTri_from_Object(self, obj: bpy.types.Object):
-        """Извлекает треугольную топологию из меша объекта.
-        Совместимо с Blender 4.1+ через vcu.calc_mesh_loop_triangles()."""
-        if obj.type != 'MESH':
-            return None
-        mesh = obj.data
-        # В Blender 4.1+ нужен явный вызов calc_loop_triangles()
-        loop_tris = vcu.calc_mesh_loop_triangles(mesh)
-        mvert_tris = (CType.MVertTri * len(loop_tris))()
-        for i, tri in enumerate(loop_tris):
-            mvert_tris[i].tri[0] = tri.vertices[0]
-            mvert_tris[i].tri[1] = tri.vertices[1]
-            mvert_tris[i].tri[2] = tri.vertices[2]
-        return mvert_tris
-
-    def fill_Scene(self, context):
-        global g_scene
-        scene = context.scene
-        g_scene = pointer(CType.Scene())
-        g_scene.contents.flag = (
-            bool(scene.rigidbody_world.enabled)
-            if scene.rigidbody_world is not None else False)
-        g_scene.contents.r = CType.RenderData(
-            cfra=int(scene.frame_current),
-            subframe=float(scene.frame_subframe),
-            framelen=float(scene.render.frame_map_old),
-            frs_sec=c_short(scene.render.fps),
-        )
-        g_scene.contents.physics_settings = CType.PhysicsSettings(
-            gravity=(c_float * 3)(*scene.gravity),
-            flag=CType.PHYS_GLOBAL_GRAVITY,
-        )
-        self.report({'INFO'}, "Scene заполнен")
-
-    def fill_Object(self, OBJ: bpy.types.Object) -> POINTER(CType.Object):
-        import numpy as np
-        new_object = CType.Object()
-        obmat = np.array(OBJ.matrix_world, dtype=np.float32)
-        imat  = np.array(OBJ.matrix_world.inverted(), dtype=np.float32)
-        for i in range(4):
-            for j in range(4):
-                new_object.obmat[i][j] = obmat[i][j]
-                new_object.imat[i][j]  = imat[i][j]
-        new_object.pd = None
-
-        for modif in OBJ.modifiers:
-            if modif.type == 'COLLISION':
-                tmp_collision = CType.CollisionModifierData()
-                mvertType = CType.MVert * len(OBJ.data.vertices)
-                mvert     = mvertType()
-                for i, mv in enumerate(OBJ.data.vertices):
-                    v = vcu.element_multiply(OBJ.matrix_world, mv.co)
-                    mvert[i].co   = (c_float * 3)(*v)
-                    mvert[i].flag = 0
-
-                mvert_tri = self.fill_MVertTri_from_Object(OBJ)
-
-                tmp_collision.x               = cast(mvert, POINTER(CType.MVert))
-                tmp_collision.xnew            = cast(mvert, POINTER(CType.MVert))
-                tmp_collision.xold            = cast(mvert, POINTER(CType.MVert))
-                tmp_collision.current_xnew    = cast(mvert, POINTER(CType.MVert))
-                tmp_collision.current_x       = cast(mvert, POINTER(CType.MVert))
-                tmp_collision.current_v       = cast(mvert, POINTER(CType.MVert))
-                tmp_collision.tri             = cast(mvert_tri, POINTER(CType.MVertTri))
-                tmp_collision.mvert_num       = len(OBJ.data.vertices)
-                loop_tris = vcu.calc_mesh_loop_triangles(OBJ.data)
-                tmp_collision.tri_num         = len(loop_tris)
-                tmp_collision.time_x          = -1000
-                tmp_collision.time_xnew       = -1000
-                tmp_collision.is_static       = True
-                tmp_collision.bvhtree         = None
-                new_object.modifiers          = pointer(tmp_collision)
-
-                _collision_keepalive.extend(
-                    [new_object, tmp_collision, mvert, mvert_tri])
-
-        return pointer(new_object)
-
-    def setMesh(self, context, snapshot) -> POINTER(CType.Mesh):
-        if not snapshot:
-            raise ValueError("Cloth input snapshot must not be None")
-        try:
-            mesh      = CType.Mesh()
-            mesh.totedge = len(snapshot["edges"])
-            mesh.totvert = snapshot["vertex_count"]
-            mesh.totpoly = len(snapshot["polygons"])
-            mesh.totloop = len(snapshot["loops"])
-
-            # Вершины
-            mvertType = CType.MVert * snapshot["vertex_count"]
-            mvert     = mvertType()
-            for i, position in enumerate(snapshot["positions"]):
-                mvert[i].co   = (c_float * 3)(*position)
-                mvert[i].flag = 0
-            mesh.mvert = cast(mvert, POINTER(CType.MVert))
-
-            # Рёбра (crease/bweight убраны в Blender 4.0 как прямые поля,
-            # здесь используются для C++ структуры — всегда 0)
-            medgeType = CType.MEdge * len(snapshot["edges"])
-            medge     = medgeType()
-            for index, edge in enumerate(snapshot["edges"]):
-                medge[index].v1      = edge[0]
-                medge[index].v2      = edge[1]
-                medge[index].crease  = 0
-                medge[index].bweight = 0
-                medge[index].flag    = 35
-            mesh.medge = cast(medge, POINTER(CType.MEdge))
-
-            # Полигоны
-            mpolyType = CType.MPoly * len(snapshot["polygons"])
-            mpoly     = mpolyType()
-            for index, polygon in enumerate(snapshot["polygons"]):
-                mpoly[index].loopstart = polygon[0]
-                mpoly[index].totloop   = polygon[1]
-            mesh.mpoly = cast(mpoly, POINTER(CType.MPoly))
-
-            # Loops
-            mloopType = CType.MLoop * len(snapshot["loops"])
-            mloop     = mloopType()
-            for index, loop in enumerate(snapshot["loops"]):
-                mloop[index].v = loop[0]
-                mloop[index].e = loop[1]
-            mesh.mloop = cast(mloop, POINTER(CType.MLoop))
-
-            return pointer(mesh)
-        except Exception as e:
-            raise RuntimeError(f"setMesh: {e}") from e
-
-    def setClothModifierData(self, context, OBJ) -> POINTER(CType.ClothModifierData):
-        clmd     = CType.ClothModifierData()
-        sim_parms = CType.ClothSimSettings()
-        gs       = OBJ.GPUCloth
-        gs_scene = context.scene.gpu_cloth_helper
-        cloth_id = _blender_session_uid(OBJ, "cloth native owner")
-        if cloth_id > 0xffffffff:
-            raise RuntimeError(
-                "Blender cloth session UID exceeds native uint32 owner ID")
-        clmd.id = cloth_id
-
-        # ── Базовые параметры ─────────────────────────────────────────────
-        sim_parms.mingoal        = gs.mingoal
-        sim_parms.Cvi            = gs.air_viscosity
-        sim_parms.Cdis           = 0.0
-        sim_parms.gravity[0]     = gs_scene.gravity_x
-        sim_parms.gravity[1]     = gs_scene.gravity_y
-        sim_parms.gravity[2]     = gs_scene.gravity_z
-        sim_parms.mass           = gs.vertex_mass
-        sim_parms.structural     = gs.structural
-        sim_parms.shear          = gs.shear
-        sim_parms.bending        = gs.bending_stiffness
-        sim_parms.vgroup_mass    = 0  # set via vertex group data injection
-        sim_parms.stepsPerFrame  = gs.quality_step
-        sim_parms.maxgoal        = gs.maxgoal
-        sim_parms.velocity_smooth= 0.0
-        sim_parms.collider_friction = 0.0
-        sim_parms.shrink_min     = gs.shrink_min
-        sim_parms.shrink_max     = gs.shrink_max
-        sim_parms.vgroup_bend    = 0
-        sim_parms.vgroup_struct  = 0
-        sim_parms.vgroup_shear   = 0
-        sim_parms.vgroup_shrink  = 0
-        sim_parms.bending_damping= gs.bending_damping
-        sim_parms.voxel_cell_size= 0.1
-        sim_parms.tension        = gs.tension
-        sim_parms.compression    = gs.compression
-        sim_parms.tension_damp   = gs.tension_damp
-        sim_parms.compression_damp = gs.compression_damp
-        sim_parms.shear_damp     = gs.shear_damp
-        sim_parms.max_tension    = gs.max_tension
-        sim_parms.max_compression = gs.max_compression
-        sim_parms.max_shear      = gs.max_shear
-        sim_parms.max_bend       = gs.max_bend
-        sim_parms.max_struct     = gs.max_struct
-        sim_parms.max_sewing     = gs.max_sewing
-        sim_parms.vel_damping    = gs.vel_damping
-
-        # ── Internal Springs ───────────────────────────────────────────────
-        sim_parms.internal_spring_max_length     = gs.internal_spring_max_length
-        sim_parms.internal_spring_max_diversion  = gs.internal_spring_max_diversion
-        sim_parms.vgroup_intern  = 0
-        sim_parms.internal_tension     = gs.internal_tension
-        sim_parms.internal_compression = gs.internal_compression
-        sim_parms.max_internal_tension     = gs.max_internal_tension
-        sim_parms.max_internal_compression = gs.max_internal_compression
-
-        # ── Anisotropic stiffness ────────────────────────────────────────
-        sim_parms.tension_u       = gs.tension_u
-        sim_parms.tension_v       = gs.tension_v
-        sim_parms.compression_u   = gs.compression_u
-        sim_parms.compression_v   = gs.compression_v
-        sim_parms.bending_u       = gs.bending_u
-        sim_parms.bending_v       = gs.bending_v
-        sim_parms.max_tension_u   = gs.max_tension_u
-        sim_parms.max_tension_v   = gs.max_tension_v
-        sim_parms.max_compression_u = gs.max_compression_u
-        sim_parms.max_compression_v = gs.max_compression_v
-        sim_parms.max_bend_u      = gs.max_bend_u
-        sim_parms.max_bend_v      = gs.max_bend_v
-
-        # ── Effector forces ────────────────────────────────────────────────
-        sim_parms.eff_force_scale  = gs.eff_force_scale
-        sim_parms.eff_wind_scale   = gs.eff_wind_scale
-        sim_parms.effector_weights = None  # allocated separately if needed
-        sim_parms.reset            = 0
-        sim_parms.presets          = 2
-        sim_parms.shapekey_rest    = 0
-        sim_parms.defgoal          = gs.defgoal
-
-        # ── Pressure ──────────────────────────────────────────────────────
-        sim_parms.fluid_density    = gs.fluid_density
-        sim_parms.pressure_factor  = gs.pressure_factor
-        sim_parms.target_volume    = (
-            gs.target_volume if gs.use_pressure_volume else 0.0)
-        sim_parms.uniform_pressure_force = gs.uniform_pressure_force
-
-        # ── Timing ────────────────────────────────────────────────────────
-        sim_parms.time_scale       = gs.speed_multiplier
-        sim_parms.timescale        = native_frame_timescale(
-            context.scene, gs.speed_multiplier)
-        sim_parms.dt               = 1
-        sim_parms.avg_spring_len   = 0.0
-        sim_parms.goalfrict        = gs.goalfrict
-        sim_parms.goalspring       = gs.goalspring
-
-        # ── Flags ─────────────────────────────────────────────────────────
-        sim_parms.flags = 0
-        if gs.use_internal_springs:
-            sim_parms.flags |= CType.CLOTH_SIMSETTINGS_FLAG_INTERNAL_SPRINGS
-        if gs.use_internal_springs_normal:
-            sim_parms.flags |= CType.CLOTH_SIMSETTINGS_FLAG_INTERNAL_SPRINGS_NORMAL
-        if gs.use_pressure:
-            sim_parms.flags |= CType.CLOTH_SIMSETTINGS_FLAG_PRESSURE
-        if gs.use_pressure_volume:
-            sim_parms.flags |= CType.CLOTH_SIMSETTINGS_FLAG_PRESSURE_VOL
-        if gs.use_dynamic_mesh:
-            sim_parms.flags |= CType.CLOTH_SIMSETTINGS_FLAG_DYNAMIC_MESH
-
-        # Модель изгиба
-        bending_model = _effective_bending_model(gs)
-        sim_parms.bending_model = (
-            CType.CLOTH_BENDING_ANGULAR
-            if bending_model in {'ANGULAR', 'SDB'}
-            else CType.CLOTH_BENDING_LINEAR
-        )
-
-        # ─�� Тип солвера ───────────────────────────────────────────────────
-        _SOLVER_MAP = {
-            'XPBD':  CType.SOLVER_XPBD,
-            'PD':    CType.SOLVER_PD,
-            'MGPBD': CType.SOLVER_MGPBD,
-            'Mil2':  CType.SOLVER_Mil2,
-            'OGC':   CType.SOLVER_OGC,
-        }
-        sim_parms.solver_type = _SOLVER_MAP.get(
-            gs.solver_type, CType.SOLVER_XPBD
-        )
-
-        # ── Tuneable solver config ───────────────────────────────────────
-        sim_parms.solver_substeps     = 0
-        sim_parms.solver_iterations   = gs.solver_iterations
-        sim_parms.solver_omega        = gs.solver_omega
-        sim_parms.solver_small_steps  = 1 if gs.use_small_steps else 0
-        sim_parms.solver_adaptive     = 1 if gs.use_adaptive else 0
-        sim_parms.solver_max_iterations = gs.solver_max_iterations
-        sim_parms.solver_convergence_tol = gs.solver_convergence_tol
-        sim_parms.solver_ptb_stretch  = gs.ptb_stretch
-        sim_parms.solver_ptb_bending  = gs.ptb_bending
-        sim_parms.solver_ptb_shear    = gs.ptb_shear
-        sim_parms.solver_ptb_seam     = gs.ptb_seam
-        sim_parms.solver_use_pt_budget = 1 if gs.use_per_type_budget else 0
-
-        # ── Anisotropy ────────────────────────────────────────────────────
-        sim_parms.use_anisotropy  = 1 if gs.use_anisotropy else 0
-        sim_parms.tension_u       = gs.tension_u
-        sim_parms.tension_v       = gs.tension_v
-        sim_parms.compression_u   = gs.compression_u
-        sim_parms.compression_v   = gs.compression_v
-        sim_parms.bending_u       = gs.bending_u
-        sim_parms.bending_v       = gs.bending_v
-        sim_parms.max_tension_u   = gs.max_tension_u
-        sim_parms.max_tension_v   = gs.max_tension_v
-        sim_parms.max_compression_u = gs.max_compression_u
-        sim_parms.max_compression_v = gs.max_compression_v
-        sim_parms.max_bend_u      = gs.max_bend_u
-        sim_parms.max_bend_v      = gs.max_bend_v
-
-        clmd.sim_parms    = pointer(sim_parms)
-        clmd.clothObject  = None
-
-        # ── Параметры столкновений ────────────────────────────────────────
-        coll_parms = pointer(CType.ClothCollSettings())
-        coll_parms.contents.epsilon       = gs.epsilon
-        coll_parms.contents.self_friction = gs.self_collision_friction
-        coll_parms.contents.friction      = gs.collision_friction
-        coll_parms.contents.damping       = gs.collision_damping
-        coll_parms.contents.selfepsilon   = gs.selfepsilon
-        coll_parms.contents.loop_count    = gs.collision_quality
-        # Collection identity/records use the typed product snapshot owner;
-        # the legacy DNA pointer is deliberately never a Python authority.
-        coll_parms.contents.group         = None
-        coll_parms.contents.vgroup_selfcol = 0
-        object_collision_group = (
-            gs.id_data.vertex_groups.get(gs.vgroup_objcol)
-            if gs.vgroup_objcol else None)
-        coll_parms.contents.vgroup_objcol = (
-            object_collision_group.index + 1
-            if object_collision_group is not None else 0)
-        coll_parms.contents.clamp          = gs.clamp
-        coll_parms.contents.self_clamp     = gs.self_clamp
-        coll_parms.contents.flags = 0
-        if gs.use_object_collision:
-            coll_parms.contents.flags |= (
-                CType.CLOTH_COLLSETTINGS_FLAG_ENABLED)
-        if gs.use_self_collision:
-            coll_parms.contents.flags |= CType.CLOTH_COLLSETTINGS_FLAG_SELF
-        clmd.coll_parms = coll_parms
-
-        # ── Результат солвера ─────────────────────────────────────────────
-        solver_result = CType.ClothSolverResult()
-        solver_result.status         = 0
-        solver_result.max_iterations = 0
-        solver_result.avg_iterations = 0
-        solver_result.max_error      = 0.0
-        solver_result.min_error      = 0.0
-        solver_result.avg_error      = 0.0
-        clmd.solver_result = pointer(solver_result)
-
-        return pointer(clmd)
-
-    # ── Execute ──────────────────────────────────────────────────────────────
-
     @_guard_prepare_teardown
     def execute(self, context):
-        global g_dll, g_scene, g_obj, g_mesh, g_clmd
+        global g_dll, g_cloth_handles
+        global _cloth_input_owners, _readback_owners
         global g_clothOBJs, g_simulationOBJs
         global g_clothCollisionOBJs, g_proxy_handles
 
@@ -4991,6 +4654,12 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
             bpy.ops.object.mode_set(mode=mode)
             return {'FINISHED'}
 
+        try:
+            _reject_unsupported_v3_owners(context.scene, active_cloth)
+        except RuntimeError as exc:
+            self.report({'ERROR'}, str(exc))
+            return {'CANCELLED'}
+
         bindings = []
         try:
             for item in active_cloth:
@@ -5007,6 +4676,13 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
             self.report(
                 {'ERROR'}, f"Modifier evaluation rejected: {exc}")
             return {'CANCELLED'}
+
+        # One generation owns the complete initial publication.  Keep the
+        # runtime generation monotonic across destroy/recreate so a new
+        # runtime cannot publish stale pin, collection, or mesh state.
+        initial_generation = int(_runtime_frame_generation) + 1
+        if initial_generation <= 0:
+            raise RuntimeError("v3 initial generation overflowed")
 
         modifier_states = []
         try:
@@ -5060,11 +4736,11 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
                         cloth_obj, simulation_obj))
                 prepared_pin_snapshots.append(_capture_pin_snapshot(
                     cloth_obj, simulation_obj, depsgraph,
-                    topology_generation, 1))
+                    topology_generation, initial_generation))
                 prepared_dynamic_meshes.append(
                     _capture_dynamic_mesh_snapshot(
                         cloth_obj, simulation_obj, depsgraph,
-                        topology_generation, 1))
+                        topology_generation, initial_generation))
                 prepared_collision_configs.append(
                     _capture_cloth_collision_config(cloth_obj.GPUCloth))
             prepared_pin_owners = [
@@ -5074,7 +4750,7 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
                 _prepare_dynamic_mesh_state(snapshot, None)
                 for snapshot in prepared_dynamic_meshes]
             prepared_collections = _prepare_collection_snapshots(
-                context, depsgraph, active_cloth, 1, {})
+                context, depsgraph, active_cloth, initial_generation, {})
         except (RuntimeError, VertexChannelError) as exc:
             self.report({'ERROR'}, f"Blender input preflight failed: {exc}")
             return {'CANCELLED'}
@@ -5108,53 +4784,11 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
             free_gpu_memory(context)
             return {'CANCELLED'}
 
-        # 6. Заполняем Mesh + ClothModifierData + Object для каждой ткани
-        for index, (cloth_obj, simulation_obj) in enumerate(zip(
-                g_clothOBJs, g_simulationOBJs)):
-            if (cloth_obj is None or simulation_obj is None
-                    or not hasattr(simulation_obj, 'data')):
-                free_gpu_memory(context)
-                bpy.ops.object.mode_set(mode=mode)
-                return {'CANCELLED'}
-
-            data_ptr = self.setMesh(
-                context, prepared_input_meshes[index])
-            if not data_ptr:
-                self.report({'ERROR'}, "NULL от setMesh")
-                free_gpu_memory(context)
-                bpy.ops.object.mode_set(mode=mode)
-                return {'CANCELLED'}
-            g_mesh.append(data_ptr)
-
-            data_ptr = self.setClothModifierData(context, cloth_obj)
-            if not data_ptr:
-                self.report({'ERROR'}, "NULL от setClothModifierData")
-                free_gpu_memory(context)
-                bpy.ops.object.mode_set(mode=mode)
-                return {'CANCELLED'}
-            g_clmd.append(data_ptr)
-
-            data_ptr = self.fill_Object(simulation_obj)
-            if not data_ptr:
-                self.report({'ERROR'}, "NULL от fill_Object (cloth)")
-                free_gpu_memory(context)
-                bpy.ops.object.mode_set(mode=mode)
-                return {'CANCELLED'}
-            g_obj.append(data_ptr)
-
-        if not (len(g_clothOBJs) == len(g_simulationOBJs) == len(g_clmd)):
-            self.report({'ERROR'},
-                f"Несоответствие объектов: clothOBJs={len(g_clothOBJs)}, "
-                f"simulationOBJs={len(g_simulationOBJs)}, clmd={len(g_clmd)}")
-            free_gpu_memory(context)
-            bpy.ops.object.mode_set(mode=mode)
-            return {'CANCELLED'}
-
         # The first native mutation is owned by the v3 runtime update.  Keep
-        # all Blender extraction above this boundary; cache setup follows it.
-        self.fill_Scene(context)
+        # all Blender extraction above this boundary.
         try:
-            _ensure_runtime_for_scene(context.scene)
+            _ensure_runtime_for_scene(
+                context.scene, generation=initial_generation)
         except (OSError, RuntimeError, TypeError, ValueError) as exc:
             self.report({'ERROR'}, f"v3 runtime setup failed: {exc}")
             free_gpu_memory(context)
@@ -5162,111 +4796,92 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
             return {'CANCELLED'}
 
         try:
-            requested_cache_playback = bool(
-                context.scene.gpu_cloth_helper.playback_mode)
-            _configure_cache_features(g_dll, context.scene)
-            _query_cache_status()
-            _cache_status_update(
-                CType.GPUCLOTH_CACHE_STATUS_SOURCE_CHANGED,
-                context.scene)
-            _sync_cache_status(context.scene)
-            if (requested_cache_playback and
-                    context.scene.gpu_cloth_helper.is_baked):
-                context.scene.gpu_cloth_helper.playback_mode = True
-        except (OSError, RuntimeError) as exc:
-            self.report({'ERROR'}, f"Cache config failed: {exc}")
+            for index, (cloth_obj, simulation_obj) in enumerate(zip(
+                    g_clothOBJs, g_simulationOBJs)):
+                backend = (
+                    CType.GPUCLOTH_V3_BACKEND_FAST
+                    if cloth_obj.GPUCloth.solver_type == "PD"
+                    else CType.GPUCLOTH_V3_BACKEND_ACCURACY)
+                owner = _create_v3_cloth_owner(
+                    g_dll, cloth_obj, simulation_obj,
+                    prepared_input_meshes[index],
+                    prepared_topology_generations[index], backend, 1)
+                g_cloth_handles.append(owner["handle"])
+                _cloth_input_owners.append(owner)
+                _readback_owners.append(owner)
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+            self.report({'ERROR'}, f"v3 cloth create failed: {exc}")
             free_gpu_memory(context)
             bpy.ops.object.mode_set(mode=mode)
             return {'CANCELLED'}
 
-        helper = context.scene.gpu_cloth_helper
-        if helper.use_external_cache:
-            cache_ready = bool(
-                requested_cache_playback and helper.is_baked and
-                not helper.is_outdated and not helper.is_frame_skip)
-            if not cache_ready:
-                self.report(
-                    {'ERROR'},
-                    "External cache is read-only and has no valid baked "
-                    "playback owner")
-                free_gpu_memory(context)
-                bpy.ops.object.mode_set(mode=mode)
-                return {'CANCELLED'}
-            helper.playback_mode = True
+        if not (len(g_clothOBJs) == len(g_simulationOBJs) ==
+                len(g_cloth_handles) == len(_cloth_input_owners) ==
+                len(_readback_owners)):
+            self.report({'ERROR'}, "v3 cloth owners are not aligned")
+            free_gpu_memory(context)
             bpy.ops.object.mode_set(mode=mode)
-            context.scene.gpu_cloth_springs_built = True
-            _store_initial_positions()
-            _bake_range['start'] = int(helper.bake_start)
-            _bake_range['end'] = int(helper.bake_end)
-            _simulation_frame_state['last_solved'] = None
-            return {'FINISHED'}
+            return {'CANCELLED'}
 
         # 7. Live simulation owns the native scene and solver state.
         for i in range(len(g_clothOBJs)):
+            cloth_handle = g_cloth_handles[i]
             try:
                 _configure_simulation_features(
-                    g_dll, g_clmd[i], context.scene,
+                    g_dll, cloth_handle, context.scene,
                     g_clothOBJs[i].GPUCloth)
                 _publish_material_features(
-                    g_dll, g_clmd[i], prepared_material_features[i])
+                    g_dll, cloth_handle, prepared_material_features[i])
                 _publish_internal_springs_config(
-                    g_dll, g_clmd[i], prepared_internal_configs[i])
+                    g_dll, cloth_handle, prepared_internal_configs[i])
                 _publish_pressure_features(
-                    g_dll, g_clmd[i], prepared_pressure_features[i])
+                    g_dll, cloth_handle, prepared_pressure_features[i])
                 _publish_cloth_collision_config(
-                    g_dll, g_clmd[i], prepared_collision_configs[i])
-                _configure_solver_diagnostics(g_dll, g_clmd[i])
+                    g_dll, cloth_handle, prepared_collision_configs[i])
+                _configure_solver_diagnostics(g_dll, cloth_handle)
             except (OSError, RuntimeError) as exc:
                 self.report({'ERROR'}, f"Simulation config failed: {exc}")
                 free_gpu_memory(context)
                 bpy.ops.object.mode_set(mode=mode)
                 return {'CANCELLED'}
+            # v3 snapshots operator-affecting typed inputs at build.  Keep
+            # anisotropy, stiffness, rest shape, and shrink pre-build;
+            # post-build uploads below are limited to state the ABI permits.
             try:
-                if not g_clmd[i].contents.clothObject:
-                    if not g_dll.BuildClothSprings(g_clmd[i], g_mesh[i]):
-                        self.report({'ERROR'}, "BuildClothSprings вернул ошибку")
-                        free_gpu_memory(context)
-                        bpy.ops.object.mode_set(mode=mode)
-                        return {'CANCELLED'}
-            except OSError as exc:
-                self.report(
-                    {'ERROR'}, f"OSError в BuildClothSprings: {exc}")
-                free_gpu_memory(context)
-                bpy.ops.object.mode_set(mode=mode)
-                return {'CANCELLED'}
-
-            try:
-                if g_clmd[i].contents.clothObject is None:
-                    self.report({'ERROR'}, "clothObject is NULL после BuildClothSprings")
-                    bpy.ops.screen.animation_cancel()
-                    free_gpu_memory(context)
-                    bpy.ops.object.mode_set(mode=mode)
-                    return {'CANCELLED'}
-            except OSError:
-                self.report({'ERROR'}, "OSError: clothObject is NULL")
-                free_gpu_memory(context)
-                bpy.ops.object.mode_set(mode=mode)
-                return {'CANCELLED'}
-
-            try:
-                depsgraph = context.evaluated_depsgraph_get()
                 _publish_material_features(
-                    g_dll, g_clmd[i], prepared_material_features[i],
+                    g_dll, cloth_handle, prepared_material_features[i],
                     publish_anisotropy=True)
                 _upload_stiffness_channels(
-                    g_dll, g_clmd[i], prepared_stiffness_channels[i])
+                    g_dll, cloth_handle, prepared_stiffness_channels[i])
                 _upload_rest_shape_key(
-                    g_dll, g_clmd[i], prepared_rest_shapes[i])
-                _upload_sewing(
-                    g_dll, g_clmd[i], g_clothOBJs[i], g_simulationOBJs[i])
-                _upload_pressure_weights(
-                    g_dll, g_clmd[i], g_clothOBJs[i], g_simulationOBJs[i])
+                    g_dll, cloth_handle, prepared_rest_shapes[i])
                 _upload_shrink_weights(
-                    g_dll, g_clmd[i], g_clothOBJs[i], g_simulationOBJs[i])
+                    g_dll, cloth_handle, g_clothOBJs[i], g_simulationOBJs[i])
+            except (OSError, RuntimeError, VertexChannelError) as exc:
+                self.report({'ERROR'}, f"Pre-build cloth data failed: {exc}")
+                free_gpu_memory(context)
+                bpy.ops.object.mode_set(mode=mode)
+                return {'CANCELLED'}
+            try:
+                result = int(g_dll.GPUCloth_v3_cloth_build(cloth_handle))
+                if result != CType.GPUCLOTH_ABI_OK:
+                    raise RuntimeError(
+                        f"v3 cloth build rejected with {result}")
+            except (OSError, RuntimeError) as exc:
+                self.report({'ERROR'}, f"v3 cloth build failed: {exc}")
+                free_gpu_memory(context)
+                bpy.ops.object.mode_set(mode=mode)
+                return {'CANCELLED'}
+
+            try:
+                _upload_sewing(
+                    g_dll, cloth_handle, g_clothOBJs[i], g_simulationOBJs[i])
+                _upload_pressure_weights(
+                    g_dll, cloth_handle, g_clothOBJs[i], g_simulationOBJs[i])
                 _upload_object_collision_mask(
-                    g_dll, g_clmd[i], g_clothOBJs[i], g_simulationOBJs[i])
+                    g_dll, cloth_handle, g_clothOBJs[i], g_simulationOBJs[i])
                 _upload_self_collision_mask(
-                    g_dll, g_clmd[i],
+                    g_dll, cloth_handle,
                     prepared_self_collision_masks[i])
             except (OSError, RuntimeError, VertexChannelError) as exc:
                 self.report({'ERROR'}, f"Cloth data upload failed: {exc}")
@@ -5274,30 +4889,20 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
                 bpy.ops.object.mode_set(mode=mode)
                 return {'CANCELLED'}
 
-            try:
-                if not g_dll.AddCloth(g_clmd[i], g_mesh[i], g_obj[i]):
-                    self.report({'ERROR'}, "AddCloth вернул ошибку")
-                    free_gpu_memory(context)
-                    bpy.ops.object.mode_set(mode=mode)
-                    return {'CANCELLED'}
-            except OSError:
-                self.report({'ERROR'}, "OSError в AddCloth")
-                free_gpu_memory(context)
-                bpy.ops.object.mode_set(mode=mode)
-                return {'CANCELLED'}
-
         try:
-            for clmd, owners in zip(g_clmd, prepared_collections):
+            for cloth_handle, owners in zip(
+                    g_cloth_handles, prepared_collections):
                 _configure_effector_weights(
-                    g_dll, clmd, owners["effector_weights"])
+                    g_dll, cloth_handle, owners["effector_weights"])
             _collection_snapshots.extend(_commit_frame_inputs(
-                g_dll, g_clmd, prepared_collections,
-                prepared_pin_owners, prepared_dynamic_owners, 1,
+                g_dll, g_cloth_handles, prepared_collections,
+                prepared_pin_owners, prepared_dynamic_owners,
+                initial_generation,
                 verify_committed_state=True))
-            for index, clmd in enumerate(g_clmd):
+            for index, cloth_handle in enumerate(g_cloth_handles):
                 _validate_native_preparation(
-                    g_dll, clmd,
-                    prepared_topology_generations[index], 1)
+                    g_dll, cloth_handle,
+                    prepared_topology_generations[index], initial_generation)
             _effector_weight_states.extend({
                 "collection_id": int(
                     owners["effector_weights"]["collection_id"]),
@@ -5369,15 +4974,6 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
         _bake_range['end'] = int(helper.bake_end)
         _simulation_frame_state['last_solved'] = max(
             1, int(helper.bake_start) - 1)
-        try:
-            _cache_status_update(
-                CType.GPUCLOTH_CACHE_STATUS_SOURCE_CHANGED,
-                context.scene)
-            _sync_cache_status(context.scene)
-        except (OSError, RuntimeError) as exc:
-            self.report({'ERROR'}, f"Cache status setup failed: {exc}")
-            free_gpu_memory(context)
-            return {'CANCELLED'}
         return {'FINISHED'}
 
 
@@ -5392,20 +4988,18 @@ class GPUCloth_UpdateSimulation(bpy.types.Operator):
 
     # ── Вспомогательные методы ───────────────────────────────────────────────
 
-    def _get_positions(self, clmd_ptr, nVerts):
-        """
-        Читает позиции вершин из GPU через SIM_get_cloth_verts.
-        Возвращает плоский ctypes массив float[nVerts*3] (x0,y0,z0,x1,y1,z1,...)
-        или None при ошибке.
-        """
-        buf = (CType.ClothVertex * nVerts)()
-        g_dll.SIM_get_cloth_verts(clmd_ptr, buf, c_size_t(nVerts))
-        pos = (c_float * (nVerts * 3))()
-        for i in range(nVerts):
-            pos[i * 3]     = buf[i].x[0]
-            pos[i * 3 + 1] = buf[i].x[1]
-            pos[i * 3 + 2] = buf[i].x[2]
-        return pos
+    def _readback(self, index):
+        if index < 0 or index >= len(_readback_owners):
+            raise RuntimeError("v3 readback owner does not exist")
+        owner = _readback_owners[index]
+        result = int(g_dll.GPUCloth_v3_cloth_readback(
+            owner["handle"], pointer(owner["readback"])))
+        if result != CType.GPUCLOTH_ABI_OK:
+            raise RuntimeError(f"v3 cloth readback rejected with {result}")
+        if (int(owner["readback"].frame_generation) !=
+                int(_runtime_frame_generation)):
+            raise RuntimeError("v3 readback generation differs from runtime")
+        return owner["readback_positions"]
 
     def _apply_positions(self, blender_obj, pos, nVerts):
         """
@@ -5431,7 +5025,7 @@ class GPUCloth_UpdateSimulation(bpy.types.Operator):
     # ── Execute ──────────────────────────────────────────────────────────────
 
     def execute(self, context):
-        global g_dll, g_obj, g_mesh, g_clmd
+        global g_dll
         global g_clothOBJs, g_simulationOBJs
 
         if _teardown_failure:
@@ -5476,18 +5070,19 @@ class GPUCloth_UpdateSimulation(bpy.types.Operator):
 
         # ── РЕЖИМ ЖИВОЙ СИМУЛЯЦИИ ────────────────────────────────────────────
         #
-        #   SIM_solver_cloth(clmd) [GPU ~N ms]
-        #   SIM_get_cloth_verts() [memcpy D2H ~<1мс]
+        #   GPUCloth_v3_cloth_step(handle) [GPU]
+        #   GPUCloth_v3_cloth_readback(handle) [D2H]
         #   foreach_set() [Blender ~<1мс]
         #   Cache_write_frame_async() ← возвращает немедленно, пишет в фоне
         #
 
         if not (len(g_clothOBJs) == len(g_simulationOBJs)
-                == len(g_clmd) == len(g_obj) == len(g_mesh)):
+                == len(g_cloth_handles) == len(_readback_owners)):
             self.report({'ERROR'},
                 f"Несоответствие размеров: clothOBJs={len(g_clothOBJs)}, "
                 f"simulationOBJs={len(g_simulationOBJs)}, "
-                f"clmd={len(g_clmd)}, obj={len(g_obj)}, mesh={len(g_mesh)}")
+                f"cloth_handles={len(g_cloth_handles)}, "
+                f"readback={len(_readback_owners)}")
             bpy.ops.screen.animation_cancel()
             return {'CANCELLED'}
 
@@ -5501,14 +5096,39 @@ class GPUCloth_UpdateSimulation(bpy.types.Operator):
                 simulation_obj = g_simulationOBJs[i]
                 n_sim = len(simulation_obj.data.vertices)
 
-                # 1. GPU симуляция одного кадра
-                if not g_dll.SIM_solver_cloth(g_clmd[i]):
+                cloth_handle = g_cloth_handles[i]
+                previous_status = CType.GPUClothV3ClothStatus()
+                previous_status.struct_size = sizeof(previous_status)
+                previous_status.status_version = 1
+                result = int(g_dll.GPUCloth_v3_cloth_get_status(
+                    cloth_handle, pointer(previous_status)))
+                if result != CType.GPUCLOTH_ABI_OK:
+                    raise RuntimeError(
+                        f"v3 cloth status rejected with {result}")
+
+                # 1. GPU simulation одного кадра.
+                result = int(g_dll.GPUCloth_v3_cloth_step(cloth_handle))
+                if result != CType.GPUCLOTH_ABI_OK:
                     _solver_diagnostic_snapshot(i)
                     self.report(
                         {'ERROR'},
-                        f"SIM_solver_cloth rejected {cloth_obj.name_full}")
+                        f"v3 cloth step rejected {cloth_obj.name_full}: "
+                        f"{result}")
                     bpy.ops.screen.animation_cancel()
                     return {'CANCELLED'}
+                status = CType.GPUClothV3ClothStatus()
+                status.struct_size = sizeof(status)
+                status.status_version = 1
+                result = int(g_dll.GPUCloth_v3_cloth_get_status(
+                    cloth_handle, pointer(status)))
+                if (result != CType.GPUCLOTH_ABI_OK or
+                        int(status.solve_count) <=
+                        int(previous_status.solve_count) or
+                        int(status.accepted_frame_generation) !=
+                        int(_runtime_frame_generation) or
+                        int(status.state) != CType.GPUCLOTH_V3_CLOTH_RUNNABLE):
+                    raise RuntimeError(
+                        "v3 cloth status did not accept stepped frame")
                 _accept_dynamic_mesh_snapshot(i)
                 diagnostic = _solver_diagnostic_snapshot(i)
                 if diagnostic is not None:
@@ -5517,12 +5137,8 @@ class GPUCloth_UpdateSimulation(bpy.types.Operator):
                         f"[GPUCloth] {cloth_obj.name_full}: "
                         f"native {native_ms:.3f} ms")
 
-                # 2. Readback позиций (D2H через SIM_get_cloth_verts)
-                simulation_pos = self._get_positions(g_clmd[i], n_sim)
-                if simulation_pos is None:
-                    self.report({'ERROR'}, "SIM_get_cloth_verts вернул ошибку")
-                    bpy.ops.screen.animation_cancel()
-                    return {'CANCELLED'}
+                # 2. Persistent v3 readback positions/velocities.
+                simulation_pos = self._readback(i)
 
                 # 3. Proxy upsampling (если активен)
                 #    proxy_pos заполняется из результатов симуляции proxy-меша
@@ -5551,7 +5167,8 @@ class GPUCloth_UpdateSimulation(bpy.types.Operator):
                 #    Phase 1 (CPU-destination): C++ пишет в фоне
                 #    pinned RAM → DMA → NVMe
                 #    _live_arrays защищает pos от GC пока C++ работает
-                if not scene_s.is_baked:
+                if (not scene_s.is_baked and
+                        bool(getattr(scene_s, "use_disk_cache", False))):
                     _live_arrays.append(pos)
                     if not g_dll.Cache_write_frame_async(
                             frame, pos, c_size_t(nV), cache_dir):
@@ -5602,14 +5219,14 @@ def _readback_drape_preview(index):
     simulation_obj = g_simulationOBJs[index]
     cloth_obj = g_clothOBJs[index]
     n_sim = len(simulation_obj.data.vertices)
-    vertices = (CType.ClothVertex * n_sim)()
-    g_dll.SIM_get_cloth_verts(
-        g_clmd[index], vertices, c_size_t(n_sim))
-    positions = (c_float * (n_sim * 3))()
-    for vertex in range(n_sim):
-        positions[vertex * 3 + 0] = vertices[vertex].x[0]
-        positions[vertex * 3 + 1] = vertices[vertex].x[1]
-        positions[vertex * 3 + 2] = vertices[vertex].x[2]
+    if index < 0 or index >= len(_readback_owners):
+        raise RuntimeError("v3 drape readback owner does not exist")
+    owner = _readback_owners[index]
+    result = int(g_dll.GPUCloth_v3_cloth_readback(
+        owner["handle"], pointer(owner["readback"])))
+    if result != CType.GPUCLOTH_ABI_OK:
+        raise RuntimeError(f"v3 drape readback rejected with {result}")
+    positions = owner["readback_positions"]
     flat = np.frombuffer(positions, dtype=np.float32)
     simulation_obj.data.vertices.foreach_set("co", flat)
     simulation_obj.data.update()
@@ -5632,9 +5249,9 @@ def _readback_drape_preview(index):
 
 def _selected_drape_owner(context):
     index = _prepared_cloth_index(context.object)
-    if g_dll is None or index < 0 or index >= len(g_clmd):
+    if g_dll is None or index < 0 or index >= len(g_cloth_handles):
         raise RuntimeError("selected cloth is not prepared")
-    return index, context.object, g_clmd[index]
+    return index, context.object, g_cloth_handles[index]
 
 
 class GPUCloth_BeginDrape(bpy.types.Operator):
@@ -5650,7 +5267,7 @@ class GPUCloth_BeginDrape(bpy.types.Operator):
 
     def execute(self, context):
         try:
-            index, cloth_obj, clmd = _selected_drape_owner(context)
+            index, cloth_obj, cloth_handle = _selected_drape_owner(context)
             _publish_frame_inputs(
                 context, context.evaluated_depsgraph_get())
             config = CType.GPUClothDrapeConfig()
@@ -5659,7 +5276,7 @@ class GPUCloth_BeginDrape(bpy.types.Operator):
             config.max_steps = 240
             config.convergence_window = 8
             config.convergence_tolerance = float(
-                clmd.contents.sim_parms.contents.solver_convergence_tol)
+                cloth_obj.GPUCloth.solver_convergence_tol)
             layer_owner = _capture_drape_triangle_layers(
                 g_simulationOBJs[index])
             if layer_owner is not None:
@@ -5669,11 +5286,11 @@ class GPUCloth_BeginDrape(bpy.types.Operator):
                     config.triangle_layers, CType.GPUCLOTH_ELEMENT_UINT32,
                     len(layers), sizeof(c_uint), addressof(layers), generation)
             status = _new_drape_status()
-            result = int(g_dll.SIM_begin_cloth_drape(
-                clmd, pointer(config), pointer(status)))
+            result = int(g_dll.GPUCloth_v3_cloth_begin_drape(
+                cloth_handle, pointer(config), pointer(status)))
             _remember_drape_status(cloth_obj, status)
             if result != CType.GPUCLOTH_ABI_OK:
-                witness = _invariant_witness_data(clmd)
+                witness = _invariant_witness_data(cloth_handle)
                 self.report(
                     {'ERROR'},
                     f"Drape Begin rejected: {witness['invariant_name']}")
@@ -5707,15 +5324,15 @@ class GPUCloth_StepDrape(bpy.types.Operator):
 
     def execute(self, context):
         try:
-            index, cloth_obj, clmd = _selected_drape_owner(context)
+            index, cloth_obj, cloth_handle = _selected_drape_owner(context)
             status = _new_drape_status()
             limit = 240 if self.until_settled else 1
             for _ in range(limit):
-                result = int(g_dll.SIM_step_cloth_drape(
-                    clmd, pointer(status)))
+                result = int(g_dll.GPUCloth_v3_cloth_step_drape(
+                    cloth_handle, pointer(status)))
                 state = _remember_drape_status(cloth_obj, status)
                 if result != CType.GPUCLOTH_ABI_OK:
-                    witness = _invariant_witness_data(clmd)
+                    witness = _invariant_witness_data(cloth_handle)
                     self.report(
                         {'ERROR'},
                         f"Drape frame rejected: {witness['invariant_name']}")
@@ -5753,10 +5370,10 @@ class GPUCloth_ApplyDrape(bpy.types.Operator):
 
     def execute(self, context):
         try:
-            index, cloth_obj, clmd = _selected_drape_owner(context)
+            index, cloth_obj, cloth_handle = _selected_drape_owner(context)
             status = _new_drape_status()
-            result = int(g_dll.SIM_apply_cloth_drape(
-                clmd, pointer(status)))
+            result = int(g_dll.GPUCloth_v3_cloth_apply_drape(
+                cloth_handle, pointer(status)))
             _remember_drape_status(cloth_obj, status)
             if result != CType.GPUCLOTH_ABI_OK:
                 raise RuntimeError(f"native Apply rejected with {result}")
@@ -5790,10 +5407,10 @@ class GPUCloth_CancelDrape(bpy.types.Operator):
 
     def execute(self, context):
         try:
-            index, cloth_obj, clmd = _selected_drape_owner(context)
+            index, cloth_obj, cloth_handle = _selected_drape_owner(context)
             status = _new_drape_status()
-            result = int(g_dll.SIM_cancel_cloth_drape(
-                clmd, pointer(status)))
+            result = int(g_dll.GPUCloth_v3_cloth_cancel_drape(
+                cloth_handle, pointer(status)))
             _remember_drape_status(cloth_obj, status)
             if result != CType.GPUCLOTH_ABI_OK:
                 raise RuntimeError(f"native Cancel rejected with {result}")
@@ -5806,11 +5423,11 @@ class GPUCloth_CancelDrape(bpy.types.Operator):
 
 
 def _selected_invariant_json(context):
-    _, cloth_obj, clmd = _selected_drape_owner(context)
+    _, cloth_obj, cloth_handle = _selected_drape_owner(context)
     payload = {
         "schema": "GPUClothInvariantWitness/1",
         "cloth": cloth_obj.name_full,
-        "witness": _invariant_witness_data(clmd),
+        "witness": _invariant_witness_data(cloth_handle),
         "drape": get_drape_ui_status(cloth_obj),
     }
     return json.dumps(payload, indent=2, sort_keys=True)
@@ -5863,7 +5480,7 @@ class GPUCloth_BakeSimulation(bpy.types.Operator):
     Паттерн: FLIP Fluids BakeFluidSimulation (modal с таймером).
 
     На каждом кадре:
-      SIM_solver_cloth() → SIM_get_cloth_verts() → foreach_set() → cache
+      v3 cloth step → v3 readback → foreach_set() → cache
     """
     bl_idname = "gpucloth.bake_simulation"
     bl_label  = "Запечь симуляцию GPU Cloth"
@@ -6082,9 +5699,8 @@ def _make_cache_handler(cache_dir_bytes):
             frame = scene.frame_current
             updated = False
             for i, cloth_obj in enumerate(g_clothOBJs):
-                clmd = g_clmd[i] if i < len(g_clmd) else None
                 cached = _cached_frame_positions(
-                    scene, frame, cloth_obj, clmd, cache_dir_bytes)
+                    scene, frame, cloth_obj, cache_dir_bytes)
                 if cached is not None:
                     flat = np.frombuffer(cached, dtype=np.float32)
                     cloth_obj.data.vertices.foreach_set("co", flat)
