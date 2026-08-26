@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 
 import bpy
 
@@ -103,6 +104,24 @@ EFFECTOR_WEIGHTS_MAP = {
     "drag": "weight_drag",
     "smokeflow": "weight_smoke_flow",
 }
+
+
+def capture_v3_velocity_damping(settings):
+    """Capture the GPUCloth-owned global velocity damping exactly once.
+
+    This is deliberately separate from Blender Cloth's CPU settings map:
+    ``vel_damping`` is a shipped GPUCloth RNA setting and has its own v3
+    typed owner, distinct from air and material damping.
+    """
+    try:
+        value = float(settings.vel_damping)
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise ValueError(
+            "GPUCloth.vel_damping is unavailable") from exc
+    if not math.isfinite(value) or not 0.0 <= value <= 1.0:
+        raise ValueError(
+            "GPUCloth.vel_damping must be finite and within [0, 1]")
+    return value
 
 
 def find_cpu_cloth_modifier(obj):

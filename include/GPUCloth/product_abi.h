@@ -150,6 +150,9 @@ enum GPUClothFeatureId : uint32_t {
     // Explicit PD-only Stable Discrete Bending owner.  This is intentionally
     // appended so existing feature ids remain ABI-stable.
     GPUCLOTH_FEATURE_BENDING_SDB,
+    // Global velocity damping is a product setting distinct from air and
+    // material damping.  Append it so all existing feature ids stay stable.
+    GPUCLOTH_FEATURE_VELOCITY_DAMPING,
 };
 
 enum GPUClothABIResult : uint32_t {
@@ -279,8 +282,9 @@ struct GPUClothSimulationConfig {
     float vertex_mass;
     float gravity[3];
     float air_damping;
+    float velocity_damping;
     uint32_t simulation_flags;
-    uint32_t reserved[3];
+    uint32_t reserved[2];
 };
 
 enum GPUClothMaterialFlags : uint32_t {
@@ -1221,6 +1225,26 @@ struct GPUClothV3SDBStatus {
     uint64_t apply_count;
 };
 
+// Handle-scoped status for the global velocity-damping owner.  The value is
+// accepted before build and marked applied only after a successful PD/Mil2
+// solve consumes it through the persistent solver state.
+struct GPUClothV3VelocityDampingStatus {
+    uint32_t struct_size;
+    uint32_t status_version;
+    uint32_t backend;
+    uint32_t requested;
+    uint32_t configured;
+    uint32_t applied;
+    uint32_t solver_mask;
+    uint32_t last_result;
+    float velocity_damping;
+    uint32_t reserved0;
+    uint64_t object_id;
+    uint64_t topology_generation;
+    uint64_t geometry_generation;
+    uint64_t apply_count;
+};
+
 // Lossless, handle-scoped material spring record. The complete native spring
 // type carries base kind plus WARP/WEFT direction bits; no host pointer crosses
 // the ABI.
@@ -1298,7 +1322,8 @@ struct GPUClothDescriptorLayout {
     uint32_t drape_status_size;
     uint32_t sdb_status_size;
     uint32_t proxy_status_size;
-    uint32_t reserved[2];
+    uint32_t velocity_damping_status_size;
+    uint32_t reserved[1];
 };
 
 static_assert(sizeof(GPUClothABIVersion) == 32, "GPUClothABIVersion ABI drift");
@@ -1353,6 +1378,8 @@ static_assert(sizeof(GPUClothV3ProxyStatus) == 112,
     "GPUClothV3ProxyStatus ABI drift");
 static_assert(sizeof(GPUClothV3SDBStatus) == 64,
     "GPUClothV3SDBStatus ABI drift");
+static_assert(sizeof(GPUClothV3VelocityDampingStatus) == 72,
+    "GPUClothV3VelocityDampingStatus ABI drift");
 static_assert(sizeof(GPUClothV3MaterialSpringRecord) == 36,
     "GPUClothV3MaterialSpringRecord ABI drift");
 static_assert(sizeof(GPUClothV3MaterialStateQuery) == 136,

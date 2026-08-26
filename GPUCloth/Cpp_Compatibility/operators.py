@@ -1075,6 +1075,11 @@ def _configure_simulation_features(dll, cloth_handle, scene, settings):
         scene.gpu_cloth_helper.gravity_z,
     )
     config.air_damping = settings.air_viscosity
+    from . import cloth_settings_bridge
+    config.velocity_damping = (
+        cloth_settings_bridge.capture_v3_velocity_damping(settings))
+    config.simulation_flags = 0
+    config.reserved[:] = (0, 0)
     header = cast(
         pointer(config), POINTER(CType.GPUClothFeatureConfigHeader))
     for feature in (
@@ -1082,8 +1087,11 @@ def _configure_simulation_features(dll, cloth_handle, scene, settings):
             CType.GPUCLOTH_FEATURE_MATERIAL_MASS,
             CType.GPUCLOTH_FEATURE_GRAVITY_VECTOR,
             CType.GPUCLOTH_FEATURE_SIMULATION_QUALITY,
-            CType.GPUCLOTH_FEATURE_AIR_DAMPING):
+            CType.GPUCLOTH_FEATURE_AIR_DAMPING,
+            CType.GPUCLOTH_FEATURE_VELOCITY_DAMPING):
         config.header.feature_id = feature
+        config.header.config_version = (
+            2 if feature == CType.GPUCLOTH_FEATURE_VELOCITY_DAMPING else 1)
         result = int(dll.GPUCloth_v3_cloth_configure(cloth_handle, header))
         if result != CType.GPUCLOTH_ABI_OK:
             raise RuntimeError(
@@ -1239,6 +1247,9 @@ _GPUCLOTH_V3_EXPORT_SIGNATURES = {
     "GPUCloth_v3_cloth_get_sdb_status": [
         CType.GPUClothV3ClothHandle,
         POINTER(CType.GPUClothV3SDBStatus)],
+    "GPUCloth_v3_cloth_get_velocity_damping_status": [
+        CType.GPUClothV3ClothHandle,
+        POINTER(CType.GPUClothV3VelocityDampingStatus)],
     "GPUCloth_v3_cloth_query_material_state": [
         CType.GPUClothV3ClothHandle,
         POINTER(CType.GPUClothV3MaterialStateQuery)],
@@ -1361,13 +1372,15 @@ def _validate_descriptor_layout(dll):
         "drape_status_size": sizeof(CType.GPUClothDrapeStatus),
         "sdb_status_size": sizeof(CType.GPUClothV3SDBStatus),
         "proxy_status_size": sizeof(CType.GPUClothV3ProxyStatus),
+        "velocity_damping_status_size": sizeof(
+            CType.GPUClothV3VelocityDampingStatus),
     }
     mismatches = [
         f"{name}={int(getattr(layout, name))}, expected={expected_size}"
         for name, expected_size in expected.items()
         if int(getattr(layout, name)) != expected_size]
     if (int(layout.struct_size) != sizeof(layout) or
-            int(layout.schema_version) != 7 or
+            int(layout.schema_version) != 8 or
             any(int(value) != 0 for value in layout.reserved) or
             mismatches):
         detail = "; ".join(mismatches) if mismatches else "header mismatch"
@@ -1389,7 +1402,7 @@ def _validate_product_abi(dll):
         "abi_major": 3,
         "abi_minor": 0,
         "abi_patch": 0,
-        "feature_schema_version": 7,
+        "feature_schema_version": 8,
         "backend_mask": CType.GPUCLOTH_V3_BACKEND_MASK_ALL,
         "pointer_width_bits": 64,
         "little_endian": 1,
@@ -1478,7 +1491,8 @@ def _validate_product_abi(dll):
             raise RuntimeError(
                 f"native v3 feature exposes unknown config kind: {name}, "
                 f"mask={int(indexed.config_kind_mask)}")
-        expected_config_version = 2 if name == "anisotropy" else 1
+        expected_config_version = 2 if name in (
+            "anisotropy", "velocity_damping") else 1
         if int(indexed.config_version) != expected_config_version:
             raise RuntimeError(
                 f"native v3 feature config version mismatch: {name}, "
