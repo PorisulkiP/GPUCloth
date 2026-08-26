@@ -1389,7 +1389,7 @@ def _validate_product_abi(dll):
         "abi_major": 3,
         "abi_minor": 0,
         "abi_patch": 0,
-        "feature_schema_version": 6,
+        "feature_schema_version": 7,
         "backend_mask": CType.GPUCLOTH_V3_BACKEND_MASK_ALL,
         "pointer_width_bits": 64,
         "little_endian": 1,
@@ -1419,8 +1419,30 @@ def _validate_product_abi(dll):
         raise RuntimeError(
             "native v3 feature count mismatch: "
             f"abi={declared_count}, native={native_count}")
-
     feature_ids = set()
+    allowed_feature_flags = (
+        CType.GPUCLOTH_FEATURE_BLENDER_CORE |
+        CType.GPUCLOTH_FEATURE_RELEASE_REQUIRED |
+        CType.GPUCLOTH_FEATURE_EXTENSION)
+    known_config_mask = (
+        CType.GPUCLOTH_CONFIG_SIMULATION |
+        CType.GPUCLOTH_CONFIG_MATERIAL |
+        CType.GPUCLOTH_CONFIG_PIN |
+        CType.GPUCLOTH_CONFIG_CONSTRAINT |
+        CType.GPUCLOTH_CONFIG_PRESSURE |
+        CType.GPUCLOTH_CONFIG_COLLISION |
+        CType.GPUCLOTH_CONFIG_COLLIDER |
+        CType.GPUCLOTH_CONFIG_MESH_STATE |
+        CType.GPUCLOTH_CONFIG_EFFECTOR |
+        CType.GPUCLOTH_CONFIG_EFFECTOR_WEIGHTS |
+        CType.GPUCLOTH_CONFIG_CACHE |
+        CType.GPUCLOTH_CONFIG_SEWING |
+        CType.GPUCLOTH_CONFIG_VERTEX_CHANNEL |
+        CType.GPUCLOTH_CONFIG_COLLISION_FILTER |
+        CType.GPUCLOTH_CONFIG_PROXY |
+        CType.GPUCLOTH_CONFIG_DIAGNOSTICS |
+        CType.GPUCLOTH_CONFIG_COLLECTION)
+    configless_features = {"lifecycle", "readback"}
     for index in range(native_count):
         indexed = CType.GPUClothFeatureInfo()
         indexed.struct_size = sizeof(indexed)
@@ -1435,6 +1457,37 @@ def _validate_product_abi(dll):
                 f"native v3 feature-info size mismatch: index={index}, "
                 f"native={int(indexed.struct_size)}, "
                 f"expected={sizeof(indexed)}")
+        name = bytes(indexed.name).split(b"\0", 1)[0].decode(
+            "ascii", errors="strict")
+        if int(indexed.status) != CType.GPUCLOTH_FEATURE_PROVEN:
+            raise RuntimeError(
+                f"native v3 feature is not PROVEN: {name}, "
+                f"status={int(indexed.status)}")
+        if int(indexed.flags) & ~allowed_feature_flags:
+            raise RuntimeError(
+                f"native v3 feature exposes unknown flags: {name}, "
+                f"flags={int(indexed.flags)}")
+        if int(indexed.supported_solver_mask) & ~CType.GPUCLOTH_SOLVER_ALL:
+            raise RuntimeError(
+                f"native v3 feature exposes non-product solver mask: {name}")
+        if int(indexed.proven_solver_mask) & ~int(
+                indexed.supported_solver_mask):
+            raise RuntimeError(
+                f"native v3 feature proves unsupported solver: {name}")
+        if int(indexed.config_kind_mask) & ~known_config_mask:
+            raise RuntimeError(
+                f"native v3 feature exposes unknown config kind: {name}, "
+                f"mask={int(indexed.config_kind_mask)}")
+        expected_config_version = 2 if name == "anisotropy" else 1
+        if int(indexed.config_version) != expected_config_version:
+            raise RuntimeError(
+                f"native v3 feature config version mismatch: {name}, "
+                f"native={int(indexed.config_version)}, "
+                f"expected={expected_config_version}")
+        if (int(indexed.config_kind_mask) == CType.GPUCLOTH_CONFIG_NONE and
+                name not in configless_features):
+            raise RuntimeError(
+                f"native v3 configurable feature has no typed owner: {name}")
         feature_id = int(indexed.feature_id)
         if feature_id in feature_ids:
             raise RuntimeError(

@@ -20,8 +20,7 @@ enum GPUClothFeatureStatus : uint32_t {
 enum GPUClothFeatureFlags : uint32_t {
     GPUCLOTH_FEATURE_BLENDER_CORE = 1u << 0,
     GPUCLOTH_FEATURE_RELEASE_REQUIRED = 1u << 1,
-    GPUCLOTH_FEATURE_FUTURE_CONFIG = 1u << 2,
-    GPUCLOTH_FEATURE_EXTENSION = 1u << 3,
+    GPUCLOTH_FEATURE_EXTENSION = 1u << 2,
 };
 
 enum GPUClothConfigKindMask : uint32_t {
