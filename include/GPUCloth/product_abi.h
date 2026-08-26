@@ -156,6 +156,9 @@ enum GPUClothFeatureId : uint32_t {
     // Global effector force and wind scales are one typed owner.  Append this
     // feature so all existing ids remain ABI-stable.
     GPUCLOTH_FEATURE_EFFECTOR_SCALES,
+    // Constraint-network seams are a distinct pre-build owner.  Append this
+    // feature so all existing ids remain ABI-stable.
+    GPUCLOTH_FEATURE_CONSTRAINT_NETWORK,
 };
 
 enum GPUClothABIResult : uint32_t {
@@ -250,6 +253,7 @@ enum GPUClothBufferElementType : uint32_t {
     GPUCLOTH_ELEMENT_MESH_FACE,
     GPUCLOTH_ELEMENT_MESH_CORNER,
     GPUCLOTH_ELEMENT_MATERIAL_SPRING,
+    GPUCLOTH_ELEMENT_CONSTRAINT_NETWORK_RECORD,
 };
 
 struct GPUClothBufferView {
@@ -709,6 +713,38 @@ struct GPUClothSewingConfig {
     uint32_t phase_count;
     uint32_t sewing_flags;
     float activation_speed;
+    uint32_t reserved[3];
+};
+
+// Constraint-network records are deliberately separate from generic sewing
+// records. Every field is consumed by the v3 owner: phase is explicit and
+// reserved is validated before the record is copied.
+struct GPUClothConstraintNetworkRecord {
+    uint64_t seam_id;
+    uint32_t vertex_a;
+    uint32_t vertex_b;
+    uint32_t phase;
+    uint32_t reserved;
+};
+
+enum GPUClothConstraintNetworkFlags : uint32_t {
+    GPUCLOTH_CONSTRAINT_NETWORK_ENABLED = 1u << 0,
+};
+
+// Pointer-free, versioned constraint-network input. The record view is
+// copied by the v3 owner before this call returns; callers may release it
+// immediately after a successful configure.
+struct GPUClothConstraintNetworkConfig {
+    GPUClothFeatureConfigHeader header;
+    uint64_t object_id;
+    uint64_t topology_generation;
+    uint64_t geometry_generation;
+    GPUClothBufferView constraints;
+    uint32_t solver_mask;
+    uint32_t network_flags;
+    uint32_t phase_count;
+    float sewing_speed;
+    float seam_stiffness;
     uint32_t reserved[3];
 };
 
@@ -1282,6 +1318,41 @@ struct GPUClothV3EffectorScaleStatus {
     uint64_t apply_count;
 };
 
+enum GPUClothV3ConstraintNetworkState : uint32_t {
+    GPUCLOTH_V3_CONSTRAINT_NETWORK_NONE = 0,
+    GPUCLOTH_V3_CONSTRAINT_NETWORK_CONFIGURED = 1,
+    GPUCLOTH_V3_CONSTRAINT_NETWORK_APPLIED = 2,
+};
+
+// Handle-scoped status for the typed constraint-network owner. Applied state
+// is reported from the native ClothConstraintNetwork consumed by both
+// supported product solvers, not from a cached Python snapshot.
+struct GPUClothV3ConstraintNetworkStatus {
+    uint32_t struct_size;
+    uint32_t status_version;
+    uint32_t state;
+    uint32_t last_result;
+    uint32_t solver_mask;
+    uint32_t enabled;
+    uint32_t configured;
+    uint32_t applied;
+    uint64_t object_id;
+    uint64_t topology_generation;
+    uint64_t geometry_generation;
+    uint64_t record_count;
+    uint64_t spring_count;
+    uint32_t phase_count;
+    uint32_t current_phase;
+    float sewing_speed;
+    float seam_stiffness;
+    float elapsed_frames;
+    uint32_t phase_coverage_mask;
+    uint32_t scan_count;
+    uint32_t upload_count;
+    uint32_t invalidation_count;
+    uint32_t phase_transition_count;
+};
+
 // Lossless, handle-scoped material spring record. The complete native spring
 // type carries base kind plus WARP/WEFT direction bits; no host pointer crosses
 // the ABI.
@@ -1365,7 +1436,9 @@ struct GPUClothDescriptorLayout {
     uint32_t velocity_damping_status_size;
     uint32_t effector_scales_config_size;
     uint32_t effector_scales_status_size;
-    uint32_t reserved[1];
+    uint32_t constraint_network_config_size;
+    uint32_t constraint_network_status_size;
+    uint32_t constraint_network_record_size;
 };
 
 static_assert(sizeof(GPUClothABIVersion) == 32, "GPUClothABIVersion ABI drift");
@@ -1396,7 +1469,11 @@ static_assert(sizeof(GPUClothCacheConfig) == 96, "GPUClothCacheConfig ABI drift"
 static_assert(sizeof(GPUClothCacheStatusUpdate) == 56, "GPUClothCacheStatusUpdate ABI drift");
 static_assert(sizeof(GPUClothCacheStatus) == 192, "GPUClothCacheStatus ABI drift");
 static_assert(sizeof(GPUClothSewingRecord) == 32, "GPUClothSewingRecord ABI drift");
+static_assert(sizeof(GPUClothConstraintNetworkRecord) == 24,
+    "GPUClothConstraintNetworkRecord ABI drift");
 static_assert(sizeof(GPUClothSewingConfig) == 80, "GPUClothSewingConfig ABI drift");
+static_assert(sizeof(GPUClothConstraintNetworkConfig) == 112,
+    "GPUClothConstraintNetworkConfig ABI drift");
 static_assert(sizeof(GPUClothVertexChannelConfig) == 40, "GPUClothVertexChannelConfig ABI drift");
 static_assert(sizeof(GPUClothCollisionFilterConfig) == 32, "GPUClothCollisionFilterConfig ABI drift");
 static_assert(sizeof(GPUClothProxyConfig) == 160, "GPUClothProxyConfig ABI drift");
@@ -1426,8 +1503,10 @@ static_assert(sizeof(GPUClothV3VelocityDampingStatus) == 72,
     "GPUClothV3VelocityDampingStatus ABI drift");
 static_assert(sizeof(GPUClothV3EffectorScaleStatus) == 72,
     "GPUClothV3EffectorScaleStatus ABI drift");
+static_assert(sizeof(GPUClothV3ConstraintNetworkStatus) == 112,
+    "GPUClothV3ConstraintNetworkStatus ABI drift");
 static_assert(sizeof(GPUClothV3MaterialSpringRecord) == 36,
     "GPUClothV3MaterialSpringRecord ABI drift");
 static_assert(sizeof(GPUClothV3MaterialStateQuery) == 136,
     "GPUClothV3MaterialStateQuery ABI drift");
-static_assert(sizeof(GPUClothDescriptorLayout) == 176, "GPUClothDescriptorLayout ABI drift");
+static_assert(sizeof(GPUClothDescriptorLayout) == 184, "GPUClothDescriptorLayout ABI drift");

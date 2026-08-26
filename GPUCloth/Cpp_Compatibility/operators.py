@@ -139,6 +139,13 @@ def _reject_unsupported_v3_owners(scene, cloth_objects):
             if bool(getattr(settings, "use_anisotropy", False)):
                 unsupported.append(
                     f"SDB_bending_anisotropy:{cloth_obj.name_full}")
+        if bool(getattr(settings, "use_constraint_network", False)):
+            if bool(getattr(settings, "use_dynamic_mesh", False)):
+                unsupported.append(
+                    f"constraint_network_dynamic_mesh:{cloth_obj.name_full}")
+            if bool(getattr(settings, "use_sewing_springs", False)):
+                unsupported.append(
+                    f"constraint_network_sewing:{cloth_obj.name_full}")
     if unsupported:
         raise RuntimeError(
             "NOT_CONFIGURABLE: ABI v3 has no owner for " +
@@ -466,10 +473,15 @@ def _create_v3_cloth_owner(
         *(component for position in mesh_snapshot["positions"]
           for component in position))
     edge_payload = (CType.GPUClothV3MeshEdge * len(edges))()
+    source_edges = tuple(getattr(simulation_obj.data, "edges", ()))
     for index, (vertex_a, vertex_b) in enumerate(edges):
         edge_payload[index].vertex_a = int(vertex_a)
         edge_payload[index].vertex_b = int(vertex_b)
-        edge_payload[index].edge_flags = 0
+        edge_payload[index].edge_flags = (
+            CType.GPUCLOTH_V3_MESH_EDGE_LOOSE
+            if index < len(source_edges) and
+            bool(getattr(source_edges[index], "is_loose", False))
+            else 0)
         edge_payload[index].reserved = 0
     face_payload = (CType.GPUClothV3MeshFace * len(polygons))()
     for index, (first_corner, corner_count) in enumerate(polygons):
@@ -558,6 +570,72 @@ def _create_v3_cloth_owner(
         "topology_generation": topology_generation,
         "geometry_generation": geometry_generation,
         "vertex_count": vertex_count,
+    }
+
+
+def _capture_constraint_network(
+        cloth_obj, simulation_obj, topology_generation, geometry_generation,
+        solver_mask):
+    """Capture loose-edge CN input; native owns a deep copy at configure."""
+    from . import cloth_settings_bridge
+    captured = cloth_settings_bridge.capture_v3_constraint_network(
+        cloth_obj.GPUCloth)
+    if captured is None:
+        return None
+    if bool(getattr(cloth_obj.GPUCloth, "use_sewing_springs", False)):
+        raise RuntimeError(
+            "constraint network and sewing springs are mutually exclusive")
+    loose_edges = tuple(
+        edge for edge in getattr(simulation_obj.data, "edges", ())
+        if bool(getattr(edge, "is_loose", False)))
+    if not loose_edges:
+        raise RuntimeError(
+            "constraint network requires at least one loose mesh edge")
+    object_id = _blender_session_uid(
+        simulation_obj, "v3 constraint-network object")
+    phase_count = int(captured["phase_count"])
+    if phase_count <= 0 or len(loose_edges) < phase_count:
+        raise RuntimeError(
+            "constraint network requires at least one loose edge per phase")
+    records = (CType.GPUClothConstraintNetworkRecord * len(loose_edges))()
+    for index, edge in enumerate(loose_edges):
+        vertices = tuple(int(value) for value in edge.vertices)
+        if len(vertices) != 2 or vertices[0] == vertices[1]:
+            raise RuntimeError("constraint network has an invalid loose edge")
+        records[index].seam_id = int(edge.index) + 1
+        records[index].vertex_a = vertices[0]
+        records[index].vertex_b = vertices[1]
+        # Deterministic contiguous ownership. Native receives explicit phase
+        # per record; no modulo/inference is performed at build time.
+        records[index].phase = (
+            index * phase_count // len(loose_edges)) + 1
+        records[index].reserved = 0
+    config = CType.GPUClothConstraintNetworkConfig()
+    config.header.struct_size = sizeof(config)
+    config.header.feature_id = CType.GPUCLOTH_FEATURE_CONSTRAINT_NETWORK
+    config.header.config_version = 2
+    config.header.flags = 0
+    config.object_id = int(object_id)
+    config.topology_generation = int(topology_generation)
+    config.geometry_generation = int(geometry_generation)
+    config.solver_mask = int(solver_mask)
+    config.network_flags = CType.GPUCLOTH_CONSTRAINT_NETWORK_ENABLED
+    config.phase_count = phase_count
+    config.sewing_speed = float(captured["sewing_speed"])
+    config.seam_stiffness = float(captured["seam_stiffness"])
+    _set_buffer_view(
+        config.constraints, CType.GPUCLOTH_ELEMENT_CONSTRAINT_NETWORK_RECORD,
+        len(records), sizeof(CType.GPUClothConstraintNetworkRecord),
+        addressof(records), int(topology_generation))
+    config.reserved[:] = (0, 0, 0)
+    return {
+        "config": config,
+        "records": records,
+        "object_id": object_id,
+        "topology_generation": int(topology_generation),
+        "geometry_generation": int(geometry_generation),
+        "solver_mask": int(solver_mask),
+        "record_count": len(records),
     }
 
 
@@ -1284,6 +1362,9 @@ _GPUCLOTH_V3_EXPORT_SIGNATURES = {
     "GPUCloth_v3_cloth_get_effector_scales_status": [
         CType.GPUClothV3ClothHandle,
         POINTER(CType.GPUClothV3EffectorScaleStatus)],
+    "GPUCloth_v3_cloth_get_constraint_network_status": [
+        CType.GPUClothV3ClothHandle,
+        POINTER(CType.GPUClothV3ConstraintNetworkStatus)],
     "GPUCloth_v3_cloth_query_material_state": [
         CType.GPUClothV3ClothHandle,
         POINTER(CType.GPUClothV3MaterialStateQuery)],
@@ -1412,14 +1493,19 @@ def _validate_descriptor_layout(dll):
             CType.GPUClothEffectorScaleConfig),
         "effector_scales_status_size": sizeof(
             CType.GPUClothV3EffectorScaleStatus),
+        "constraint_network_config_size": sizeof(
+            CType.GPUClothConstraintNetworkConfig),
+        "constraint_network_status_size": sizeof(
+            CType.GPUClothV3ConstraintNetworkStatus),
+        "constraint_network_record_size": sizeof(
+            CType.GPUClothConstraintNetworkRecord),
     }
     mismatches = [
         f"{name}={int(getattr(layout, name))}, expected={expected_size}"
         for name, expected_size in expected.items()
         if int(getattr(layout, name)) != expected_size]
     if (int(layout.struct_size) != sizeof(layout) or
-            int(layout.schema_version) != 9 or
-            any(int(value) != 0 for value in layout.reserved) or
+            int(layout.schema_version) != 11 or
             mismatches):
         detail = "; ".join(mismatches) if mismatches else "header mismatch"
         raise RuntimeError(f"native v3 descriptor ABI mismatch: {detail}")
@@ -1440,7 +1526,7 @@ def _validate_product_abi(dll):
         "abi_major": 3,
         "abi_minor": 0,
         "abi_patch": 0,
-        "feature_schema_version": 9,
+        "feature_schema_version": 11,
         "backend_mask": CType.GPUCLOTH_V3_BACKEND_MASK_ALL,
         "pointer_width_bits": 64,
         "little_endian": 1,
@@ -1530,7 +1616,7 @@ def _validate_product_abi(dll):
                 f"native v3 feature exposes unknown config kind: {name}, "
                 f"mask={int(indexed.config_kind_mask)}")
         expected_config_version = 2 if name in (
-            "anisotropy", "velocity_damping") else 1
+            "anisotropy", "velocity_damping", "constraint_network") else 1
         if int(indexed.config_version) != expected_config_version:
             raise RuntimeError(
                 f"native v3 feature config version mismatch: {name}, "
@@ -2130,6 +2216,58 @@ def _publish_internal_springs_config(dll, cloth_handle, prepared_config):
         raise RuntimeError(
             f"typed internal-springs config rejected with {result}")
     return result
+
+
+def _publish_constraint_network(dll, cloth_handle, prepared):
+    if prepared is None:
+        return CType.GPUCLOTH_ABI_OK
+    config = CType.GPUClothConstraintNetworkConfig.from_buffer_copy(
+        bytes(prepared["config"]))
+    # Keep the copied caller owner live through the native call. Native then
+    # owns records independently of this ctypes allocation.
+    config.constraints.data_address = addressof(prepared["records"])
+    header = cast(
+        pointer(config), POINTER(CType.GPUClothFeatureConfigHeader))
+    result = int(dll.GPUCloth_v3_cloth_configure(cloth_handle, header))
+    if result != CType.GPUCLOTH_ABI_OK:
+        raise RuntimeError(
+            f"typed constraint-network config rejected with {result}")
+    return result
+
+
+def _validate_constraint_network_status(dll, cloth_handle, prepared):
+    if prepared is None:
+        return None
+    status = CType.GPUClothV3ConstraintNetworkStatus()
+    status.struct_size = sizeof(status)
+    status.status_version = 1
+    result = int(dll.GPUCloth_v3_cloth_get_constraint_network_status(
+        cloth_handle, pointer(status)))
+    if result != CType.GPUCLOTH_ABI_OK:
+        raise RuntimeError(
+            f"typed constraint-network status rejected with {result}")
+    expected = prepared["record_count"]
+    expected_phase_mask = (1 << int(prepared["config"].phase_count)) - 1
+    if (int(status.state) != CType.GPUCLOTH_V3_CONSTRAINT_NETWORK_APPLIED or
+            int(status.configured) != 1 or int(status.applied) != 1 or
+            int(status.enabled) != 1 or
+            int(status.solver_mask) != int(prepared["solver_mask"]) or
+            int(status.record_count) != expected or
+            int(status.spring_count) != expected or
+            int(status.phase_count) != int(prepared["config"].phase_count) or
+            int(status.phase_coverage_mask) != expected_phase_mask or
+            abs(float(status.sewing_speed) -
+                float(prepared["config"].sewing_speed)) > 1e-6 or
+            abs(float(status.seam_stiffness) -
+                float(prepared["config"].seam_stiffness)) > 1e-6 or
+            int(status.object_id) != int(prepared["object_id"]) or
+            int(status.topology_generation) !=
+                int(prepared["topology_generation"]) or
+            int(status.geometry_generation) !=
+                int(prepared["geometry_generation"])):
+        raise RuntimeError(
+            "typed constraint-network status does not match accepted owner")
+    return status
 
 
 def _capture_pressure_features(settings):
@@ -5057,6 +5195,7 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
             prepared_self_collision_masks = []
             prepared_topology_generations = []
             prepared_dynamic_meshes = []
+            prepared_constraint_networks = []
             for cloth_obj, simulation_obj in zip(
                     active_cloth, simulation_objects):
                 prepared_input_meshes.append(
@@ -5097,6 +5236,18 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
                     _capture_dynamic_mesh_snapshot(
                         cloth_obj, simulation_obj, depsgraph,
                         topology_generation, initial_generation))
+                solver_mask = {
+                    "PD": CType.GPUCLOTH_SOLVER_PD,
+                    "Mil2": CType.GPUCLOTH_SOLVER_MIL2,
+                }.get(str(cloth_obj.GPUCloth.solver_type))
+                if solver_mask is None:
+                    raise RuntimeError(
+                        f"unsupported v3 constraint-network solver: "
+                        f"{cloth_obj.GPUCloth.solver_type}")
+                prepared_constraint_networks.append(
+                    _capture_constraint_network(
+                        cloth_obj, simulation_obj, topology_generation, 1,
+                        solver_mask))
                 prepared_collision_configs.append(
                     _capture_cloth_collision_config(cloth_obj.GPUCloth))
             prepared_pin_owners = [
@@ -5213,6 +5364,8 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
                     g_dll, cloth_handle, prepared_internal_configs[i])
                 _publish_pressure_features(
                     g_dll, cloth_handle, prepared_pressure_features[i])
+                _publish_constraint_network(
+                    g_dll, cloth_handle, prepared_constraint_networks[i])
                 _publish_cloth_collision_config(
                     g_dll, cloth_handle, prepared_collision_configs[i])
                 _configure_solver_diagnostics(g_dll, cloth_handle)
@@ -5247,6 +5400,8 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
                 if result != CType.GPUCLOTH_ABI_OK:
                     raise RuntimeError(
                         f"v3 cloth build rejected with {result}")
+                _validate_constraint_network_status(
+                    g_dll, cloth_handle, prepared_constraint_networks[i])
             except (OSError, RuntimeError) as exc:
                 self.report({'ERROR'}, f"v3 cloth build failed: {exc}")
                 free_gpu_memory(context)

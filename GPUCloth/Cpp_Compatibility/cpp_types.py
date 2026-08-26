@@ -303,6 +303,8 @@ GPUCLOTH_ELEMENT_MESH_EDGE = 9
 GPUCLOTH_ELEMENT_MESH_FACE = 10
 GPUCLOTH_ELEMENT_MESH_CORNER = 11
 GPUCLOTH_ELEMENT_MATERIAL_SPRING = 12
+GPUCLOTH_ELEMENT_CONSTRAINT_NETWORK_RECORD = 13
+GPUCLOTH_V3_MESH_EDGE_LOOSE = 1 << 7
 
 GPUCLOTH_ABI_UNSUPPORTED = 4
 GPUCLOTH_ABI_OK = 0
@@ -344,6 +346,10 @@ GPUCLOTH_V3_CACHE_FRAME_READ = 1 << 1
 GPUCLOTH_PROXY_LOCAL_FRAME = 0
 GPUCLOTH_PROXY_DIRECT_BARYCENTRIC = 1 << 0
 GPUCLOTH_V3_PROXY_READY = 1
+GPUCLOTH_CONSTRAINT_NETWORK_ENABLED = 1 << 0
+GPUCLOTH_V3_CONSTRAINT_NETWORK_NONE = 0
+GPUCLOTH_V3_CONSTRAINT_NETWORK_CONFIGURED = 1
+GPUCLOTH_V3_CONSTRAINT_NETWORK_APPLIED = 2
 
 GPUClothV3RuntimeHandle = c_uint64
 GPUClothV3ClothHandle = c_uint64
@@ -407,6 +413,7 @@ GPUCLOTH_FEATURE_CACHE_STATUS = 55
 GPUCLOTH_FEATURE_BENDING_SDB = 56
 GPUCLOTH_FEATURE_VELOCITY_DAMPING = 57
 GPUCLOTH_FEATURE_EFFECTOR_SCALES = 58
+GPUCLOTH_FEATURE_CONSTRAINT_NETWORK = 59
 
 GPUCLOTH_MATERIAL_ANISOTROPY_ENABLED = 1 << 0
 
@@ -869,6 +876,34 @@ class GPUClothV3EffectorScaleStatus(Structure):
     ]
 
 
+class GPUClothV3ConstraintNetworkStatus(Structure):
+    _fields_ = [
+        ("struct_size", c_uint),
+        ("status_version", c_uint),
+        ("state", c_uint),
+        ("last_result", c_uint),
+        ("solver_mask", c_uint),
+        ("enabled", c_uint),
+        ("configured", c_uint),
+        ("applied", c_uint),
+        ("object_id", c_uint64),
+        ("topology_generation", c_uint64),
+        ("geometry_generation", c_uint64),
+        ("record_count", c_uint64),
+        ("spring_count", c_uint64),
+        ("phase_count", c_uint),
+        ("current_phase", c_uint),
+        ("sewing_speed", c_float),
+        ("seam_stiffness", c_float),
+        ("elapsed_frames", c_float),
+        ("phase_coverage_mask", c_uint),
+        ("scan_count", c_uint),
+        ("upload_count", c_uint),
+        ("invalidation_count", c_uint),
+        ("phase_transition_count", c_uint),
+    ]
+
+
 class GPUClothV3ProxyStatus(Structure):
     _fields_ = [
         ("struct_size", c_uint),
@@ -944,6 +979,9 @@ GPUCLOTH_V3_STRUCT_SIZES = {
     "GPUClothV3VelocityDampingStatus": 72,
     "GPUClothEffectorScaleConfig": 72,
     "GPUClothV3EffectorScaleStatus": 72,
+    "GPUClothV3ConstraintNetworkStatus": 112,
+    "GPUClothConstraintNetworkConfig": 112,
+    "GPUClothConstraintNetworkRecord": 24,
     "GPUClothV3MaterialSpringRecord": 36,
     "GPUClothV3MaterialStateQuery": 136,
 }
@@ -1307,6 +1345,16 @@ class GPUClothSewingRecord(Structure):
     ]
 
 
+class GPUClothConstraintNetworkRecord(Structure):
+    _fields_ = [
+        ("seam_id", c_uint64),
+        ("vertex_a", c_uint),
+        ("vertex_b", c_uint),
+        ("phase", c_uint),
+        ("reserved", c_uint),
+    ]
+
+
 class GPUClothSewingConfig(Structure):
     _fields_ = [
         ("header", GPUClothFeatureConfigHeader),
@@ -1314,6 +1362,22 @@ class GPUClothSewingConfig(Structure):
         ("phase_count", c_uint),
         ("sewing_flags", c_uint),
         ("activation_speed", c_float),
+        ("reserved", c_uint * 3),
+    ]
+
+
+class GPUClothConstraintNetworkConfig(Structure):
+    _fields_ = [
+        ("header", GPUClothFeatureConfigHeader),
+        ("object_id", c_uint64),
+        ("topology_generation", c_uint64),
+        ("geometry_generation", c_uint64),
+        ("constraints", GPUClothBufferView),
+        ("solver_mask", c_uint),
+        ("network_flags", c_uint),
+        ("phase_count", c_uint),
+        ("sewing_speed", c_float),
+        ("seam_stiffness", c_float),
         ("reserved", c_uint * 3),
     ]
 
@@ -1546,7 +1610,9 @@ class GPUClothDescriptorLayout(Structure):
         ("velocity_damping_status_size", c_uint),
         ("effector_scales_config_size", c_uint),
         ("effector_scales_status_size", c_uint),
-        ("reserved", c_uint * 1),
+        ("constraint_network_config_size", c_uint),
+        ("constraint_network_status_size", c_uint),
+        ("constraint_network_record_size", c_uint),
     ]
 
 class fmatrix3x3(Structure):

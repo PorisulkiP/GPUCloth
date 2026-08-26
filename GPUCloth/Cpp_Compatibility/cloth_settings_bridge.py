@@ -146,6 +146,41 @@ def capture_v3_effector_scales(settings):
     return force_scale, wind_scale
 
 
+def capture_v3_constraint_network(settings):
+    """Capture the supported typed constraint-network settings.
+
+    The loose-edge records are captured by the evaluated-mesh owner. This
+    helper owns only the four Blender RNA values and never retains a Blender
+    or ctypes pointer.
+    """
+    try:
+        enabled = bool(settings.use_constraint_network)
+        phases = int(settings.cn_phases)
+        sewing_speed = float(settings.cn_sewing_speed)
+        seam_stiffness = float(settings.cn_seam_stiffness)
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise ValueError(
+            "GPUCloth constraint-network settings are unavailable") from exc
+    if not enabled:
+        return None
+    if not 1 <= phases <= 10:
+        raise ValueError("GPUCloth.cn_phases must be within [1, 10]")
+    if (not math.isfinite(sewing_speed) or
+            not 1.0 <= sewing_speed <= 100.0):
+        raise ValueError(
+            "GPUCloth.cn_sewing_speed must be finite and within [1, 100]")
+    if (not math.isfinite(seam_stiffness) or
+            not 0.0 <= seam_stiffness <= 5.0):
+        raise ValueError(
+            "GPUCloth.cn_seam_stiffness must be finite and within [0, 5]")
+    return {
+        "enabled": True,
+        "phase_count": phases,
+        "sewing_speed": sewing_speed,
+        "seam_stiffness": seam_stiffness,
+    }
+
+
 def find_cpu_cloth_modifier(obj):
     return next((modifier for modifier in obj.modifiers if modifier.type == "CLOTH"), None)
 
