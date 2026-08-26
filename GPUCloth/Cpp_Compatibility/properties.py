@@ -507,24 +507,6 @@ class GPUClothObjectSettings(PropertyGroup):
         default=1.0, min=0.0, max=5.0, soft_max=2.0,
     )
 
-    cn_button_stiffness: FloatProperty(
-        name="Button Stiffness",
-        description="Stiffness multiplier for button constraints",
-        default=1.0, min=0.0, max=5.0, soft_max=2.0,
-    )
-
-    cn_zipper_stiffness: FloatProperty(
-        name="Zipper Stiffness",
-        description="Stiffness multiplier for zipper constraints",
-        default=1.0, min=0.0, max=5.0, soft_max=2.0,
-    )
-
-    cn_dart_stiffness: FloatProperty(
-        name="Dart Stiffness",
-        description="Stiffness multiplier for dart constraints",
-        default=1.0, min=0.0, max=5.0, soft_max=2.0,
-    )
-
     cn_enable_selfcoll_stitching: BoolProperty(
         name="Self-Collision During Stitching",
         description="Enable self-collision while seams are being tightened",
@@ -538,14 +520,6 @@ class GPUClothObjectSettings(PropertyGroup):
         default=1.0,
         min=0.0,
         max=100.0,
-    )
-
-    structural: FloatProperty(
-        name="Structural Stiffness",
-        description="Structural spring stiffness for Linear Bending model",
-        default=15.0,
-        min=0.0,
-        max=500.0,
     )
 
     max_tension: FloatProperty(
@@ -578,14 +552,6 @@ class GPUClothObjectSettings(PropertyGroup):
         default=100.0,
         min=0.0,
         max=10000.0,
-    )
-
-    max_struct: FloatProperty(
-        name="Max Structural",
-        description="Maximum structural stiffness clamping value",
-        default=500.0,
-        min=0.0,
-        max=500.0,
     )
 
     max_sewing: FloatProperty(
@@ -760,12 +726,6 @@ class GPUClothObjectSettings(PropertyGroup):
         name="Chebyshev ω",
         description="Chebyshev acceleration omega (1.0 = off, 1.5 = default)",
         default=1.5, min=0.5, max=2.0,
-    )
-
-    use_small_steps: BoolProperty(
-        name="Small Steps",
-        description="Combine substeps×iterations into single-iteration small steps",
-        default=False,
     )
 
     use_adaptive: BoolProperty(

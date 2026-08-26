@@ -358,16 +358,9 @@ class GPUCLOTH_PT_physical(bpy.types.Panel):
         col.prop(s, "max_compression",text=_t("Max Compression", "Макс. сжатие"))
         col.prop(s, "max_shear",      text=_t("Max Shear",       "Макс. сдвиг"))
         col.prop(s, "max_bend",       text=_t("Max Bending",     "Макс. изгиб"))
-        col.prop(s, "max_struct",     text=_t("Max Structural",  "Макс. структура"))
         col.prop(s, "max_sewing",     text=_t("Max Sewing",      "Макс. шов"))
         col.prop(s, "use_sewing_springs",
                  text=_t("Sew Cloth", "Сшивать ткань"))
-
-        layout.separator()
-        col = layout.column(align=True)
-        col.prop(s, "structural",     text=_t("Structural (Linear)",
-                                              "Структурная жёсткость (Linear)"))
-        col.active = (s.bending_model == 'LINEAR')
 
 
 # ===========================================================================
@@ -939,9 +932,6 @@ class GPUCLOTH_PT_constraint_network(bpy.types.Panel):
         layout.prop(gs, "cn_sewing_speed")
         layout.separator()
         layout.prop(gs, "cn_seam_stiffness")
-        layout.prop(gs, "cn_button_stiffness")
-        layout.prop(gs, "cn_zipper_stiffness")
-        layout.prop(gs, "cn_dart_stiffness")
         layout.separator()
         layout.prop(gs, "cn_enable_selfcoll_stitching")
 
@@ -976,7 +966,6 @@ class GPUCLOTH_PT_solver_advanced(bpy.types.Panel):
         col = layout.column(align=True)
         col.prop(s, "solver_iterations")
         col.prop(s, "solver_omega")
-        col.prop(s, "use_small_steps")
 
         layout.separator()
         box = layout.box()
