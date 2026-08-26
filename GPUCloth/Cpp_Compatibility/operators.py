@@ -1389,7 +1389,7 @@ def _validate_product_abi(dll):
         "abi_major": 3,
         "abi_minor": 0,
         "abi_patch": 0,
-        "feature_schema_version": 5,
+        "feature_schema_version": 6,
         "backend_mask": CType.GPUCLOTH_V3_BACKEND_MASK_ALL,
         "pointer_width_bits": 64,
         "little_endian": 1,
@@ -4776,16 +4776,6 @@ class GPUCloth_LoadDLL(bpy.types.Operator):
             g_dll = cdll.LoadLibrary(filename)
             self.report({'INFO'}, f"DLL загружена: {filename}")
 
-            # Host layout probes remain ABI diagnostics only; production cloth
-            # ownership uses opaque v3 handles exclusively.
-            g_dll.SIM_sizeof_cloth_vertex.argtypes = []
-            g_dll.SIM_sizeof_cloth_vertex.restype = c_size_t
-            g_dll.SIM_offsetof_cloth_vertex_x.argtypes = []
-            g_dll.SIM_offsetof_cloth_vertex_x.restype = c_size_t
-            g_dll.SIM_get_host_layout.argtypes = [
-                POINTER(CType.GPUClothHostLayout)]
-            g_dll.SIM_get_host_layout.restype = c_bool
-
             _bind_gpucloth_v3_exports(g_dll)
             _validate_product_abi(g_dll)
             _validate_descriptor_layout(g_dll)
@@ -6272,7 +6262,7 @@ def _make_cushion_mesh(name, nx, ny, half_size, init_z, sep, dome_height):
     return obj
 
 
-def _setup_cloth(obj, solver='XPBD', material='COTTON'):
+def _setup_cloth(obj, solver='PD', material='COTTON'):
     """Enable GPUCloth on object with given solver and material preset."""
     obj.GPUCloth.is_active = True
     obj.GPUCloth.solver_type = solver
@@ -6296,7 +6286,7 @@ class GPUCloth_TestDrapeOnSphere(bpy.types.Operator):
         bpy.context.view_layer.objects.active = cloth_obj
         cloth_obj.select_set(True)
 
-        _setup_cloth(cloth_obj, solver='XPBD', material='COTTON')
+        _setup_cloth(cloth_obj, solver='PD', material='COTTON')
 
         context.scene.gpu_cloth_helper.gravity_z = -9.81
 
@@ -6318,7 +6308,7 @@ class GPUCloth_TestTwist(bpy.types.Operator):
         bpy.context.view_layer.objects.active = cloth_obj
         cloth_obj.select_set(True)
 
-        _setup_cloth(cloth_obj, solver='XPBD', material='COTTON')
+        _setup_cloth(cloth_obj, solver='PD', material='COTTON')
 
         context.scene.gpu_cloth_helper.gravity_x = 0.0
         context.scene.gpu_cloth_helper.gravity_y = 0.0
@@ -6347,7 +6337,7 @@ class GPUCloth_TestMultiLayerDrop(bpy.types.Operator):
         bpy.context.view_layer.objects.active = cloth_obj
         cloth_obj.select_set(True)
 
-        _setup_cloth(cloth_obj, solver='OGC', material='COTTON')
+        _setup_cloth(cloth_obj, solver='PD', material='COTTON')
         cloth_obj.GPUCloth.use_self_collision = True
         cloth_obj.GPUCloth.ogc_radius = 150.0
         cloth_obj.GPUCloth.ogc_friction = 0.3
@@ -6385,7 +6375,7 @@ class GPUCloth_TestCushionDrop(bpy.types.Operator):
         bpy.context.view_layer.objects.active = cushion_obj
         cushion_obj.select_set(True)
 
-        _setup_cloth(cushion_obj, solver='XPBD', material='COTTON')
+        _setup_cloth(cushion_obj, solver='PD', material='COTTON')
 
         context.scene.gpu_cloth_helper.gravity_z = -9.81
 
@@ -6409,7 +6399,7 @@ class GPUCloth_TestOGCBounds(bpy.types.Operator):
         # Activate OGC on the upper sheet, show bounds immediately
         bpy.context.view_layer.objects.active = upper
         upper.select_set(True)
-        _setup_cloth(upper, solver='OGC', material='COTTON')
+        _setup_cloth(upper, solver='PD', material='COTTON')
         upper.GPUCloth.use_self_collision = True
         upper.GPUCloth.ogc_radius         = 150.0
         upper.GPUCloth.ogc_friction       = 0.3
@@ -6418,7 +6408,7 @@ class GPUCloth_TestOGCBounds(bpy.types.Operator):
         # Activate OGC on the lower sheet as well
         lower.select_set(True)
         bpy.context.view_layer.objects.active = lower
-        _setup_cloth(lower, solver='OGC', material='COTTON')
+        _setup_cloth(lower, solver='PD', material='COTTON')
         lower.GPUCloth.use_self_collision = True
         lower.GPUCloth.ogc_radius         = 150.0
         lower.GPUCloth.ogc_friction       = 0.3

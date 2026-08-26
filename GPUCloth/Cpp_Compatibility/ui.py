@@ -987,17 +987,6 @@ class GPUCLOTH_PT_solver_advanced(bpy.types.Panel):
         sub.prop(s, "solver_max_iterations")
         sub.prop(s, "solver_convergence_tol")
 
-        layout.separator()
-        box = layout.box()
-        box.label(text="Per-Type Budget (XPBD only)")
-        box.prop(s, "use_per_type_budget")
-        sub = box.column()
-        sub.active = s.use_per_type_budget
-        sub.prop(s, "ptb_stretch")
-        sub.prop(s, "ptb_bending")
-        sub.prop(s, "ptb_shear")
-        sub.prop(s, "ptb_seam")
-
 
 # ===========================================================================
 #  Registration

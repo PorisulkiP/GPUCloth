@@ -86,16 +86,8 @@ def _on_execution_backend_change(self, context):
 # ===========================================================================
 #
 #  Источники значений:
-#    XPBD  — Macklin & Müller 2016 "XPBD: Position-Based Simulation of
-#             Compliant Constrained Dynamics", Table 1 (compliance → stiffness)
-#    PD    — Bouaziz et al. 2014 "Projective Dynamics", §5 (projection weights);
-#             глобальный solve позволяет бóльшую жёсткость при меньшем числе шагов
-#    MGPBD — Xian et al. 2019 "A Scalable Galerkin Multigrid Method for
-#             Real-time Simulation", §4; AMG-ускорение → меньше подшагов
-#    Mil2  — Li et al. 2020 "Incremental Potential Contact", §3;
-#             barrier-based, диапазон аналогичен XPBD
-#    OGC   — Chen et al. 2025 "Offset Geometric Contact", §3.6;
-#             базовые параметры как у XPBD + OGC-специфичные (radius, friction)
+#    PD    — Bouaziz et al. 2014 "Projective Dynamics", §5 (projection weights)
+#    Mil2  — Li et al. 2020 "Incremental Potential Contact", §3
 #
 #  Физические ориентиры (реальные ткани):
 #    Silk:    density ~1.3 g/cm³, thickness ~0.1 mm, very light and flowing
@@ -105,38 +97,6 @@ def _on_execution_backend_change(self, context):
 #    Rubber:  ~1.5 g/cm³, ~1–3 mm, elastic, low bending, high friction
 
 MATERIAL_PRESETS = {
-    'XPBD': {
-        'SILK': {
-            'vertex_mass': 0.04, 'quality_step': 10, 'bending_model': 'ANGULAR',
-            'tension': 4.0,  'compression': 2.5,  'shear': 1.5,  'bending_stiffness': 0.03,
-            'tension_damp': 0.5, 'compression_damp': 0.5,
-            'shear_damp': 0.5,   'bending_damping': 0.05,
-        },
-        'COTTON': {
-            'vertex_mass': 0.3, 'quality_step': 5, 'bending_model': 'ANGULAR',
-            'tension': 15.0, 'compression': 15.0, 'shear': 5.0,  'bending_stiffness': 0.5,
-            'tension_damp': 5.0, 'compression_damp': 5.0,
-            'shear_damp': 5.0,   'bending_damping': 0.5,
-        },
-        'DENIM': {
-            'vertex_mass': 0.5, 'quality_step': 6, 'bending_model': 'ANGULAR',
-            'tension': 40.0, 'compression': 40.0, 'shear': 20.0, 'bending_stiffness': 5.0,
-            'tension_damp': 10.0, 'compression_damp': 10.0,
-            'shear_damp': 8.0,    'bending_damping': 2.0,
-        },
-        'LEATHER': {
-            'vertex_mass': 0.8, 'quality_step': 6, 'bending_model': 'ANGULAR',
-            'tension': 80.0, 'compression': 80.0, 'shear': 10.0, 'bending_stiffness': 15.0,
-            'tension_damp': 15.0, 'compression_damp': 15.0,
-            'shear_damp': 5.0,    'bending_damping': 5.0,
-        },
-        'RUBBER': {
-            'vertex_mass': 1.2, 'quality_step': 8, 'bending_model': 'LINEAR',
-            'tension': 50.0, 'compression': 50.0, 'shear': 25.0, 'bending_stiffness': 1.0,
-            'tension_damp': 15.0, 'compression_damp': 15.0,
-            'shear_damp': 12.0,   'bending_damping': 1.0,
-        },
-    },
     'PD': {
         'SILK': {
             'vertex_mass': 0.04, 'quality_step': 6, 'bending_model': 'ANGULAR',
@@ -167,38 +127,6 @@ MATERIAL_PRESETS = {
             'tension': 100.0, 'compression': 100.0, 'shear': 50.0, 'bending_stiffness': 2.0,
             'tension_damp': 15.0, 'compression_damp': 15.0,
             'shear_damp': 12.0,   'bending_damping': 1.0,
-        },
-    },
-    'MGPBD': {
-        'SILK': {
-            'vertex_mass': 0.04, 'quality_step': 4, 'bending_model': 'ANGULAR',
-            'tension': 3.0,  'compression': 2.0,  'shear': 1.0,  'bending_stiffness': 0.02,
-            'tension_damp': 0.5, 'compression_damp': 0.5,
-            'shear_damp': 0.3,   'bending_damping': 0.03,
-        },
-        'COTTON': {
-            'vertex_mass': 0.3, 'quality_step': 3, 'bending_model': 'ANGULAR',
-            'tension': 10.0, 'compression': 10.0, 'shear': 3.0,  'bending_stiffness': 0.3,
-            'tension_damp': 3.0, 'compression_damp': 3.0,
-            'shear_damp': 2.0,   'bending_damping': 0.3,
-        },
-        'DENIM': {
-            'vertex_mass': 0.5, 'quality_step': 4, 'bending_model': 'ANGULAR',
-            'tension': 30.0, 'compression': 30.0, 'shear': 12.0, 'bending_stiffness': 3.0,
-            'tension_damp': 8.0, 'compression_damp': 8.0,
-            'shear_damp': 6.0,   'bending_damping': 1.5,
-        },
-        'LEATHER': {
-            'vertex_mass': 0.8, 'quality_step': 5, 'bending_model': 'ANGULAR',
-            'tension': 60.0, 'compression': 60.0, 'shear': 8.0,  'bending_stiffness': 10.0,
-            'tension_damp': 12.0, 'compression_damp': 12.0,
-            'shear_damp': 4.0,    'bending_damping': 4.0,
-        },
-        'RUBBER': {
-            'vertex_mass': 1.2, 'quality_step': 5, 'bending_model': 'LINEAR',
-            'tension': 40.0, 'compression': 40.0, 'shear': 18.0, 'bending_stiffness': 0.5,
-            'tension_damp': 12.0, 'compression_damp': 12.0,
-            'shear_damp': 8.0,    'bending_damping': 0.5,
         },
     },
     'Mil2': {
@@ -233,44 +161,8 @@ MATERIAL_PRESETS = {
             'shear_damp': 12.0,   'bending_damping': 1.0,
         },
     },
-    'OGC': {
-        'SILK': {
-            'vertex_mass': 0.04, 'quality_step': 10, 'bending_model': 'ANGULAR',
-            'tension': 4.0,  'compression': 2.5,  'shear': 1.5,  'bending_stiffness': 0.03,
-            'tension_damp': 0.5, 'compression_damp': 0.5,
-            'shear_damp': 0.5,   'bending_damping': 0.05,
-            'use_self_collision': True, 'ogc_radius': 80.0, 'ogc_friction': 0.1,
-        },
-        'COTTON': {
-            'vertex_mass': 0.3, 'quality_step': 5, 'bending_model': 'ANGULAR',
-            'tension': 15.0, 'compression': 15.0, 'shear': 5.0,  'bending_stiffness': 0.5,
-            'tension_damp': 5.0, 'compression_damp': 5.0,
-            'shear_damp': 5.0,   'bending_damping': 0.5,
-            'use_self_collision': True, 'ogc_radius': 150.0, 'ogc_friction': 0.3,
-        },
-        'DENIM': {
-            'vertex_mass': 0.5, 'quality_step': 6, 'bending_model': 'ANGULAR',
-            'tension': 40.0, 'compression': 40.0, 'shear': 20.0, 'bending_stiffness': 5.0,
-            'tension_damp': 10.0, 'compression_damp': 10.0,
-            'shear_damp': 8.0,    'bending_damping': 2.0,
-            'use_self_collision': True, 'ogc_radius': 200.0, 'ogc_friction': 0.5,
-        },
-        'LEATHER': {
-            'vertex_mass': 0.8, 'quality_step': 6, 'bending_model': 'ANGULAR',
-            'tension': 80.0, 'compression': 80.0, 'shear': 10.0, 'bending_stiffness': 15.0,
-            'tension_damp': 15.0, 'compression_damp': 15.0,
-            'shear_damp': 5.0,    'bending_damping': 5.0,
-            'use_self_collision': True, 'ogc_radius': 250.0, 'ogc_friction': 0.6,
-        },
-        'RUBBER': {
-            'vertex_mass': 1.2, 'quality_step': 8, 'bending_model': 'LINEAR',
-            'tension': 50.0, 'compression': 50.0, 'shear': 25.0, 'bending_stiffness': 1.0,
-            'tension_damp': 15.0, 'compression_damp': 15.0,
-            'shear_damp': 12.0,   'bending_damping': 1.0,
-            'use_self_collision': True, 'ogc_radius': 300.0, 'ogc_friction': 0.8,
-        },
-    },
 }
+
 
 
 # ===========================================================================
@@ -333,14 +225,9 @@ def _bending_model_items(self, context):
 
 def _solver_type_items(self, context):
     return [
-        ('XPBD',  "XPBD",  "Extended Position-Based Dynamics (Macklin 2016)"),
         ('PD',    "PD",     _t("Projective Dynamics with Chebyshev-Jacobi acceleration",
                                "Projective Dynamics с Chebyshev-Jacobi ускорением")),
-        ('MGPBD', "MGPBD",  _t("Multigrid PBD with Algebraic Multigrid",
-                               "Многоуровневый PBD с Algebraic Multigrid")),
         ('Mil2',  "Mil2",   "Non-distance barriers + Subspace Reuse"),
-        ('OGC',   "OGC",    _t("Offset Geometric Contact — self-collision",
-                               "Offset Geometric Contact — самостолкновение")),
     ]
 
 
@@ -869,7 +756,7 @@ class GPUClothObjectSettings(PropertyGroup):
     # ── Advanced Solver Config ──────────────────────────────────────────────
     solver_iterations: IntProperty(
         name="Iterations",
-        description="XPBD/PD/Mil2 iterations per substep",
+        description="PD/Mil2 iterations per substep",
         default=10, min=1, max=200,
     )
 
@@ -881,7 +768,7 @@ class GPUClothObjectSettings(PropertyGroup):
 
     use_small_steps: BoolProperty(
         name="Small Steps",
-        description="XPBD: combine substeps×iterations into single-iteration small steps",
+        description="Combine substeps×iterations into single-iteration small steps",
         default=False,
     )
 
@@ -901,25 +788,6 @@ class GPUClothObjectSettings(PropertyGroup):
         name="Convergence Tol",
         description="L∞ norm of position change (meters) for adaptive early exit",
         default=0.001, min=0.0001, max=0.1, soft_max=0.01,
-    )
-
-    use_per_type_budget: BoolProperty(
-        name="Per-Type Budget",
-        description="XPBD: separate iteration count per constraint type",
-        default=False,
-    )
-
-    ptb_stretch: IntProperty(
-        name="Stretch Iter", default=10, min=1, max=100,
-    )
-    ptb_bending: IntProperty(
-        name="Bending Iter", default=5, min=1, max=100,
-    )
-    ptb_shear: IntProperty(
-        name="Shear Iter", default=5, min=1, max=100,
-    )
-    ptb_seam: IntProperty(
-        name="Seam Iter", default=20, min=1, max=100,
     )
 
     vgroup_intern: StringProperty(
