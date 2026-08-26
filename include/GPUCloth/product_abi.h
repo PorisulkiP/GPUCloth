@@ -1297,8 +1297,11 @@ struct GPUClothV3MaterialSpringRecord {
 };
 
 // Versioned in/out query. Caller supplies record capacity/stride/address and
-// receives accepted anisotropy state plus exact spring records after build.
-// BUFFER_TOO_SMALL reports required_record_count without writing records.
+// receives accepted material state plus exact spring records after build.
+// directional_* and the anisotropy material flag are populated only when
+// anisotropy was configured; bending_model and spring records are populated
+// for every built material owner. BUFFER_TOO_SMALL reports
+// required_record_count without writing records.
 struct GPUClothV3MaterialStateQuery {
     uint32_t struct_size;
     uint32_t query_version;

@@ -1888,18 +1888,15 @@ def _bounded_float32(value, label, lower, upper):
 
 
 def _effective_bending_model(settings):
-    bending_model = str(settings.bending_model)
-    solver_type = str(settings.solver_type)
+    solver_type = str(getattr(settings, "solver_type", ""))
+    bending_model = str(getattr(settings, "bending_model", ""))
+    if solver_type not in {'PD', 'Mil2'}:
+        raise RuntimeError(f"unknown solver type {solver_type!r}")
+    if bending_model not in {'LINEAR', 'ANGULAR', 'SDB'}:
+        raise RuntimeError(f"unknown bending model {bending_model!r}")
     if solver_type != 'PD' and bending_model == 'SDB':
         raise RuntimeError(
             "NOT_CONFIGURABLE: SDB bending is only supported by PD")
-    if solver_type == 'Mil2':
-        return 'LINEAR'
-    if solver_type == 'PD' and bending_model in {'', 'LINEAR'}:
-        # Migrate old saved PD settings: linear bending is no longer exposed.
-        return 'ANGULAR'
-    if bending_model not in {'LINEAR', 'ANGULAR', 'SDB'}:
-        raise RuntimeError(f"unknown bending model {bending_model!r}")
     return bending_model
 
 
