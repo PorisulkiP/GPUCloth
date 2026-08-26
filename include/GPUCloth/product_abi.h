@@ -153,6 +153,9 @@ enum GPUClothFeatureId : uint32_t {
     // Global velocity damping is a product setting distinct from air and
     // material damping.  Append it so all existing feature ids stay stable.
     GPUCLOTH_FEATURE_VELOCITY_DAMPING,
+    // Global effector force and wind scales are one typed owner.  Append this
+    // feature so all existing ids remain ABI-stable.
+    GPUCLOTH_FEATURE_EFFECTOR_SCALES,
 };
 
 enum GPUClothABIResult : uint32_t {
@@ -1090,6 +1093,21 @@ struct GPUClothV3MeshEdge {
     uint32_t reserved;
 };
 
+// Versioned, cloth-owned global effector scales.  These values are distinct
+// from per-effector weights and are consumed by the existing PD/Mil2 force
+// stage through the persistent native simulation state.
+struct GPUClothEffectorScaleConfig {
+    GPUClothFeatureConfigHeader header;
+    uint32_t solver_mask;
+    uint32_t reserved0;
+    uint64_t object_id;
+    uint64_t topology_generation;
+    uint64_t geometry_generation;
+    float force_scale;
+    float wind_scale;
+    uint64_t reserved[2];
+};
+
 struct GPUClothV3MeshFace {
     uint32_t first_corner;
     uint32_t corner_count;
@@ -1245,6 +1263,25 @@ struct GPUClothV3VelocityDampingStatus {
     uint64_t apply_count;
 };
 
+// Handle-scoped status for the global effector-scale owner.  Values become
+// applied only after a successful PD/Mil2 solve consumes the persistent state.
+struct GPUClothV3EffectorScaleStatus {
+    uint32_t struct_size;
+    uint32_t status_version;
+    uint32_t backend;
+    uint32_t requested;
+    uint32_t configured;
+    uint32_t applied;
+    uint32_t solver_mask;
+    uint32_t last_result;
+    float force_scale;
+    float wind_scale;
+    uint64_t object_id;
+    uint64_t topology_generation;
+    uint64_t geometry_generation;
+    uint64_t apply_count;
+};
+
 // Lossless, handle-scoped material spring record. The complete native spring
 // type carries base kind plus WARP/WEFT direction bits; no host pointer crosses
 // the ABI.
@@ -1323,6 +1360,8 @@ struct GPUClothDescriptorLayout {
     uint32_t sdb_status_size;
     uint32_t proxy_status_size;
     uint32_t velocity_damping_status_size;
+    uint32_t effector_scales_config_size;
+    uint32_t effector_scales_status_size;
     uint32_t reserved[1];
 };
 
@@ -1343,6 +1382,8 @@ static_assert(sizeof(GPUClothColliderConfig) == 416, "GPUClothColliderConfig ABI
 static_assert(sizeof(GPUClothMeshStateConfig) == 256, "GPUClothMeshStateConfig ABI drift");
 static_assert(sizeof(GPUClothEffectorConfig) == 160, "GPUClothEffectorConfig ABI drift");
 static_assert(sizeof(GPUClothEffectorWeightsConfig) == 96, "GPUClothEffectorWeightsConfig ABI drift");
+static_assert(sizeof(GPUClothEffectorScaleConfig) == 72,
+    "GPUClothEffectorScaleConfig ABI drift");
 static_assert(sizeof(GPUClothCollectionRecord) == 80, "GPUClothCollectionRecord ABI drift");
 static_assert(sizeof(GPUClothCollectionSnapshotConfig) == 160, "GPUClothCollectionSnapshotConfig ABI drift");
 static_assert(sizeof(GPUClothCollectionTransactionConfig) == 48, "GPUClothCollectionTransactionConfig ABI drift");
@@ -1380,8 +1421,10 @@ static_assert(sizeof(GPUClothV3SDBStatus) == 64,
     "GPUClothV3SDBStatus ABI drift");
 static_assert(sizeof(GPUClothV3VelocityDampingStatus) == 72,
     "GPUClothV3VelocityDampingStatus ABI drift");
+static_assert(sizeof(GPUClothV3EffectorScaleStatus) == 72,
+    "GPUClothV3EffectorScaleStatus ABI drift");
 static_assert(sizeof(GPUClothV3MaterialSpringRecord) == 36,
     "GPUClothV3MaterialSpringRecord ABI drift");
 static_assert(sizeof(GPUClothV3MaterialStateQuery) == 136,
     "GPUClothV3MaterialStateQuery ABI drift");
-static_assert(sizeof(GPUClothDescriptorLayout) == 168, "GPUClothDescriptorLayout ABI drift");
+static_assert(sizeof(GPUClothDescriptorLayout) == 176, "GPUClothDescriptorLayout ABI drift");

@@ -124,6 +124,28 @@ def capture_v3_velocity_damping(settings):
     return value
 
 
+def capture_v3_effector_scales(settings):
+    """Capture the native global force/wind scales as one typed owner.
+
+    These are independent from per-effector collection weights.  Capture is
+    prepare-time only so native callers own the values for the full cloth
+    lifetime and the frame loop performs no Python/ctypes allocation.
+    """
+    try:
+        force_scale = float(settings.eff_force_scale)
+        wind_scale = float(settings.eff_wind_scale)
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise ValueError(
+            "GPUCloth effector scales are unavailable") from exc
+    for name, value in (
+            ("eff_force_scale", force_scale),
+            ("eff_wind_scale", wind_scale)):
+        if not math.isfinite(value) or not 0.0 <= value <= 100000.0:
+            raise ValueError(
+                f"GPUCloth.{name} must be finite and within [0, 100000]")
+    return force_scale, wind_scale
+
+
 def find_cpu_cloth_modifier(obj):
     return next((modifier for modifier in obj.modifiers if modifier.type == "CLOTH"), None)
 

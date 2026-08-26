@@ -406,6 +406,7 @@ GPUCLOTH_FEATURE_SOLVER_DIAGNOSTICS = 54
 GPUCLOTH_FEATURE_CACHE_STATUS = 55
 GPUCLOTH_FEATURE_BENDING_SDB = 56
 GPUCLOTH_FEATURE_VELOCITY_DAMPING = 57
+GPUCLOTH_FEATURE_EFFECTOR_SCALES = 58
 
 GPUCLOTH_MATERIAL_ANISOTROPY_ENABLED = 1 << 0
 
@@ -849,6 +850,25 @@ class GPUClothV3VelocityDampingStatus(Structure):
     ]
 
 
+class GPUClothV3EffectorScaleStatus(Structure):
+    _fields_ = [
+        ("struct_size", c_uint),
+        ("status_version", c_uint),
+        ("backend", c_uint),
+        ("requested", c_uint),
+        ("configured", c_uint),
+        ("applied", c_uint),
+        ("solver_mask", c_uint),
+        ("last_result", c_uint),
+        ("force_scale", c_float),
+        ("wind_scale", c_float),
+        ("object_id", c_uint64),
+        ("topology_generation", c_uint64),
+        ("geometry_generation", c_uint64),
+        ("apply_count", c_uint64),
+    ]
+
+
 class GPUClothV3ProxyStatus(Structure):
     _fields_ = [
         ("struct_size", c_uint),
@@ -922,6 +942,8 @@ GPUCLOTH_V3_STRUCT_SIZES = {
     "GPUClothV3ProxyStatus": 112,
     "GPUClothV3SDBStatus": 64,
     "GPUClothV3VelocityDampingStatus": 72,
+    "GPUClothEffectorScaleConfig": 72,
+    "GPUClothV3EffectorScaleStatus": 72,
     "GPUClothV3MaterialSpringRecord": 36,
     "GPUClothV3MaterialStateQuery": 136,
 }
@@ -1203,6 +1225,20 @@ class GPUClothCollectionStatus(Structure):
         ("effector_applied_generation", c_uint64),
         ("effector_upload_count", c_uint64),
         ("effector_allocation_count", c_uint64),
+    ]
+
+
+class GPUClothEffectorScaleConfig(Structure):
+    _fields_ = [
+        ("header", GPUClothFeatureConfigHeader),
+        ("solver_mask", c_uint),
+        ("reserved0", c_uint),
+        ("object_id", c_uint64),
+        ("topology_generation", c_uint64),
+        ("geometry_generation", c_uint64),
+        ("force_scale", c_float),
+        ("wind_scale", c_float),
+        ("reserved", c_uint64 * 2),
     ]
 
 
@@ -1508,6 +1544,8 @@ class GPUClothDescriptorLayout(Structure):
         ("sdb_status_size", c_uint),
         ("proxy_status_size", c_uint),
         ("velocity_damping_status_size", c_uint),
+        ("effector_scales_config_size", c_uint),
+        ("effector_scales_status_size", c_uint),
         ("reserved", c_uint * 1),
     ]
 

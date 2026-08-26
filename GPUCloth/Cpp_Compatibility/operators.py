@@ -1051,7 +1051,9 @@ def _v3_configure_feature(dll, cloth_handle, config):
     return result
 
 
-def _configure_simulation_features(dll, cloth_handle, scene, settings):
+def _configure_simulation_features(
+        dll, cloth_handle, scene, settings,
+        object_id=None, topology_generation=None, geometry_generation=None):
     solver_mask = {
         'PD': CType.GPUCLOTH_SOLVER_PD,
         'Mil2': CType.GPUCLOTH_SOLVER_MIL2,
@@ -1060,6 +1062,14 @@ def _configure_simulation_features(dll, cloth_handle, scene, settings):
         raise RuntimeError(
             f"typed simulation config owns only PD/Mil2; got "
             f"{settings.solver_type}")
+    if (object_id is None or topology_generation is None or
+            geometry_generation is None or int(object_id) == 0 or
+            int(topology_generation) == 0 or int(geometry_generation) == 0):
+        raise RuntimeError(
+            "typed effector scales require nonzero cloth identity/generations")
+    from . import cloth_settings_bridge
+    force_scale, wind_scale = (
+        cloth_settings_bridge.capture_v3_effector_scales(settings))
 
     config = CType.GPUClothSimulationConfig()
     config.header.struct_size = sizeof(config)
@@ -1075,7 +1085,6 @@ def _configure_simulation_features(dll, cloth_handle, scene, settings):
         scene.gpu_cloth_helper.gravity_z,
     )
     config.air_damping = settings.air_viscosity
-    from . import cloth_settings_bridge
     config.velocity_damping = (
         cloth_settings_bridge.capture_v3_velocity_damping(settings))
     config.simulation_flags = 0
@@ -1096,6 +1105,28 @@ def _configure_simulation_features(dll, cloth_handle, scene, settings):
         if result != CType.GPUCLOTH_ABI_OK:
             raise RuntimeError(
                 f"typed simulation feature {feature} rejected with {result}")
+
+    effector_scales = CType.GPUClothEffectorScaleConfig()
+    effector_scales.header.struct_size = sizeof(effector_scales)
+    effector_scales.header.feature_id = (
+        CType.GPUCLOTH_FEATURE_EFFECTOR_SCALES)
+    effector_scales.header.config_version = 1
+    effector_scales.header.flags = 0
+    effector_scales.solver_mask = solver_mask
+    effector_scales.reserved0 = 0
+    effector_scales.object_id = int(object_id)
+    effector_scales.topology_generation = int(topology_generation)
+    effector_scales.geometry_generation = int(geometry_generation)
+    effector_scales.force_scale = force_scale
+    effector_scales.wind_scale = wind_scale
+    effector_scales.reserved[:] = (0, 0)
+    result = int(dll.GPUCloth_v3_cloth_configure(
+        cloth_handle,
+        cast(pointer(effector_scales),
+             POINTER(CType.GPUClothFeatureConfigHeader))))
+    if result != CType.GPUCLOTH_ABI_OK:
+        raise RuntimeError(
+            f"typed effector scales rejected with {result}")
     return CType.GPUCLOTH_ABI_OK
 
 
@@ -1250,6 +1281,9 @@ _GPUCLOTH_V3_EXPORT_SIGNATURES = {
     "GPUCloth_v3_cloth_get_velocity_damping_status": [
         CType.GPUClothV3ClothHandle,
         POINTER(CType.GPUClothV3VelocityDampingStatus)],
+    "GPUCloth_v3_cloth_get_effector_scales_status": [
+        CType.GPUClothV3ClothHandle,
+        POINTER(CType.GPUClothV3EffectorScaleStatus)],
     "GPUCloth_v3_cloth_query_material_state": [
         CType.GPUClothV3ClothHandle,
         POINTER(CType.GPUClothV3MaterialStateQuery)],
@@ -1374,13 +1408,17 @@ def _validate_descriptor_layout(dll):
         "proxy_status_size": sizeof(CType.GPUClothV3ProxyStatus),
         "velocity_damping_status_size": sizeof(
             CType.GPUClothV3VelocityDampingStatus),
+        "effector_scales_config_size": sizeof(
+            CType.GPUClothEffectorScaleConfig),
+        "effector_scales_status_size": sizeof(
+            CType.GPUClothV3EffectorScaleStatus),
     }
     mismatches = [
         f"{name}={int(getattr(layout, name))}, expected={expected_size}"
         for name, expected_size in expected.items()
         if int(getattr(layout, name)) != expected_size]
     if (int(layout.struct_size) != sizeof(layout) or
-            int(layout.schema_version) != 8 or
+            int(layout.schema_version) != 9 or
             any(int(value) != 0 for value in layout.reserved) or
             mismatches):
         detail = "; ".join(mismatches) if mismatches else "header mismatch"
@@ -1402,7 +1440,7 @@ def _validate_product_abi(dll):
         "abi_major": 3,
         "abi_minor": 0,
         "abi_patch": 0,
-        "feature_schema_version": 8,
+        "feature_schema_version": 9,
         "backend_mask": CType.GPUCLOTH_V3_BACKEND_MASK_ALL,
         "pointer_width_bits": 64,
         "little_endian": 1,
@@ -5168,7 +5206,10 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
             try:
                 _configure_simulation_features(
                     g_dll, cloth_handle, context.scene,
-                    g_clothOBJs[i].GPUCloth)
+                    g_clothOBJs[i].GPUCloth,
+                    _cloth_input_owners[i]["object_id"],
+                    _cloth_input_owners[i]["topology_generation"],
+                    _cloth_input_owners[i]["geometry_generation"])
                 _publish_material_features(
                     g_dll, cloth_handle, prepared_material_features[i])
                 _publish_internal_springs_config(
