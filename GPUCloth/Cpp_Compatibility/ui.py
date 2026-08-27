@@ -931,7 +931,11 @@ class GPUCLOTH_PT_constraint_network(bpy.types.Panel):
         layout.prop(gs, "cn_phases")
         layout.prop(gs, "cn_sewing_speed")
         layout.separator()
-        layout.prop(gs, "cn_seam_stiffness")
+        stiffness_row = layout.row()
+        stiffness_row.enabled = gs.solver_type != 'PD'
+        stiffness_row.prop(gs, "cn_seam_stiffness")
+        if gs.solver_type == 'PD':
+            layout.label(text="PD seam stiffness is fixed at 1.0")
         layout.separator()
         layout.prop(gs, "cn_enable_selfcoll_stitching")
 

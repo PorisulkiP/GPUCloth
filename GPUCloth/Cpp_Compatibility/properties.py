@@ -503,8 +503,10 @@ class GPUClothObjectSettings(PropertyGroup):
 
     cn_seam_stiffness: FloatProperty(
         name="Seam Stiffness",
-        description="Stiffness multiplier for seam constraints",
-        default=1.0, min=0.0, max=5.0, soft_max=2.0,
+        description=(
+            "Mil2 seam-stiffness multiplier in [0.25, 5.0]; "
+            "PD uses the fixed value 1.0"),
+        default=1.0, min=0.25, max=5.0, soft_max=2.0,
     )
 
     cn_enable_selfcoll_stitching: BoolProperty(

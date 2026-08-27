@@ -146,12 +146,13 @@ def capture_v3_effector_scales(settings):
     return force_scale, wind_scale
 
 
-def capture_v3_constraint_network(settings):
+def capture_v3_constraint_network(settings, solver_mask=None):
     """Capture the supported typed constraint-network settings.
 
     The loose-edge records are captured by the evaluated-mesh owner. This
     helper owns only the four Blender RNA values and never retains a Blender
-    or ctypes pointer.
+    or ctypes pointer. ``solver_mask`` selects the native seam-stiffness
+    policy when the caller is preparing a product owner.
     """
     try:
         enabled = bool(settings.use_constraint_network)
@@ -169,10 +170,34 @@ def capture_v3_constraint_network(settings):
             not 1.0 <= sewing_speed <= 100.0):
         raise ValueError(
             "GPUCloth.cn_sewing_speed must be finite and within [1, 100]")
-    if (not math.isfinite(seam_stiffness) or
-            not 0.0 <= seam_stiffness <= 5.0):
+    if not math.isfinite(seam_stiffness):
         raise ValueError(
-            "GPUCloth.cn_seam_stiffness must be finite and within [0, 5]")
+            "GPUCloth.cn_seam_stiffness must be finite")
+    from . import cpp_types
+    if solver_mask is not None:
+        policy = cpp_types.constraint_network_stiffness_policy(solver_mask)
+        if (policy ==
+                cpp_types.GPUCLOTH_CONSTRAINT_NETWORK_STIFFNESS_FIXED_DEFAULT):
+            if seam_stiffness != (
+                    cpp_types.GPUCLOTH_CONSTRAINT_NETWORK_SEAM_STIFFNESS_DEFAULT):
+                raise ValueError(
+                    "GPUCloth.cn_seam_stiffness is fixed at 1.0 for PD")
+        elif (policy ==
+              cpp_types.GPUCLOTH_CONSTRAINT_NETWORK_STIFFNESS_POSITIVE_RANGE):
+            if not (cpp_types.GPUCLOTH_CONSTRAINT_NETWORK_SEAM_STIFFNESS_MIN <=
+                    seam_stiffness <=
+                    cpp_types.GPUCLOTH_CONSTRAINT_NETWORK_SEAM_STIFFNESS_MAX):
+                raise ValueError(
+                    "GPUCloth.cn_seam_stiffness must be finite and within "
+                    "[0.25, 5] for Mil2")
+        else:
+            raise ValueError(
+                "GPUCloth constraint-network solver has no stiffness policy")
+    elif not (cpp_types.GPUCLOTH_CONSTRAINT_NETWORK_SEAM_STIFFNESS_MIN <=
+              seam_stiffness <=
+              cpp_types.GPUCLOTH_CONSTRAINT_NETWORK_SEAM_STIFFNESS_MAX):
+        raise ValueError(
+            "GPUCloth.cn_seam_stiffness must be finite and within [0.25, 5]")
     return {
         "enabled": True,
         "phase_count": phases,

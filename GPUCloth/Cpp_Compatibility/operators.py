@@ -146,6 +146,22 @@ def _reject_unsupported_v3_owners(scene, cloth_objects):
             if bool(getattr(settings, "use_sewing_springs", False)):
                 unsupported.append(
                     f"constraint_network_sewing:{cloth_obj.name_full}")
+            solver_mask = {
+                "PD": CType.GPUCLOTH_SOLVER_PD,
+                "Mil2": CType.GPUCLOTH_SOLVER_MIL2,
+            }.get(str(getattr(settings, "solver_type", "")))
+            if solver_mask is None:
+                unsupported.append(
+                    f"constraint_network_solver:{cloth_obj.name_full}")
+            else:
+                from . import cloth_settings_bridge
+                try:
+                    cloth_settings_bridge.capture_v3_constraint_network(
+                        settings, solver_mask)
+                except (AttributeError, TypeError, ValueError) as exc:
+                    unsupported.append(
+                        f"constraint_network_settings:{cloth_obj.name_full}:"
+                        f"{exc}")
     if unsupported:
         raise RuntimeError(
             "NOT_CONFIGURABLE: ABI v3 has no owner for " +
@@ -579,7 +595,7 @@ def _capture_constraint_network(
     """Capture loose-edge CN input; native owns a deep copy at configure."""
     from . import cloth_settings_bridge
     captured = cloth_settings_bridge.capture_v3_constraint_network(
-        cloth_obj.GPUCloth)
+        cloth_obj.GPUCloth, solver_mask)
     if captured is None:
         return None
     if bool(getattr(cloth_obj.GPUCloth, "use_sewing_springs", False)):
@@ -2256,10 +2272,14 @@ def _validate_constraint_network_status(dll, cloth_handle, prepared):
             f"typed constraint-network status rejected with {result}")
     expected = prepared["record_count"]
     expected_phase_mask = (1 << int(prepared["config"].phase_count)) - 1
+    expected_policy = CType.constraint_network_stiffness_policy(
+        prepared["solver_mask"])
     if (int(status.state) != CType.GPUCLOTH_V3_CONSTRAINT_NETWORK_APPLIED or
             int(status.configured) != 1 or int(status.applied) != 1 or
             int(status.enabled) != 1 or
             int(status.solver_mask) != int(prepared["solver_mask"]) or
+            int(CType.constraint_network_stiffness_policy(
+                status.solver_mask)) != int(expected_policy) or
             int(status.record_count) != expected or
             int(status.spring_count) != expected or
             int(status.phase_count) != int(prepared["config"].phase_count) or

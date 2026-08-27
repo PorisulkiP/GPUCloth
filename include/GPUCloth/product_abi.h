@@ -10,6 +10,29 @@ enum GPUClothSolverMask : uint32_t {
     GPUCLOTH_SOLVER_ALL = GPUCLOTH_SOLVER_PD | GPUCLOTH_SOLVER_MIL2,
 };
 
+// Constraint-network seam stiffness is solver-qualified.  The status
+// solver_mask selects this policy; it is not a generic promise that every
+// product backend consumes the scalar.
+enum GPUClothConstraintNetworkStiffnessPolicy : uint32_t {
+    GPUCLOTH_CONSTRAINT_NETWORK_STIFFNESS_UNSUPPORTED = 0,
+    GPUCLOTH_CONSTRAINT_NETWORK_STIFFNESS_FIXED_DEFAULT = 1,
+    GPUCLOTH_CONSTRAINT_NETWORK_STIFFNESS_POSITIVE_RANGE = 2,
+};
+
+constexpr float GPUCLOTH_CONSTRAINT_NETWORK_SEAM_STIFFNESS_DEFAULT = 1.0f;
+constexpr float GPUCLOTH_CONSTRAINT_NETWORK_SEAM_STIFFNESS_MIN = 0.25f;
+constexpr float GPUCLOTH_CONSTRAINT_NETWORK_SEAM_STIFFNESS_MAX = 5.0f;
+
+constexpr GPUClothConstraintNetworkStiffnessPolicy
+gpucloth_constraint_network_stiffness_policy(uint32_t solver_mask)
+{
+    return solver_mask == GPUCLOTH_SOLVER_PD
+        ? GPUCLOTH_CONSTRAINT_NETWORK_STIFFNESS_FIXED_DEFAULT
+        : solver_mask == GPUCLOTH_SOLVER_MIL2
+        ? GPUCLOTH_CONSTRAINT_NETWORK_STIFFNESS_POSITIVE_RANGE
+        : GPUCLOTH_CONSTRAINT_NETWORK_STIFFNESS_UNSUPPORTED;
+}
+
 enum GPUClothFeatureStatus : uint32_t {
     GPUCLOTH_FEATURE_MISSING = 0,
     GPUCLOTH_FEATURE_PARTIAL = 1,
@@ -1361,7 +1384,9 @@ enum GPUClothV3ConstraintNetworkState : uint32_t {
 
 // Handle-scoped status for the typed constraint-network owner. Applied state
 // is reported from the native ClothConstraintNetwork consumed by both
-// supported product solvers, not from a cached Python snapshot.
+// supported product solvers, not from a cached Python snapshot. solver_mask
+// is the typed policy selector for seam_stiffness: PD uses the fixed default,
+// while Mil2 accepts the documented positive range.
 struct GPUClothV3ConstraintNetworkStatus {
     uint32_t struct_size;
     uint32_t status_version;
