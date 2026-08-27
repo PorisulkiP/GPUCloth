@@ -181,6 +181,31 @@ def capture_v3_constraint_network(settings):
     }
 
 
+def capture_v3_shrink_bounds(settings):
+    """Capture Blender's ordered shrink endpoints for the v3 owner.
+
+    Blender applies ``shrink_min`` at weight zero and ``shrink_max`` at
+    weight one.  Blender's RNA enforces ``shrink_min <= shrink_max`` when
+    either endpoint is assigned; reject malformed stand-ins instead of
+    silently changing that product contract.
+    """
+    try:
+        shrink_min = float(settings.shrink_min)
+        shrink_max = float(settings.shrink_max)
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise ValueError(
+            "GPUCloth shrink bounds are unavailable") from exc
+    for name, value in (
+            ("shrink_min", shrink_min), ("shrink_max", shrink_max)):
+        if not math.isfinite(value) or not -1.0 <= value <= 1.0:
+            raise ValueError(
+                f"GPUCloth.{name} must be finite and within [-1, 1]")
+    if shrink_min > shrink_max:
+        raise ValueError(
+            "GPUCloth.shrink_min must be less than or equal to shrink_max")
+    return shrink_min, shrink_max
+
+
 def find_cpu_cloth_modifier(obj):
     return next((modifier for modifier in obj.modifiers if modifier.type == "CLOTH"), None)
 

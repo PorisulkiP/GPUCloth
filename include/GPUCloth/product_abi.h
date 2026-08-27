@@ -643,6 +643,23 @@ struct GPUClothVertexChannelConfig {
     uint64_t data_address;
 };
 
+// Versioned, cloth-owned shrink bounds.  The bounds are intentionally
+// separate from the vertex-weight channel: Blender's shrink operator uses
+// shrink_min at weight 0 and shrink_max at weight 1.  Blender RNA enforces
+// shrink_min <= shrink_max; native validates and copies both values before
+// the spring operator is built.
+struct GPUClothShrinkConfig {
+    GPUClothFeatureConfigHeader header;
+    uint32_t solver_mask;
+    uint32_t reserved0;
+    uint64_t object_id;
+    uint64_t topology_generation;
+    uint64_t geometry_generation;
+    float shrink_min;
+    float shrink_max;
+    uint64_t reserved[1];
+};
+
 struct GPUClothCollisionFilterConfig {
     GPUClothFeatureConfigHeader header;
     uint64_t collection_id;
@@ -1236,6 +1253,24 @@ struct GPUClothV3ClothStatus {
     uint64_t reserved[3];
 };
 
+// Handle-scoped status for the shrink-bounds owner.  configured means the
+// one-shot pre-build config was accepted; applied is set only after the
+// existing spring/shrink consumer has accepted those exact bounds.
+struct GPUClothV3ShrinkStatus {
+    uint32_t struct_size;
+    uint32_t status_version;
+    uint32_t configured;
+    uint32_t applied;
+    uint32_t last_result;
+    uint32_t reserved0;
+    uint64_t object_id;
+    uint64_t topology_generation;
+    uint64_t geometry_generation;
+    float shrink_min;
+    float shrink_max;
+    uint32_t reserved[2];
+};
+
 // Handle-scoped proxy lifecycle/status.  The owner retains the validated
 // topology and rest payload; only opaque handles and typed counts cross ABI.
 struct GPUClothV3ProxyStatus {
@@ -1439,6 +1474,8 @@ struct GPUClothDescriptorLayout {
     uint32_t constraint_network_config_size;
     uint32_t constraint_network_status_size;
     uint32_t constraint_network_record_size;
+    uint32_t shrink_config_size;
+    uint32_t shrink_status_size;
 };
 
 static_assert(sizeof(GPUClothABIVersion) == 32, "GPUClothABIVersion ABI drift");
@@ -1475,6 +1512,8 @@ static_assert(sizeof(GPUClothSewingConfig) == 80, "GPUClothSewingConfig ABI drif
 static_assert(sizeof(GPUClothConstraintNetworkConfig) == 112,
     "GPUClothConstraintNetworkConfig ABI drift");
 static_assert(sizeof(GPUClothVertexChannelConfig) == 40, "GPUClothVertexChannelConfig ABI drift");
+static_assert(sizeof(GPUClothShrinkConfig) == 64,
+    "GPUClothShrinkConfig ABI drift");
 static_assert(sizeof(GPUClothCollisionFilterConfig) == 32, "GPUClothCollisionFilterConfig ABI drift");
 static_assert(sizeof(GPUClothProxyConfig) == 160, "GPUClothProxyConfig ABI drift");
 static_assert(sizeof(GPUClothDiagnosticsConfig) == 96, "GPUClothDiagnosticsConfig ABI drift");
@@ -1495,6 +1534,8 @@ static_assert(sizeof(GPUClothV3ClothCreateConfig) == 368, "GPUClothV3ClothCreate
 static_assert(sizeof(GPUClothV3ReadbackConfig) == 120, "GPUClothV3ReadbackConfig ABI drift");
 static_assert(sizeof(GPUClothV3CacheFrameConfig) == 104, "GPUClothV3CacheFrameConfig ABI drift");
 static_assert(sizeof(GPUClothV3ClothStatus) == 112, "GPUClothV3ClothStatus ABI drift");
+static_assert(sizeof(GPUClothV3ShrinkStatus) == 64,
+    "GPUClothV3ShrinkStatus ABI drift");
 static_assert(sizeof(GPUClothV3ProxyStatus) == 112,
     "GPUClothV3ProxyStatus ABI drift");
 static_assert(sizeof(GPUClothV3SDBStatus) == 64,
@@ -1509,4 +1550,4 @@ static_assert(sizeof(GPUClothV3MaterialSpringRecord) == 36,
     "GPUClothV3MaterialSpringRecord ABI drift");
 static_assert(sizeof(GPUClothV3MaterialStateQuery) == 136,
     "GPUClothV3MaterialStateQuery ABI drift");
-static_assert(sizeof(GPUClothDescriptorLayout) == 184, "GPUClothDescriptorLayout ABI drift");
+static_assert(sizeof(GPUClothDescriptorLayout) == 192, "GPUClothDescriptorLayout ABI drift");

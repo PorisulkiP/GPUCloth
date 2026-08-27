@@ -659,6 +659,20 @@ class GPUClothVertexChannelConfig(Structure):
     ]
 
 
+class GPUClothShrinkConfig(Structure):
+    _fields_ = [
+        ("header", GPUClothFeatureConfigHeader),
+        ("solver_mask", c_uint),
+        ("reserved0", c_uint),
+        ("object_id", c_uint64),
+        ("topology_generation", c_uint64),
+        ("geometry_generation", c_uint64),
+        ("shrink_min", c_float),
+        ("shrink_max", c_float),
+        ("reserved", c_uint64 * 1),
+    ]
+
+
 class GPUClothCollisionFilterConfig(Structure):
     _fields_ = [
         ("header", GPUClothFeatureConfigHeader),
@@ -821,6 +835,23 @@ class GPUClothV3ClothStatus(Structure):
     ]
 
 
+class GPUClothV3ShrinkStatus(Structure):
+    _fields_ = [
+        ("struct_size", c_uint),
+        ("status_version", c_uint),
+        ("configured", c_uint),
+        ("applied", c_uint),
+        ("last_result", c_uint),
+        ("reserved0", c_uint),
+        ("object_id", c_uint64),
+        ("topology_generation", c_uint64),
+        ("geometry_generation", c_uint64),
+        ("shrink_min", c_float),
+        ("shrink_max", c_float),
+        ("reserved", c_uint * 2),
+    ]
+
+
 class GPUClothV3SDBStatus(Structure):
     _fields_ = [
         ("struct_size", c_uint),
@@ -973,7 +1004,9 @@ GPUCLOTH_V3_STRUCT_SIZES = {
     "GPUClothV3ClothCreateConfig": 368,
     "GPUClothV3ReadbackConfig": 120,
     "GPUClothV3CacheFrameConfig": 104,
+    "GPUClothShrinkConfig": 64,
     "GPUClothV3ClothStatus": 112,
+    "GPUClothV3ShrinkStatus": 64,
     "GPUClothV3ProxyStatus": 112,
     "GPUClothV3SDBStatus": 64,
     "GPUClothV3VelocityDampingStatus": 72,
@@ -1613,6 +1646,8 @@ class GPUClothDescriptorLayout(Structure):
         ("constraint_network_config_size", c_uint),
         ("constraint_network_status_size", c_uint),
         ("constraint_network_record_size", c_uint),
+        ("shrink_config_size", c_uint),
+        ("shrink_status_size", c_uint),
     ]
 
 class fmatrix3x3(Structure):

@@ -1271,6 +1271,9 @@ _GPUCLOTH_V3_EXPORT_SIGNATURES = {
     "GPUCloth_v3_cloth_configure": [
         CType.GPUClothV3ClothHandle,
         POINTER(CType.GPUClothFeatureConfigHeader)],
+    "GPUCloth_v3_cloth_set_shrink_config": [
+        CType.GPUClothV3ClothHandle,
+        POINTER(CType.GPUClothShrinkConfig)],
     "GPUCloth_v3_cloth_set_vertex_channel": [
         CType.GPUClothV3ClothHandle,
         POINTER(CType.GPUClothVertexChannelConfig)],
@@ -1340,6 +1343,9 @@ _GPUCLOTH_V3_EXPORT_SIGNATURES = {
     "GPUCloth_v3_cloth_get_status": [
         CType.GPUClothV3ClothHandle,
         POINTER(CType.GPUClothV3ClothStatus)],
+    "GPUCloth_v3_cloth_get_shrink_status": [
+        CType.GPUClothV3ClothHandle,
+        POINTER(CType.GPUClothV3ShrinkStatus)],
     "GPUCloth_v3_proxy_create": [
         CType.GPUClothV3RuntimeHandle,
         CType.GPUClothV3ClothHandle,
@@ -1499,13 +1505,15 @@ def _validate_descriptor_layout(dll):
             CType.GPUClothV3ConstraintNetworkStatus),
         "constraint_network_record_size": sizeof(
             CType.GPUClothConstraintNetworkRecord),
+        "shrink_config_size": sizeof(CType.GPUClothShrinkConfig),
+        "shrink_status_size": sizeof(CType.GPUClothV3ShrinkStatus),
     }
     mismatches = [
         f"{name}={int(getattr(layout, name))}, expected={expected_size}"
         for name, expected_size in expected.items()
         if int(getattr(layout, name)) != expected_size]
     if (int(layout.struct_size) != sizeof(layout) or
-            int(layout.schema_version) != 11 or
+            int(layout.schema_version) != 12 or
             mismatches):
         detail = "; ".join(mismatches) if mismatches else "header mismatch"
         raise RuntimeError(f"native v3 descriptor ABI mismatch: {detail}")
@@ -2532,6 +2540,73 @@ def _upload_shrink_weights(
     return apply_float_channel(
         dll, CType, cloth_handle, CType.GPUCLOTH_FEATURE_SHRINK,
         CType.GPUCLOTH_VERTEX_SHRINK_WEIGHT, 1, weights)
+
+
+def _capture_shrink_bounds(settings_owner):
+    from . import cloth_settings_bridge
+    try:
+        shrink_min, shrink_max = (
+            cloth_settings_bridge.capture_v3_shrink_bounds(
+                settings_owner.GPUCloth))
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise RuntimeError(f"shrink bounds capture failed: {exc}") from exc
+    return (
+        _bounded_float32(shrink_min, "shrink minimum", -1.0, 1.0),
+        _bounded_float32(shrink_max, "shrink maximum", -1.0, 1.0),
+    )
+
+
+def _publish_shrink_bounds(
+        dll, cloth_handle, prepared_bounds, solver_mask,
+        object_id, topology_generation, geometry_generation):
+    if prepared_bounds is None:
+        raise RuntimeError("shrink bounds owner is missing")
+    shrink_min, shrink_max = prepared_bounds
+    config = CType.GPUClothShrinkConfig()
+    config.header.struct_size = sizeof(config)
+    config.header.feature_id = CType.GPUCLOTH_FEATURE_SHRINK
+    config.header.config_version = 1
+    config.header.flags = 0
+    config.solver_mask = int(solver_mask)
+    config.reserved0 = 0
+    config.object_id = int(object_id)
+    config.topology_generation = int(topology_generation)
+    config.geometry_generation = int(geometry_generation)
+    config.shrink_min = float(shrink_min)
+    config.shrink_max = float(shrink_max)
+    config.reserved[:] = (0,)
+    result = int(dll.GPUCloth_v3_cloth_set_shrink_config(
+        cloth_handle, pointer(config)))
+    if result != CType.GPUCLOTH_ABI_OK:
+        raise RuntimeError(
+            f"typed shrink bounds rejected with {result}")
+    return result
+
+
+def _validate_shrink_status(
+        dll, cloth_handle, prepared_bounds,
+        object_id, topology_generation, geometry_generation):
+    status = CType.GPUClothV3ShrinkStatus()
+    status.struct_size = sizeof(status)
+    status.status_version = 1
+    result = int(dll.GPUCloth_v3_cloth_get_shrink_status(
+        cloth_handle, pointer(status)))
+    if result != CType.GPUCLOTH_ABI_OK:
+        raise RuntimeError(
+            f"typed shrink status rejected with {result}")
+    shrink_min, shrink_max = prepared_bounds
+    if (int(status.configured) != 1 or int(status.applied) != 1 or
+            int(status.last_result) != CType.GPUCLOTH_ABI_OK or
+            int(status.object_id) != int(object_id) or
+            int(status.topology_generation) != int(topology_generation) or
+            int(status.geometry_generation) != int(geometry_generation) or
+            abs(float(status.shrink_min) - float(shrink_min)) > 1e-6 or
+            abs(float(status.shrink_max) - float(shrink_max)) > 1e-6 or
+            int(status.reserved0) != 0 or
+            any(int(value) != 0 for value in status.reserved)):
+        raise RuntimeError(
+            "typed shrink status does not match accepted owner")
+    return status
 
 
 def _upload_object_collision_mask(
@@ -5192,6 +5267,7 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
             prepared_internal_configs = []
             prepared_pressure_features = []
             prepared_stiffness_channels = []
+            prepared_shrink_bounds = []
             prepared_self_collision_masks = []
             prepared_topology_generations = []
             prepared_dynamic_meshes = []
@@ -5226,6 +5302,8 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
                 prepared_stiffness_channels.append(
                     _capture_stiffness_channels(
                         cloth_obj, simulation_obj))
+                prepared_shrink_bounds.append(
+                    _capture_shrink_bounds(cloth_obj))
                 prepared_self_collision_masks.append(
                     _capture_self_collision_mask(
                         cloth_obj, simulation_obj))
@@ -5383,6 +5461,14 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
                     publish_anisotropy=True)
                 _upload_stiffness_channels(
                     g_dll, cloth_handle, prepared_stiffness_channels[i])
+                _publish_shrink_bounds(
+                    g_dll, cloth_handle, prepared_shrink_bounds[i],
+                    CType.GPUCLOTH_SOLVER_PD
+                    if g_clothOBJs[i].GPUCloth.solver_type == "PD"
+                    else CType.GPUCLOTH_SOLVER_MIL2,
+                    _cloth_input_owners[i]["object_id"],
+                    _cloth_input_owners[i]["topology_generation"],
+                    _cloth_input_owners[i]["geometry_generation"])
                 _upload_rest_shape_key(
                     g_dll, cloth_handle, prepared_rest_shapes[i],
                     _cloth_input_owners[i]["object_id"],
@@ -5402,6 +5488,11 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
                         f"v3 cloth build rejected with {result}")
                 _validate_constraint_network_status(
                     g_dll, cloth_handle, prepared_constraint_networks[i])
+                _validate_shrink_status(
+                    g_dll, cloth_handle, prepared_shrink_bounds[i],
+                    _cloth_input_owners[i]["object_id"],
+                    _cloth_input_owners[i]["topology_generation"],
+                    _cloth_input_owners[i]["geometry_generation"])
             except (OSError, RuntimeError) as exc:
                 self.report({'ERROR'}, f"v3 cloth build failed: {exc}")
                 free_gpu_memory(context)
