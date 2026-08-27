@@ -1620,19 +1620,29 @@ def _validate_product_abi(dll):
                 f"expected={sizeof(indexed)}")
         name = bytes(indexed.name).split(b"\0", 1)[0].decode(
             "ascii", errors="strict")
-        if int(indexed.status) != CType.GPUCLOTH_FEATURE_PROVEN:
+        supported_solver_mask = int(indexed.supported_solver_mask)
+        proven_solver_mask = int(indexed.proven_solver_mask)
+        expected_status = (
+            CType.GPUCLOTH_FEATURE_PROVEN
+            if proven_solver_mask == supported_solver_mask and
+            proven_solver_mask != 0 else
+            CType.GPUCLOTH_FEATURE_PARTIAL
+            if supported_solver_mask != 0 else
+            CType.GPUCLOTH_FEATURE_MISSING)
+        if int(indexed.status) != expected_status:
             raise RuntimeError(
-                f"native v3 feature is not PROVEN: {name}, "
-                f"status={int(indexed.status)}")
+                f"native v3 feature status does not match solver coverage: "
+                f"{name}, status={int(indexed.status)}, "
+                f"expected={expected_status}, supported={supported_solver_mask}, "
+                f"proven={proven_solver_mask}")
         if int(indexed.flags) & ~allowed_feature_flags:
             raise RuntimeError(
                 f"native v3 feature exposes unknown flags: {name}, "
                 f"flags={int(indexed.flags)}")
-        if int(indexed.supported_solver_mask) & ~CType.GPUCLOTH_SOLVER_ALL:
+        if supported_solver_mask & ~CType.GPUCLOTH_SOLVER_ALL:
             raise RuntimeError(
                 f"native v3 feature exposes non-product solver mask: {name}")
-        if int(indexed.proven_solver_mask) & ~int(
-                indexed.supported_solver_mask):
+        if proven_solver_mask & ~supported_solver_mask:
             raise RuntimeError(
                 f"native v3 feature proves unsupported solver: {name}")
         if int(indexed.config_kind_mask) & ~known_config_mask:
