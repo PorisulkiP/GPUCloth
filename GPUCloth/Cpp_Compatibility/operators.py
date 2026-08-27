@@ -1263,7 +1263,154 @@ def _configure_solver_diagnostics(dll, cloth_handle, event_capacity=16):
     return result
 
 
+# Keep dict insertion order aligned with GPUClothV3.exports.allowlist.
 _GPUCLOTH_V3_EXPORT_SIGNATURES = {
+    "GPUCloth_v3_cache_clear": [
+        CType.GPUClothV3RuntimeHandle,
+        CType.GPUClothV3CacheHandle],
+    "GPUCloth_v3_cache_configure": [
+        CType.GPUClothV3RuntimeHandle,
+        POINTER(CType.GPUClothCacheConfig),
+        POINTER(CType.GPUClothV3CacheHandle)],
+    "GPUCloth_v3_cache_destroy": [
+        CType.GPUClothV3RuntimeHandle,
+        CType.GPUClothV3CacheHandle],
+    "GPUCloth_v3_cache_flush": [
+        CType.GPUClothV3RuntimeHandle,
+        CType.GPUClothV3CacheHandle],
+    "GPUCloth_v3_cache_free_frame": [
+        CType.GPUClothV3RuntimeHandle,
+        CType.GPUClothV3CacheHandle,
+        POINTER(CType.GPUClothV3CacheFrameConfig)],
+    "GPUCloth_v3_cache_get_status": [
+        CType.GPUClothV3RuntimeHandle,
+        CType.GPUClothV3CacheHandle,
+        POINTER(CType.GPUClothCacheStatus)],
+    "GPUCloth_v3_cache_has_frame": [
+        CType.GPUClothV3RuntimeHandle,
+        CType.GPUClothV3CacheHandle,
+        POINTER(CType.GPUClothV3CacheFrameConfig), POINTER(c_uint)],
+    "GPUCloth_v3_cache_is_frame_ready": [
+        CType.GPUClothV3RuntimeHandle,
+        CType.GPUClothV3CacheHandle,
+        POINTER(CType.GPUClothV3CacheFrameConfig), POINTER(c_uint)],
+    "GPUCloth_v3_cache_prefetch_frame": [
+        CType.GPUClothV3RuntimeHandle,
+        CType.GPUClothV3CacheHandle,
+        POINTER(CType.GPUClothV3CacheFrameConfig)],
+    "GPUCloth_v3_cache_query": [
+        CType.GPUClothV3RuntimeHandle,
+        CType.GPUClothV3CacheHandle,
+        POINTER(CType.GPUClothCacheConfig)],
+    "GPUCloth_v3_cache_read_frame": [
+        CType.GPUClothV3RuntimeHandle,
+        CType.GPUClothV3CacheHandle,
+        POINTER(CType.GPUClothV3CacheFrameConfig)],
+    "GPUCloth_v3_cache_update_status": [
+        CType.GPUClothV3RuntimeHandle,
+        CType.GPUClothV3CacheHandle,
+        POINTER(CType.GPUClothCacheStatusUpdate)],
+    "GPUCloth_v3_cache_write_frame_async": [
+        CType.GPUClothV3RuntimeHandle,
+        CType.GPUClothV3CacheHandle,
+        POINTER(CType.GPUClothV3CacheFrameConfig)],
+    "GPUCloth_v3_cloth_apply_drape": [
+        CType.GPUClothV3ClothHandle,
+        POINTER(CType.GPUClothDrapeStatus)],
+    "GPUCloth_v3_cloth_begin_drape": [
+        CType.GPUClothV3ClothHandle,
+        POINTER(CType.GPUClothDrapeConfig),
+        POINTER(CType.GPUClothDrapeStatus)],
+    "GPUCloth_v3_cloth_build": [CType.GPUClothV3ClothHandle],
+    "GPUCloth_v3_cloth_cancel_drape": [
+        CType.GPUClothV3ClothHandle,
+        POINTER(CType.GPUClothDrapeStatus)],
+    "GPUCloth_v3_cloth_configure": [
+        CType.GPUClothV3ClothHandle,
+        POINTER(CType.GPUClothFeatureConfigHeader)],
+    "GPUCloth_v3_cloth_create": [
+        CType.GPUClothV3RuntimeHandle,
+        POINTER(CType.GPUClothV3ClothCreateConfig),
+        POINTER(CType.GPUClothV3ClothHandle)],
+    "GPUCloth_v3_cloth_destroy": [CType.GPUClothV3ClothHandle],
+    "GPUCloth_v3_cloth_get_collection_status": [
+        CType.GPUClothV3ClothHandle,
+        POINTER(CType.GPUClothCollectionStatus)],
+    "GPUCloth_v3_cloth_get_constraint_network_status": [
+        CType.GPUClothV3ClothHandle,
+        POINTER(CType.GPUClothV3ConstraintNetworkStatus)],
+    "GPUCloth_v3_cloth_get_diagnostics": [
+        CType.GPUClothV3ClothHandle,
+        POINTER(CType.GPUClothDiagnosticsStatus)],
+    "GPUCloth_v3_cloth_get_effector_scales_status": [
+        CType.GPUClothV3ClothHandle,
+        POINTER(CType.GPUClothV3EffectorScaleStatus)],
+    "GPUCloth_v3_cloth_get_invariant_status": [
+        CType.GPUClothV3ClothHandle,
+        POINTER(CType.GPUClothInvariantWitness)],
+    "GPUCloth_v3_cloth_get_preparation_status": [
+        CType.GPUClothV3ClothHandle,
+        POINTER(CType.GPUClothPreparationStatus)],
+    "GPUCloth_v3_cloth_get_sdb_status": [
+        CType.GPUClothV3ClothHandle,
+        POINTER(CType.GPUClothV3SDBStatus)],
+    "GPUCloth_v3_cloth_get_shrink_status": [
+        CType.GPUClothV3ClothHandle,
+        POINTER(CType.GPUClothV3ShrinkStatus)],
+    "GPUCloth_v3_cloth_get_status": [
+        CType.GPUClothV3ClothHandle,
+        POINTER(CType.GPUClothV3ClothStatus)],
+    "GPUCloth_v3_cloth_get_velocity_damping_status": [
+        CType.GPUClothV3ClothHandle,
+        POINTER(CType.GPUClothV3VelocityDampingStatus)],
+    "GPUCloth_v3_cloth_query_collection": [
+        CType.GPUClothV3ClothHandle,
+        POINTER(CType.GPUClothCollectionQuery)],
+    "GPUCloth_v3_cloth_query_material_state": [
+        CType.GPUClothV3ClothHandle,
+        POINTER(CType.GPUClothV3MaterialStateQuery)],
+    "GPUCloth_v3_cloth_readback": [
+        CType.GPUClothV3ClothHandle,
+        POINTER(CType.GPUClothV3ReadbackConfig)],
+    "GPUCloth_v3_cloth_set_pin_snapshot": [
+        CType.GPUClothV3ClothHandle,
+        POINTER(CType.GPUClothPinSnapshotConfig)],
+    "GPUCloth_v3_cloth_set_shrink_config": [
+        CType.GPUClothV3ClothHandle,
+        POINTER(CType.GPUClothShrinkConfig)],
+    "GPUCloth_v3_cloth_set_vertex_channel": [
+        CType.GPUClothV3ClothHandle,
+        POINTER(CType.GPUClothVertexChannelConfig)],
+    "GPUCloth_v3_cloth_step": [CType.GPUClothV3ClothHandle],
+    "GPUCloth_v3_cloth_step_drape": [
+        CType.GPUClothV3ClothHandle,
+        POINTER(CType.GPUClothDrapeStatus)],
+    "GPUCloth_v3_cloth_validate_initial_state": [
+        CType.GPUClothV3ClothHandle,
+        POINTER(CType.GPUClothPreparationConfig),
+        POINTER(CType.GPUClothPreparationStatus)],
+    "GPUCloth_v3_collection_stage_mesh_state": [
+        CType.GPUClothV3TransactionHandle,
+        CType.GPUClothV3ClothHandle,
+        POINTER(CType.GPUClothMeshStateConfig)],
+    "GPUCloth_v3_collection_stage_pin_snapshot": [
+        CType.GPUClothV3TransactionHandle,
+        CType.GPUClothV3ClothHandle,
+        POINTER(CType.GPUClothPinSnapshotConfig)],
+    "GPUCloth_v3_collection_stage_snapshot": [
+        CType.GPUClothV3TransactionHandle,
+        CType.GPUClothV3ClothHandle,
+        POINTER(CType.GPUClothCollectionSnapshotConfig)],
+    "GPUCloth_v3_collection_transaction_abort": [
+        CType.GPUClothV3RuntimeHandle,
+        CType.GPUClothV3TransactionHandle],
+    "GPUCloth_v3_collection_transaction_begin": [
+        CType.GPUClothV3RuntimeHandle,
+        POINTER(CType.GPUClothCollectionTransactionConfig),
+        POINTER(CType.GPUClothV3TransactionHandle)],
+    "GPUCloth_v3_collection_transaction_commit": [
+        CType.GPUClothV3RuntimeHandle,
+        CType.GPUClothV3TransactionHandle],
     "GPUCloth_v3_get_abi_info": [
         POINTER(CType.GPUClothV3ABIInfo)],
     "GPUCloth_v3_get_descriptor_layout": [
@@ -1271,174 +1418,28 @@ _GPUCLOTH_V3_EXPORT_SIGNATURES = {
     "GPUCloth_v3_get_feature_count": [POINTER(c_uint64)],
     "GPUCloth_v3_get_feature_info": [
         c_uint64, POINTER(CType.GPUClothFeatureInfo)],
-    "GPUCloth_v3_query_feature": [
-        c_uint, POINTER(CType.GPUClothFeatureInfo)],
-    "GPUCloth_v3_runtime_create": [
-        POINTER(CType.GPUClothV3RuntimeConfig),
-        POINTER(CType.GPUClothV3RuntimeHandle)],
-    "GPUCloth_v3_runtime_update": [
-        CType.GPUClothV3RuntimeHandle,
-        POINTER(CType.GPUClothV3FrameConfig)],
-    "GPUCloth_v3_runtime_destroy": [CType.GPUClothV3RuntimeHandle],
-    "GPUCloth_v3_cloth_create": [
-        CType.GPUClothV3RuntimeHandle,
-        POINTER(CType.GPUClothV3ClothCreateConfig),
-        POINTER(CType.GPUClothV3ClothHandle)],
-    "GPUCloth_v3_cloth_configure": [
-        CType.GPUClothV3ClothHandle,
-        POINTER(CType.GPUClothFeatureConfigHeader)],
-    "GPUCloth_v3_cloth_set_shrink_config": [
-        CType.GPUClothV3ClothHandle,
-        POINTER(CType.GPUClothShrinkConfig)],
-    "GPUCloth_v3_cloth_set_vertex_channel": [
-        CType.GPUClothV3ClothHandle,
-        POINTER(CType.GPUClothVertexChannelConfig)],
-    "GPUCloth_v3_cloth_set_pin_snapshot": [
-        CType.GPUClothV3ClothHandle,
-        POINTER(CType.GPUClothPinSnapshotConfig)],
-    "GPUCloth_v3_collection_transaction_begin": [
-        CType.GPUClothV3RuntimeHandle,
-        POINTER(CType.GPUClothCollectionTransactionConfig),
-        POINTER(CType.GPUClothV3TransactionHandle)],
-    "GPUCloth_v3_collection_stage_snapshot": [
-        CType.GPUClothV3TransactionHandle,
-        CType.GPUClothV3ClothHandle,
-        POINTER(CType.GPUClothCollectionSnapshotConfig)],
-    "GPUCloth_v3_collection_stage_pin_snapshot": [
-        CType.GPUClothV3TransactionHandle,
-        CType.GPUClothV3ClothHandle,
-        POINTER(CType.GPUClothPinSnapshotConfig)],
-    "GPUCloth_v3_collection_stage_mesh_state": [
-        CType.GPUClothV3TransactionHandle,
-        CType.GPUClothV3ClothHandle,
-        POINTER(CType.GPUClothMeshStateConfig)],
-    "GPUCloth_v3_collection_transaction_commit": [
-        CType.GPUClothV3RuntimeHandle,
-        CType.GPUClothV3TransactionHandle],
-    "GPUCloth_v3_collection_transaction_abort": [
-        CType.GPUClothV3RuntimeHandle,
-        CType.GPUClothV3TransactionHandle],
-    "GPUCloth_v3_cloth_query_collection": [
-        CType.GPUClothV3ClothHandle,
-        POINTER(CType.GPUClothCollectionQuery)],
-    "GPUCloth_v3_cloth_get_collection_status": [
-        CType.GPUClothV3ClothHandle,
-        POINTER(CType.GPUClothCollectionStatus)],
-    "GPUCloth_v3_cloth_get_diagnostics": [
-        CType.GPUClothV3ClothHandle,
-        POINTER(CType.GPUClothDiagnosticsStatus)],
-    "GPUCloth_v3_cloth_validate_initial_state": [
-        CType.GPUClothV3ClothHandle,
-        POINTER(CType.GPUClothPreparationConfig),
-        POINTER(CType.GPUClothPreparationStatus)],
-    "GPUCloth_v3_cloth_get_preparation_status": [
-        CType.GPUClothV3ClothHandle,
-        POINTER(CType.GPUClothPreparationStatus)],
-    "GPUCloth_v3_cloth_get_invariant_status": [
-        CType.GPUClothV3ClothHandle,
-        POINTER(CType.GPUClothInvariantWitness)],
-    "GPUCloth_v3_cloth_begin_drape": [
-        CType.GPUClothV3ClothHandle,
-        POINTER(CType.GPUClothDrapeConfig),
-        POINTER(CType.GPUClothDrapeStatus)],
-    "GPUCloth_v3_cloth_step_drape": [
-        CType.GPUClothV3ClothHandle,
-        POINTER(CType.GPUClothDrapeStatus)],
-    "GPUCloth_v3_cloth_apply_drape": [
-        CType.GPUClothV3ClothHandle,
-        POINTER(CType.GPUClothDrapeStatus)],
-    "GPUCloth_v3_cloth_cancel_drape": [
-        CType.GPUClothV3ClothHandle,
-        POINTER(CType.GPUClothDrapeStatus)],
-    "GPUCloth_v3_cloth_build": [CType.GPUClothV3ClothHandle],
-    "GPUCloth_v3_cloth_destroy": [CType.GPUClothV3ClothHandle],
-    "GPUCloth_v3_cloth_step": [CType.GPUClothV3ClothHandle],
-    "GPUCloth_v3_cloth_readback": [
-        CType.GPUClothV3ClothHandle,
-        POINTER(CType.GPUClothV3ReadbackConfig)],
-    "GPUCloth_v3_cloth_get_status": [
-        CType.GPUClothV3ClothHandle,
-        POINTER(CType.GPUClothV3ClothStatus)],
-    "GPUCloth_v3_cloth_get_shrink_status": [
-        CType.GPUClothV3ClothHandle,
-        POINTER(CType.GPUClothV3ShrinkStatus)],
+    "GPUCloth_v3_proxy_apply": [
+        CType.GPUClothV3ProxyHandle,
+        POINTER(CType.GPUClothBufferView),
+        POINTER(CType.GPUClothBufferView)],
     "GPUCloth_v3_proxy_create": [
         CType.GPUClothV3RuntimeHandle,
         CType.GPUClothV3ClothHandle,
         POINTER(CType.GPUClothProxyConfig),
         POINTER(CType.GPUClothV3ProxyHandle)],
-    "GPUCloth_v3_proxy_apply": [
-        CType.GPUClothV3ProxyHandle,
-        POINTER(CType.GPUClothBufferView),
-        POINTER(CType.GPUClothBufferView)],
+    "GPUCloth_v3_proxy_destroy": [CType.GPUClothV3ProxyHandle],
     "GPUCloth_v3_proxy_get_status": [
         CType.GPUClothV3ProxyHandle,
         POINTER(CType.GPUClothV3ProxyStatus)],
-    "GPUCloth_v3_proxy_destroy": [CType.GPUClothV3ProxyHandle],
-    "GPUCloth_v3_cloth_get_sdb_status": [
-        CType.GPUClothV3ClothHandle,
-        POINTER(CType.GPUClothV3SDBStatus)],
-    "GPUCloth_v3_cloth_get_velocity_damping_status": [
-        CType.GPUClothV3ClothHandle,
-        POINTER(CType.GPUClothV3VelocityDampingStatus)],
-    "GPUCloth_v3_cloth_get_effector_scales_status": [
-        CType.GPUClothV3ClothHandle,
-        POINTER(CType.GPUClothV3EffectorScaleStatus)],
-    "GPUCloth_v3_cloth_get_constraint_network_status": [
-        CType.GPUClothV3ClothHandle,
-        POINTER(CType.GPUClothV3ConstraintNetworkStatus)],
-    "GPUCloth_v3_cloth_query_material_state": [
-        CType.GPUClothV3ClothHandle,
-        POINTER(CType.GPUClothV3MaterialStateQuery)],
-    "GPUCloth_v3_cache_configure": [
+    "GPUCloth_v3_query_feature": [
+        c_uint, POINTER(CType.GPUClothFeatureInfo)],
+    "GPUCloth_v3_runtime_create": [
+        POINTER(CType.GPUClothV3RuntimeConfig),
+        POINTER(CType.GPUClothV3RuntimeHandle)],
+    "GPUCloth_v3_runtime_destroy": [CType.GPUClothV3RuntimeHandle],
+    "GPUCloth_v3_runtime_update": [
         CType.GPUClothV3RuntimeHandle,
-        POINTER(CType.GPUClothCacheConfig),
-        POINTER(CType.GPUClothV3CacheHandle)],
-    "GPUCloth_v3_cache_query": [
-        CType.GPUClothV3RuntimeHandle,
-        CType.GPUClothV3CacheHandle,
-        POINTER(CType.GPUClothCacheConfig)],
-    "GPUCloth_v3_cache_destroy": [
-        CType.GPUClothV3RuntimeHandle,
-        CType.GPUClothV3CacheHandle],
-    "GPUCloth_v3_cache_update_status": [
-        CType.GPUClothV3RuntimeHandle,
-        CType.GPUClothV3CacheHandle,
-        POINTER(CType.GPUClothCacheStatusUpdate)],
-    "GPUCloth_v3_cache_get_status": [
-        CType.GPUClothV3RuntimeHandle,
-        CType.GPUClothV3CacheHandle,
-        POINTER(CType.GPUClothCacheStatus)],
-    "GPUCloth_v3_cache_write_frame_async": [
-        CType.GPUClothV3RuntimeHandle,
-        CType.GPUClothV3CacheHandle,
-        POINTER(CType.GPUClothV3CacheFrameConfig)],
-    "GPUCloth_v3_cache_prefetch_frame": [
-        CType.GPUClothV3RuntimeHandle,
-        CType.GPUClothV3CacheHandle,
-        POINTER(CType.GPUClothV3CacheFrameConfig)],
-    "GPUCloth_v3_cache_is_frame_ready": [
-        CType.GPUClothV3RuntimeHandle,
-        CType.GPUClothV3CacheHandle,
-        POINTER(CType.GPUClothV3CacheFrameConfig), POINTER(c_uint)],
-    "GPUCloth_v3_cache_read_frame": [
-        CType.GPUClothV3RuntimeHandle,
-        CType.GPUClothV3CacheHandle,
-        POINTER(CType.GPUClothV3CacheFrameConfig)],
-    "GPUCloth_v3_cache_free_frame": [
-        CType.GPUClothV3RuntimeHandle,
-        CType.GPUClothV3CacheHandle,
-        POINTER(CType.GPUClothV3CacheFrameConfig)],
-    "GPUCloth_v3_cache_has_frame": [
-        CType.GPUClothV3RuntimeHandle,
-        CType.GPUClothV3CacheHandle,
-        POINTER(CType.GPUClothV3CacheFrameConfig), POINTER(c_uint)],
-    "GPUCloth_v3_cache_clear": [
-        CType.GPUClothV3RuntimeHandle,
-        CType.GPUClothV3CacheHandle],
-    "GPUCloth_v3_cache_flush": [
-        CType.GPUClothV3RuntimeHandle,
-        CType.GPUClothV3CacheHandle],
+        POINTER(CType.GPUClothV3FrameConfig)],
 }
 
 
