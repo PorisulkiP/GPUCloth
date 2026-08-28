@@ -2,6 +2,7 @@
 /.editorconfig text eol=lf
 tools/gpu_runtime/core/src/*.cs text eol=lf
 tools/tests/gpu_broker/fixtures/*.cs text eol=lf
+src/tests/cloth_geometry_tests/main.cpp text eol=lf
 *.sh text eol=lf
 *.bat text eol=crlf
 *.ps1 text eol=crlf
@@ -9,5 +10,6 @@ tools/tests/gpu_broker/fixtures/*.cs text eol=lf
 *.psd1 text eol=crlf
 *.json text eol=lf working-tree-encoding=UTF-8
 *.jsonl text eol=lf working-tree-encoding=UTF-8
+*.py text eol=lf
 # JSON/JSONL protocol artifacts are written with UTF8Encoding(false); Git
 # attributes preserve LF but cannot manufacture or remove a BOM.
