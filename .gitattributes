@@ -2,6 +2,8 @@
 /.editorconfig text eol=lf
 tools/gpu_runtime/core/src/*.cs text eol=lf
 tools/tests/gpu_broker/fixtures/*.cs text eol=lf
+src/engine/TestScene/*.cpp text eol=lf
+src/engine/TestScene/*.h text eol=lf
 src/tests/cloth_geometry_tests/main.cpp text eol=lf
 *.sh text eol=lf
 *.bat text eol=crlf
