@@ -15,10 +15,16 @@ at runtime; implementation sources are not part of this repository.
 
 ## Install
 
-1. Obtain a `GPUCloth.dll` release built for the matching ABI v3 contract.
-2. Place it at `GPUCloth/lib/GPUCloth.dll`.
-3. Install the `GPUCloth` directory as a Blender add-on.
-4. Enable **GPUCloth** under Blender preferences.
+1. Install the NVIDIA driver and compatible CUDA 13.3 runtime libraries.
+2. Download `gpucloth-<version>-windows-x64.zip` from the release.
+3. In Blender 4.2, open **Edit > Preferences > Get Extensions**.
+4. Open the menu, choose **Install from Disk**, and select the ZIP.
+5. Enable **GPUCloth** if Blender does not enable it automatically.
+
+Do not extract or rearrange the ZIP. It contains the Python add-on,
+`GPUCloth.dll`, DirectStorage dependencies, and the required OptiX PTX files.
+The CUDA runtime must provide `cublas64_13.dll`, `cusparse64_12.dll`, and
+`cusolver64_12.dll` together through `CUDA_PATH/bin/x64` or `PATH`.
 
 The loader fails closed when the DLL is absent, an export is missing, or ABI
 layout/version checks do not match.
@@ -30,13 +36,31 @@ py -3 -m unittest discover -s tests -v
 ```
 
 The check parses source without importing Blender. It verifies Python syntax,
-the exact ordered export list, header parity, and loader binding order.
+the exact ordered export list, header parity, loader binding order, and release
+contract.
+
+Build an official Blender extension archive from a compatible Core build:
+
+```powershell
+py -3 tools/build_blender_release.py `
+  --core-build-dir <GPUCloth-Core-build> `
+  --blender "C:\Program Files\Blender Foundation\Blender 4.2\blender.exe"
+```
+
+Validate installation, registration, ABI metadata, restart, and removal in an
+isolated Blender profile:
+
+```powershell
+py -3 tools/test_blender_release.py `
+  --package dist/gpucloth-0.1.0-windows-x64.zip `
+  --blender "C:\Program Files\Blender Foundation\Blender 4.2\blender.exe"
+```
 
 ## Platform
 
 - Windows x64
-- Blender 4.0 or newer
-- NVIDIA runtime compatible with the supplied native release
+- Blender 4.2 LTS
+- NVIDIA driver and CUDA 13.3 runtime compatible with the supplied native release
 
 ## License
 

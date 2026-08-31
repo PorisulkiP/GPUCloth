@@ -93,6 +93,9 @@ _effector_publication_state = {
 _collider_history = {}
 _drape_status_by_uid = {}
 _teardown_failure = False
+_pending_auto_prepare = None
+_auto_prepare_timer_registered = False
+_stop_requested = False
 _MODIFIER_VISIBILITY = (
     "show_viewport", "show_render", "show_in_editmode", "show_on_cage")
 
@@ -116,6 +119,101 @@ def _runtime_owners_retained():
         _collection_snapshots or _effector_weight_states or
         _collider_history or
         _initial_positions)
+
+
+def auto_prepare_pending(obj=None):
+    request = _pending_auto_prepare
+    if request is None:
+        return False
+    return obj is None or request.get("object_name") == getattr(
+        obj, "name_full", getattr(obj, "name", None))
+
+
+def cancel_auto_prepare():
+    """Cancel the single deferred prepare request and its timer owner."""
+    global _pending_auto_prepare, _auto_prepare_timer_registered
+    _pending_auto_prepare = None
+    if not _auto_prepare_timer_registered:
+        return
+    try:
+        if bpy.app.timers.is_registered(_run_auto_prepare):
+            bpy.app.timers.unregister(_run_auto_prepare)
+    except (AttributeError, RuntimeError):
+        pass
+    _auto_prepare_timer_registered = False
+
+
+def _run_auto_prepare():
+    global _pending_auto_prepare, _auto_prepare_timer_registered
+    request = _pending_auto_prepare
+    _pending_auto_prepare = None
+    _auto_prepare_timer_registered = False
+    if request is None or _stop_requested:
+        return None
+    scene = bpy.data.scenes.get(request["scene_name"])
+    obj = bpy.data.objects.get(request["object_name"])
+    if scene is None or obj is None:
+        return None
+    settings = getattr(obj, "GPUCloth", None)
+    if (settings is None or settings.execution_backend != 'GPU' or
+            not settings.is_active or not settings.auto_prepare):
+        return None
+    view_layer = scene.view_layers[0] if scene.view_layers else None
+    helper = getattr(scene, "gpu_cloth_helper", None)
+    if view_layer is None:
+        if helper is not None:
+            helper.memory_preflight_status = (
+                "ERROR: deferred prepare has no scene view layer")
+        return None
+    previous_active = view_layer.objects.active
+    previous_selected = tuple(
+        candidate for candidate in view_layer.objects
+        if candidate.select_get())
+    try:
+        view_layer.objects.active = obj
+        obj.select_set(True)
+        override = {
+            "scene": scene,
+            "view_layer": view_layer,
+            "object": obj,
+            "active_object": obj,
+        }
+        if bpy.context.window is not None:
+            override["window"] = bpy.context.window
+        with bpy.context.temp_override(
+                **override):
+            bpy.ops.gpucloth.prepare_simulation()
+    except (AttributeError, RuntimeError) as exc:
+        message = f"ERROR: deferred prepare failed: {exc}"
+        if helper is not None:
+            helper.memory_preflight_status = message
+        print(f"[GPUCloth] {message}")
+    finally:
+        view_layer.objects.active = previous_active
+        for candidate in view_layer.objects:
+            candidate.select_set(candidate in previous_selected)
+    return None
+
+
+def schedule_auto_prepare(obj, scene):
+    """Queue one Blender-main-thread prepare after property callbacks return."""
+    global _pending_auto_prepare, _auto_prepare_timer_registered, _stop_requested
+    if obj is None or scene is None:
+        return False
+    _stop_requested = False
+    _pending_auto_prepare = {
+        "object_name": getattr(obj, "name_full", obj.name),
+        "scene_name": getattr(scene, "name_full", scene.name),
+    }
+    if _auto_prepare_timer_registered:
+        return True
+    try:
+        bpy.app.timers.register(_run_auto_prepare, first_interval=0.0)
+    except (AttributeError, RuntimeError):
+        _pending_auto_prepare = None
+        return False
+    _auto_prepare_timer_registered = True
+    return True
 
 
 def _reject_unsupported_v3_owners(scene, cloth_objects):
@@ -166,6 +264,82 @@ def _reject_unsupported_v3_owners(scene, cloth_objects):
         raise RuntimeError(
             "NOT_CONFIGURABLE: ABI v3 has no owner for " +
             ", ".join(unsupported))
+
+
+def _estimate_gpu_memory_bytes(simulation_objects, solver_types):
+    """Estimate explicitly described persistent v3 buffers, in bytes."""
+    if len(simulation_objects) != len(solver_types):
+        raise RuntimeError("GPU memory estimate inputs are inconsistent")
+    position_components = 3
+    edge_endpoints = 2
+    face_indices = 2
+    loop_indices = 2
+    solver_state_vectors = {"PD": 2, "Mil2": 3}
+    total = 0
+    for obj, solver in zip(simulation_objects, solver_types):
+        if solver not in solver_state_vectors:
+            raise RuntimeError(f"GPU memory estimate solver is unsupported: {solver}")
+        mesh = obj.data
+        vertices = len(mesh.vertices)
+        edges = len(mesh.edges)
+        faces = len(mesh.polygons)
+        loops = len(mesh.loops)
+        vertex_state = vertices * position_components * sizeof(c_float)
+        topology = (
+            edges * sizeof(c_uint) * edge_endpoints +
+            faces * sizeof(c_uint) * face_indices +
+            loops * sizeof(c_uint) * loop_indices)
+        solver_state = vertex_state * solver_state_vectors[solver]
+        total += vertex_state + topology + solver_state
+    return int(total)
+
+
+def _query_gpu_memory_bytes():
+    """Read device-0 free/total memory through the existing nvidia-smi path."""
+    try:
+        result = subprocess.run(
+            [
+                "nvidia-smi", "--query-gpu=memory.free,memory.total",
+                "--format=csv,noheader,nounits",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=True,
+        )
+        first = next(line for line in result.stdout.splitlines() if line.strip())
+        free_text, total_text = (item.strip() for item in first.split(",", 1))
+        free_mib = int(free_text)
+        total_mib = int(total_text)
+    except (FileNotFoundError, subprocess.CalledProcessError,
+            StopIteration, ValueError):
+        return None
+    if free_mib < 0 or total_mib <= 0 or free_mib > total_mib:
+        return None
+    return free_mib * 1024 * 1024, total_mib * 1024 * 1024
+
+
+def _require_gpu_memory_preflight(simulation_objects, solver_types):
+    """Admit only a visible lower-bound estimate; native allocation remains oracle."""
+    estimate = _estimate_gpu_memory_bytes(simulation_objects, solver_types)
+    required = estimate
+    available = _query_gpu_memory_bytes()
+    if available is None:
+        raise RuntimeError(
+            "GPU memory preflight unavailable: nvidia-smi free/total query "
+            "failed; native allocation not attempted")
+    free_bytes, total_bytes = available
+    if free_bytes < required:
+        raise RuntimeError(
+            "GPU memory preflight rejected: "
+            f"free={free_bytes} bytes, lower-bound={required} bytes, "
+            f"total={total_bytes} bytes")
+    return {
+        "free_bytes": free_bytes,
+        "total_bytes": total_bytes,
+        "estimate_bytes": estimate,
+        "lower_bound_bytes": required,
+    }
 
 
 def _runtime_handle_value():
@@ -241,7 +415,7 @@ def _guard_prepare_teardown(execute):
             result == {'FINISHED'} and failure is None and
             not _teardown_failure)
         if not succeeded:
-            if native_mutated and _runtime_owners_retained():
+            if native_mutated:
                 free_gpu_memory(context)
             if not native_mutated:
                 for modifier, visibility in modifier_state:
@@ -346,20 +520,20 @@ def _reject_active_shape_keys(obj):
 
 
 def _plan_modifier_evaluation(bindings):
+    from . import cloth_settings_bridge
     plans = []
     for binding_index, binding in enumerate(bindings):
         cloth_obj = binding["render_object"]
         simulation_obj = binding["simulation_object"]
         modifiers = tuple(getattr(cloth_obj, "modifiers", ()))
-        cloth_indices = [
-            index for index, modifier in enumerate(modifiers)
-            if getattr(modifier, "type", None) == 'CLOTH']
-        if len(cloth_indices) != 1:
+        cpu_cloth_modifiers = cloth_settings_bridge.find_cpu_cloth_modifiers(
+            cloth_obj)
+        if len(cpu_cloth_modifiers) != 1:
             raise RuntimeError(
                 f"{cloth_obj.name_full!r} requires exactly one Cloth "
                 "modifier")
-        cloth_index = cloth_indices[0]
-        cloth_modifier = modifiers[cloth_index]
+        cloth_modifier = cpu_cloth_modifiers[0]
+        cloth_index = modifiers.index(cloth_modifier)
         if bool(getattr(cloth_modifier, "use_pin_to_last", False)):
             raise RuntimeError(
                 f"{cloth_obj.name_full!r} Cloth use_pin_to_last is not "
@@ -4447,7 +4621,13 @@ def _accept_dynamic_mesh_snapshot(index):
 _cache_playback_guard  = {'active': False}
 _initial_positions     = []     # list[np.ndarray] — rest positions per cloth object
 _bake_range            = {'start': 1, 'end': 250}
-_simulation_frame_state = {'last_solved': None}
+_simulation_frame_state = {
+    'last_solved': None,
+    # Live simulation does not own a native cache unless bake/playback is
+    # requested.  Retain reached render states so timeline rewinds still
+    # publish the requested geometry in that mode.
+    'positions': {},
+}
 _cache_source_state = {'generation': 0}
 _input_generation = {'value': 0}
 
@@ -4494,6 +4674,7 @@ def _cache_source_generation(scene):
             "bake_start", "bake_end", "bake_progress",
             "is_baked", "is_baking", "is_outdated", "is_frame_skip",
             "cache_info", "cached_frame_count", "playback_mode",
+            "memory_preflight_status",
         })
     _cache_hash_value(hasher, "render.fps", scene.render.fps)
     _cache_hash_value(hasher, "render.fps_base", scene.render.fps_base)
@@ -4777,6 +4958,38 @@ def _restore_initial_positions():
             cloth_obj.data.update_tag()
 
 
+def _store_simulation_frame(frame):
+    """Retain one reached render state for live timeline playback."""
+    snapshots = []
+    for cloth_obj in g_clothOBJs:
+        values = np.empty(len(cloth_obj.data.vertices) * 3, dtype=np.float32)
+        cloth_obj.data.vertices.foreach_get("co", values)
+        snapshots.append(values.copy())
+    _simulation_frame_state['positions'][int(frame)] = tuple(snapshots)
+
+
+def _load_simulation_frame(frame, depsgraph):
+    """Publish a retained live state when native cache is unavailable."""
+    snapshots = _simulation_frame_state['positions'].get(int(frame))
+    if snapshots is None:
+        if int(frame) != int(_bake_range['start']) or not _initial_positions:
+            return False
+        _restore_initial_positions()
+        depsgraph.update()
+        return True
+    if len(snapshots) != len(g_clothOBJs):
+        return False
+    for cloth_obj, values in zip(g_clothOBJs, snapshots):
+        expected = len(cloth_obj.data.vertices) * 3
+        if values.size != expected:
+            return False
+        cloth_obj.data.vertices.foreach_set("co", values)
+        cloth_obj.data.update()
+        cloth_obj.data.update_tag()
+    depsgraph.update()
+    return True
+
+
 def _load_cached_frame(scene, depsgraph, frame):
     if g_dll is None or not _runtime_handle_value() or not _cache_handle_value():
         return False
@@ -4914,7 +5127,7 @@ def _cache_input_change_handler(scene, depsgraph):
 
 
 def _frame_change_handler(scene, depsgraph):
-    if _teardown_failure:
+    if _teardown_failure or _stop_requested:
         return
     if _cache_playback_guard['active']:
         return
@@ -4939,7 +5152,8 @@ def _frame_change_handler(scene, depsgraph):
         elif not scene_s.is_baked:
             last_solved = _simulation_frame_state['last_solved']
             if last_solved is not None and frame <= last_solved:
-                _load_cached_frame(scene, depsgraph, frame)
+                if not _load_cached_frame(scene, depsgraph, frame):
+                    _load_simulation_frame(frame, depsgraph)
                 return
             if frame > scene_s.bake_end:
                 return
@@ -4986,19 +5200,6 @@ def free_gpu_memory(context=None, shutdown_runtime=False):
             _teardown_failure = True
             return False
 
-    try:
-        from . import cloth_settings_bridge
-        for cloth_obj in tuple(g_clothOBJs):
-            cloth_settings_bridge.apply_modifier_ownership(
-                cloth_obj, "CPU")
-    except (
-            AttributeError, ReferenceError, RuntimeError,
-            TypeError) as exc:
-        print(
-            f"free_gpu_memory: CPU Cloth visibility restore failed: {exc}")
-        _teardown_failure = True
-        return False
-
     g_cloth_handles      = []
     _cloth_input_owners  = []
     _readback_owners     = []
@@ -5019,6 +5220,7 @@ def free_gpu_memory(context=None, shutdown_runtime=False):
     _drape_status_by_uid.clear()
     _initial_positions.clear()
     _simulation_frame_state['last_solved'] = None
+    _simulation_frame_state['positions'].clear()
     _cache_source_state['generation'] = 0
     _input_generation['value'] = 0
     if context is not None and hasattr(context.scene, 'gpu_cloth_springs_built'):
@@ -5042,7 +5244,14 @@ class GPUCloth_FreeVRAM(bpy.types.Operator):
         return True
 
     def execute(self, context):
-        if not free_gpu_memory(context):
+        global _stop_requested
+        cancel_auto_prepare()
+        _stop_requested = True
+        try:
+            bpy.ops.screen.animation_cancel()
+        except (AttributeError, RuntimeError):
+            pass
+        if not free_gpu_memory(context, shutdown_runtime=True):
             self.report({'ERROR'}, "Не удалось освободить GPU память.")
             return {'CANCELLED'}
         self.report({'INFO'}, "GPU память освобождена.")
@@ -5204,6 +5413,7 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
         global _cloth_input_owners, _readback_owners
         global g_clothOBJs, g_simulationOBJs
         global g_clothCollisionOBJs, g_proxy_handles
+        global _stop_requested
 
         self._native_prepare_mutated = False
 
@@ -5276,6 +5486,19 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
             self.report(
                 {'ERROR'}, f"Modifier evaluation rejected: {exc}")
             return {'CANCELLED'}
+        solver_types = [
+            str(item.GPUCloth.solver_type) for item in active_cloth]
+        try:
+            memory = _require_gpu_memory_preflight(
+                simulation_objects, solver_types)
+        except RuntimeError as exc:
+            helper.memory_preflight_status = str(exc)
+            self.report({'ERROR'}, str(exc))
+            return {'CANCELLED'}
+        helper.memory_preflight_status = (
+            f"PASS: lower bound {memory['lower_bound_bytes']} bytes; "
+            f"free {memory['free_bytes']} bytes")
+        _stop_requested = False
 
         # One generation owns the complete initial publication.  Keep the
         # runtime generation monotonic across destroy/recreate so a new
@@ -5667,10 +5890,10 @@ class GPUCloth_UpdateSimulation(bpy.types.Operator):
         global g_dll
         global g_clothOBJs, g_simulationOBJs
 
-        if _teardown_failure:
+        if _teardown_failure or _stop_requested:
             self.report(
                 {'ERROR'},
-                "Native teardown recovery is required before update")
+                "Simulation is stopped; prepare is required before update")
             return {'CANCELLED'}
 
         if g_dll is None or context.scene.frame_current < 2:
@@ -5697,8 +5920,9 @@ class GPUCloth_UpdateSimulation(bpy.types.Operator):
 
         last_solved = _simulation_frame_state['last_solved']
         if last_solved is not None and frame <= last_solved:
-            _load_cached_frame(
-                context.scene, context.evaluated_depsgraph_get(), frame)
+            depsgraph = context.evaluated_depsgraph_get()
+            if not _load_cached_frame(context.scene, depsgraph, frame):
+                _load_simulation_frame(frame, depsgraph)
             return {'FINISHED'}
 
         # ── РЕЖИМ ЖИВОЙ СИМУЛЯЦИИ ────────────────────────────────────────────
@@ -5803,6 +6027,8 @@ class GPUCloth_UpdateSimulation(bpy.types.Operator):
                             {'ERROR'},
                             f"Cache write rejected at frame {frame}")
                         return {'CANCELLED'}
+
+            _store_simulation_frame(frame)
 
         except (OSError, RuntimeError, VertexChannelError) as err:
             print(f"GPUCloth_UpdateSimulation failed: {err}")
@@ -6008,6 +6234,7 @@ class GPUCloth_ApplyDrape(bpy.types.Operator):
             _store_initial_positions()
             _simulation_frame_state['last_solved'] = max(
                 1, int(context.scene.gpu_cloth_helper.bake_start) - 1)
+            _simulation_frame_state['positions'].clear()
             _cache_status_update(
                 CType.GPUCLOTH_CACHE_STATUS_SOURCE_CHANGED, context.scene)
             _sync_cache_status(context.scene)
@@ -6185,6 +6412,7 @@ class GPUCloth_BakeSimulation(bpy.types.Operator):
         _bake_range['end'] = s.bake_end
         _simulation_frame_state['last_solved'] = max(
             1, int(s.bake_start) - 1)
+        _simulation_frame_state['positions'].clear()
         self._frame = s.bake_start
         return True
 
@@ -7036,6 +7264,9 @@ def register():
     # OGC contact-bounds visualiser — register once, draw callback checks flag
 def unregister():
     global g_dll
+    global _stop_requested
+    cancel_auto_prepare()
+    _stop_requested = True
     if not ensure_native_teardown(shutdown_runtime=True):
         print(
             "GPUCloth unregister retained handlers, classes, DLL, and "

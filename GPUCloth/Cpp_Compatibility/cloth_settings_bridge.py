@@ -232,7 +232,14 @@ def capture_v3_shrink_bounds(settings):
 
 
 def find_cpu_cloth_modifier(obj):
-    return next((modifier for modifier in obj.modifiers if modifier.type == "CLOTH"), None)
+    return next(iter(find_cpu_cloth_modifiers(obj)), None)
+
+
+def find_cpu_cloth_modifiers(obj):
+    """Return every CPU Cloth modifier, including hidden modifiers."""
+    return tuple(
+        modifier for modifier in getattr(obj, "modifiers", ())
+        if getattr(modifier, "type", None) == "CLOTH")
 
 
 def _stored_cpu_cloth_modifier(obj):
@@ -580,10 +587,27 @@ def record_runtime_error(obj, message):
 
 def select_backend(obj, backend, scene=None):
     """Switch evaluator ownership while preserving CPU modifier configuration."""
-    modifier = find_cpu_cloth_modifier(obj)
     result = None
     if backend == "GPU":
-        result = sync_cpu_to_gpu(obj, scene) if modifier else None
+        modifiers = find_cpu_cloth_modifiers(obj)
+        if len(modifiers) != 1:
+            result = {
+                "errors": [
+                    f"{obj.name!r} requires exactly one Cloth modifier; "
+                    f"found {len(modifiers)}"],
+                "unsupported_non_default": [],
+            }
+            _store_report(obj, {
+                "schema_version": SCHEMA_VERSION,
+                "source_modifier": None,
+                "copied": [],
+                "unsupported": [],
+                "unsupported_non_default": [],
+                "errors": result["errors"],
+                "committed": False,
+            })
+            return result
+        result = sync_cpu_to_gpu(obj, scene)
         if result is not None and (
                 result["errors"] or result["unsupported_non_default"]):
             return result
@@ -593,12 +617,15 @@ def select_backend(obj, backend, scene=None):
 
     from . import operators
     if obj in operators.g_clothOBJs:
-        released = operators.free_gpu_memory()
+        operators.cancel_auto_prepare()
+        released = operators.free_gpu_memory(shutdown_runtime=True)
         if scene is not None and hasattr(scene, "gpu_cloth_springs_built"):
             scene.gpu_cloth_springs_built = False
         if not released:
             record_runtime_error(
                 obj, "GPUCloth native data release failed while returning to CPU")
+    else:
+        operators.cancel_auto_prepare()
     obj.GPUCloth.is_active = False
     apply_modifier_ownership(obj, backend)
     return result
@@ -642,7 +669,7 @@ def apply_modifier_ownership(obj, backend):
 def restore_all_cpu_owners():
     """Restore CPU modifiers after addon reload, disable, or failed runtime."""
     restored = []
-    for obj in bpy.data.objects:
+    for obj in getattr(bpy.data, "objects", ()):
         if (_STATE_PREFIX + "name" not in obj
                 and _STATE_PREFIX + "uid" not in obj):
             continue

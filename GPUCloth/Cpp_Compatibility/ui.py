@@ -109,8 +109,19 @@ class GPUCLOTH_PT_main(bpy.types.Panel):
         prepare.operator(
             "gpucloth.prepare_simulation",
             text=_t("Prepare", "Подготовить"), icon='PLAY')
+        layout.prop(
+            settings, "auto_prepare",
+            text=_t("Auto Prepare", "Автоподготовка"))
+        if getattr(scene.gpu_cloth_helper, "memory_preflight_status", ""):
+            layout.label(
+                text=scene.gpu_cloth_helper.memory_preflight_status,
+                icon=(
+                    'CHECKMARK'
+                    if scene.gpu_cloth_helper.memory_preflight_status.startswith(
+                        "PASS:")
+                    else 'ERROR'))
         stop = status.row(align=True)
-        stop.enabled = operators.g_dll is not None and prepared
+        stop.enabled = prepared or operators.auto_prepare_pending(obj)
         stop.operator(
             "gpucloth.destroy_simulation_data",
             text=_t("Stop", "Остановить"), icon='CANCEL')

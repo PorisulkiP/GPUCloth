@@ -77,6 +77,10 @@ def _on_execution_backend_change(self, context):
             self.execution_backend = 'CPU'
             cloth_settings_bridge.select_backend(
                 obj, 'CPU', context.scene if context else None)
+        elif self.execution_backend == 'GPU' and context is not None:
+            from . import operators as ops
+            if bool(getattr(self, "auto_prepare", True)):
+                ops.schedule_auto_prepare(obj, context.scene)
     finally:
         _backend_switch_active = False
 
@@ -313,6 +317,12 @@ class GPUClothObjectSettings(PropertyGroup):
         ),
         default='CPU',
         update=_on_execution_backend_change,
+    )
+
+    auto_prepare: BoolProperty(
+        name="Auto Prepare",
+        description="Defer GPU preparation after switching from CPU Cloth",
+        default=True,
     )
 
     cpu_sync_copied: IntProperty(default=0, options={'HIDDEN'})
@@ -1208,6 +1218,13 @@ class GPUClothSceneSettings(PropertyGroup):
         name="Cache Status",
         description="Native cache status detail",
         default="",
+    )
+
+    memory_preflight_status: StringProperty(
+        name="GPU Memory Preflight",
+        description="Visible lower-bound GPU memory admission diagnostic",
+        default="",
+        options={'HIDDEN'},
     )
 
     bake_start: IntProperty(
