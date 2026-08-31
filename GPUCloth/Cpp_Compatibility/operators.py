@@ -5094,7 +5094,7 @@ class GPUCloth_LoadDLL(bpy.types.Operator):
             addon_dir = vcu.get_addon_directory()
             self.report({'ERROR'},
                 f"GPUCloth.dll не найдена. "
-                f"Искали в: {lib_dir} , {addon_dir} , {addon_dir}\\build\\ . "
+                f"Ожидаемый путь: {os.path.join(lib_dir, 'GPUCloth.dll')}. "
                 f"Скопируйте GPUCloth.dll в {lib_dir}")
             return False
 

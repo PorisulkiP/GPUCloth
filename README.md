@@ -1,28 +1,43 @@
-<h1 align="center">GPUCloth</h1>
-<h2 align="center">Cloth simulation for Blender 2.93.x with CUDA support</h2>
-<h3 align="center">(in development)</h2>
+# GPUCloth
 
-## Why GPUCloth?
+Public Blender add-on and stable C ABI for the GPUCloth native runtime.
 
-- Faster when standart cloth simulation
-- Use CUDA that's faster when OpenCL for ~20%
-- If you buy NVIDIA graphic card why will not buy this addon?
-- If you have a graphics card from AMD, do not panic and do not leave, as soon as possible we will add support for OpenCL
+This repository contains only the client boundary:
 
-## Development stage
+- `GPUCloth/` — Blender 4.x add-on and `ctypes` bindings;
+- `include/GPUCloth/gpucloth.h` — 57 callable ABI v3 entry points;
+- `include/GPUCloth/product_abi.h` — versioned ABI layouts and handles;
+- `abi/GPUClothV3.exports.allowlist` — frozen 57-symbol export contract.
 
-![Status of project](https://sun9-35.userapi.com/impg/p8_eD0PWLoVpB2BS552zZsEIPnHVTdpIizyUew/q8Uu5l-V23s.jpg?size=2560x1176&quality=96&sign=58b22f525f620fe60af00ef65fa130d5&type=album)
+The native solver implementation and its tests live in the separate
+GPUCloth-Core repository. A compatible release of `GPUCloth.dll` is required
+at runtime; implementation sources are not part of this repository.
 
-## Project setup
+## Install
 
+1. Obtain a `GPUCloth.dll` release built for the matching ABI v3 contract.
+2. Place it at `GPUCloth/lib/GPUCloth.dll`.
+3. Install the `GPUCloth` directory as a Blender add-on.
+4. Enable **GPUCloth** under Blender preferences.
+
+The loader fails closed when the DLL is absent, an export is missing, or ABI
+layout/version checks do not match.
+
+## Validate the public boundary
+
+```powershell
+py -3 -m unittest discover -s tests -v
 ```
-cd path/to/blender.exe
-blender --python /path/to/script/main.py
-```
 
-## About the project.
+The check parses source without importing Blender. It verifies Python syntax,
+the exact ordered export list, header parity, and loader binding order.
 
-The essence of the project:
->Speed up the process of physically based  calculation of the cloth simulation by transferring calculations from the CPU to the GPU
+## Platform
 
-The project is being developed for passing a discipline in college, so it can be abandoned
+- Windows x64
+- Blender 4.0 or newer
+- NVIDIA runtime compatible with the supplied native release
+
+## License
+
+See `LICENSE` and the notices retained in the source files.

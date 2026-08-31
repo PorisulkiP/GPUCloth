@@ -44,7 +44,7 @@ CLOTH_SIMSETTINGS_FLAG_DYNAMIC_MESH           = CLOTH_SIMSETTINGS_FLAG_DYNAMIC_B
 
 # ---------------------------------------------------------------------------
 #  Типы GPU-солверов ткани
-#  Зеркало C++ enum SolverType в src/engine/source/DNA/cloth_types.cuh
+#  Значения публичного GPUCloth solver contract
 # ---------------------------------------------------------------------------
 SOLVER_PD     = 1   # Projective Dynamics с Chebyshev-Jacobi ускорением
 SOLVER_Mil2   = 3   # Non-distance barriers + subspace reuse (Mil²)

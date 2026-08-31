@@ -874,8 +874,8 @@ enum GPUClothConvergenceMetric : uint32_t {
     GPUCLOTH_CONVERGENCE_LINF_POSITION_DELTA = 1,
 };
 
-// Caller-owned event records. A configured buffer remains live until
-// RemoveCloth/FreeSolverData and is written only by synchronous API calls.
+// Caller-owned event records. A configured buffer remains live until the
+// owning v3 cloth/runtime is destroyed and is written by synchronous calls.
 struct GPUClothDiagnosticsEvent {
     uint32_t struct_size;
     uint32_t event_type;
