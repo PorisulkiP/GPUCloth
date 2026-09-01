@@ -136,7 +136,7 @@ def check_active(module_name: str, repo_dir: Path) -> None:
         f"extension loaded outside isolated repository: {package_root}",
     )
     metadata = addon_utils.module_bl_info(package)
-    require(metadata["version"] == (0, 1, 2), "unexpected add-on version")
+    require(metadata["version"] == (0, 1, 3), "unexpected add-on version")
     require(metadata["blender"] == (4, 2, 0), "unexpected Blender minimum")
     for name in REQUIRED_NATIVE:
         require((package_root / "lib" / name).is_file(), f"missing native payload: {name}")

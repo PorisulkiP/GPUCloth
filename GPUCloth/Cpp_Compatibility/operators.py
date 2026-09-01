@@ -3792,6 +3792,18 @@ def _collider_motion_classification(
         CType.GPUCLOTH_FEATURE_STATIC_OBJECT_COLLISION)
 
 
+def _resolve_collider_surface_contract(settings):
+    """Map Blender's independent flags onto the finite native ABI."""
+    single_sided = bool(settings.use_culling)
+    # Blender 4.2 defaults to (True, False). The native one-sided contract
+    # always uses surface normals, so Single Sided owns the mapping. Keep RNA
+    # unchanged; Override Normals cannot change native sidedness.
+    bool(settings.use_normal)
+    return (
+        CType.GPUCLOTH_COLLIDER_ONE_SIDED_NORMAL
+        if single_sided else CType.GPUCLOTH_COLLIDER_TWO_SIDED)
+
+
 def _capture_collider_payload(
     occurrence, modifier_index, depsgraph, cloth_owner_id, collection_id,
         snapshot_generation, collider_history, cloth_inverse):
@@ -4038,8 +4050,7 @@ def _capture_collider_payload(
         config.friction = float(settings.cloth_friction)
         config.damping = float(settings.damping)
         config.effector_absorption = float(settings.absorption)
-        use_culling = bool(settings.use_culling)
-        use_normal = bool(settings.use_normal)
+        config.sidedness = _resolve_collider_surface_contract(settings)
     except (AttributeError, ReferenceError, RuntimeError, TypeError) as exc:
         raise RuntimeError(
             f"collider {source_object.name_full!r} has incomplete Blender "
@@ -4066,15 +4077,6 @@ def _capture_collider_payload(
         raise RuntimeError(
             f"collider {source_object.name_full!r} absorption is "
             "outside [0, 1]")
-    if use_culling != use_normal:
-        raise RuntimeError(
-            f"collider {source_object.name_full!r} must select an explicit "
-            "surface contract: culling+normal for one-sided, or neither "
-            "for two-sided")
-    config.sidedness = (
-        CType.GPUCLOTH_COLLIDER_ONE_SIDED_NORMAL
-        if use_culling else CType.GPUCLOTH_COLLIDER_TWO_SIDED)
-
     record = CType.GPUClothCollectionRecord()
     record.struct_size = sizeof(record)
     record.record_version = 1

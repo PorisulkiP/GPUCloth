@@ -19,7 +19,7 @@ class ReleaseContractTest(unittest.TestCase):
             {
                 "schema_version": "1.0.0",
                 "id": "gpucloth",
-                "version": "0.1.2",
+                "version": "0.1.3",
                 "name": "GPUCloth",
                 "tagline": "GPU cloth simulation for Blender",
                 "maintainer": "PorisulkiP",

@@ -223,6 +223,34 @@ class AddonLifecycleContractTest(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "preflight rejected"):
             namespace["_require_gpu_memory_preflight"]([obj], ["PD"])
 
+    def test_blender_default_collider_surface_contract_is_normalized(self):
+        one_sided = 1
+        two_sided = 2
+        namespace = self._functions(
+            self.operators,
+            {"_resolve_collider_surface_contract"},
+            {"CType": SimpleNamespace(
+                GPUCLOTH_COLLIDER_ONE_SIDED_NORMAL=one_sided,
+                GPUCLOTH_COLLIDER_TWO_SIDED=two_sided)},
+        )
+        resolve = namespace["_resolve_collider_surface_contract"]
+        self.assertEqual(
+            resolve(SimpleNamespace(use_culling=True, use_normal=False)),
+            one_sided,
+        )
+        self.assertEqual(
+            resolve(SimpleNamespace(use_culling=True, use_normal=True)),
+            one_sided,
+        )
+        self.assertEqual(
+            resolve(SimpleNamespace(use_culling=False, use_normal=False)),
+            two_sided,
+        )
+        self.assertEqual(
+            resolve(SimpleNamespace(use_culling=False, use_normal=True)),
+            two_sided,
+        )
+
     def test_stop_teardown_and_scrub_block_contract(self):
         calls = []
         bpy = SimpleNamespace(ops=SimpleNamespace(screen=SimpleNamespace(

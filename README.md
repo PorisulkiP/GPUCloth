@@ -35,6 +35,10 @@ Blender shows phase and percentage progress in the GPU Cloth panel and status
 bar. **Stop** requests cancellation; native teardown waits for the active DLL
 call to finish.
 
+Collider sidedness follows Blender's **Single Sided** setting. Blender 4.2's
+default `(use_culling=True, use_normal=False)` maps automatically to the native
+one-sided-normal contract. Disabling **Single Sided** selects two-sided contact.
+
 ## Validate the public boundary
 
 ```powershell
@@ -58,7 +62,7 @@ isolated Blender profile:
 
 ```powershell
 py -3 tools/test_blender_release.py `
-  --package dist/gpucloth-0.1.2-windows-x64.zip `
+  --package dist/gpucloth-0.1.3-windows-x64.zip `
   --blender "C:\Program Files\Blender Foundation\Blender 4.2\blender.exe"
 ```
 
