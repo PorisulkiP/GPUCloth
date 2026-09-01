@@ -19,7 +19,7 @@ class ReleaseContractTest(unittest.TestCase):
             {
                 "schema_version": "1.0.0",
                 "id": "gpucloth",
-                "version": "0.1.0",
+                "version": "0.1.2",
                 "name": "GPUCloth",
                 "tagline": "GPU cloth simulation for Blender",
                 "maintainer": "PorisulkiP",
@@ -59,6 +59,9 @@ class ReleaseContractTest(unittest.TestCase):
         self.assertIn("bpy.ops.gpucloth.load_dll", smoke_source)
         self.assertIn("_validate_product_abi", smoke_source)
         self.assertIn("_validate_descriptor_layout", smoke_source)
+        self.assertIn("prepare_task_active", smoke_source)
+        self.assertIn("prepare_progress", smoke_source)
+        self.assertIn("gpucloth_async_ui_probe", smoke_source)
         self.assertNotIn("GPUCloth_v3_runtime_create", smoke_source)
         self.assertNotIn("prepare_simulation", smoke_source)
 

@@ -22,7 +22,7 @@ class AddonLifecycleContractTest(unittest.TestCase):
         cls.properties = PROPERTIES.read_text(encoding="utf-8")
         cls.ui = UI.read_text(encoding="utf-8")
 
-    def test_exact_one_modifier_switch_contract(self):
+    def test_create_reuse_and_reject_duplicate_modifier_contract(self):
         namespace = self._functions(
             self.bridge,
             {"find_cpu_cloth_modifier", "find_cpu_cloth_modifiers",
@@ -34,20 +34,36 @@ class AddonLifecycleContractTest(unittest.TestCase):
              "apply_modifier_ownership": lambda _obj, _backend: None},
         )
         class Modifier:
-            def __init__(self, kind):
+            def __init__(self, kind, name=None):
                 self.type = kind
-                self.name = kind
+                self.name = name or kind
+        class Modifiers(list):
+            def new(self, name, type):
+                modifier = Modifier(type, name)
+                self.append(modifier)
+                return modifier
         class Object:
             def __init__(self, modifiers):
                 self.name = "Cube"
                 self.modifiers = modifiers
                 self.GPUCloth = SimpleNamespace(is_active=False)
-        one = Object((Modifier("CLOTH"), Modifier("SUBSURF")))
+        zero = Object(Modifiers((Modifier("SUBSURF"),)))
+        self.assertEqual(
+            namespace["select_backend"](zero, "GPU"),
+            {"errors": [], "unsupported_non_default": []})
+        created = namespace["find_cpu_cloth_modifiers"](zero)
+        self.assertEqual(len(created), 1)
+        self.assertEqual(created[0].name, "Cloth")
+        self.assertTrue(zero.GPUCloth.is_active)
+
+        one = Object(Modifiers((Modifier("CLOTH"), Modifier("SUBSURF"))))
         self.assertEqual(
             namespace["select_backend"](one, "GPU"),
             {"errors": [], "unsupported_non_default": []})
         self.assertTrue(one.GPUCloth.is_active)
-        two = Object((Modifier("CLOTH"), Modifier("CLOTH")))
+        self.assertEqual(len(namespace["find_cpu_cloth_modifiers"](one)), 1)
+
+        two = Object(Modifiers((Modifier("CLOTH"), Modifier("CLOTH"))))
         rejected = namespace["select_backend"](two, "GPU")
         self.assertIn("exactly one Cloth modifier", rejected["errors"][0])
         self.assertFalse(two.GPUCloth.is_active)
@@ -66,7 +82,8 @@ class AddonLifecycleContractTest(unittest.TestCase):
             {"bpy": bpy, "_run_auto_prepare": object(),
              "_pending_auto_prepare": None,
              "_auto_prepare_timer_registered": False,
-             "_stop_requested": True},
+             "_stop_requested": True,
+             "cancel_prepare_task": lambda: False},
         )
         obj = SimpleNamespace(name_full="Cube", name="Cube")
         scene = SimpleNamespace(name_full="Scene", name="Scene")
@@ -119,10 +136,13 @@ class AddonLifecycleContractTest(unittest.TestCase):
             self.operators, {"_run_auto_prepare"},
             {"bpy": bpy, "_pending_auto_prepare": {
                 "scene_name": "Scene", "object_name": "Cube"},
-             "_auto_prepare_timer_registered": True, "_stop_requested": False},
+             "_auto_prepare_timer_registered": True, "_stop_requested": False,
+             "prepare_task_active": lambda: False,
+             "_start_prepare_task": lambda _context, automatic=False: (
+                 calls.append(("prepare", automatic)) or True)},
         )
         namespace["_run_auto_prepare"]()
-        self.assertEqual(calls, ["prepare"])
+        self.assertEqual(calls, [("prepare", True)])
         self.assertIs(view_layer.objects.active, other)
         self.assertFalse(target.select_get())
         self.assertTrue(other.select_get())
@@ -132,10 +152,60 @@ class AddonLifecycleContractTest(unittest.TestCase):
             self.operators, {"_run_auto_prepare"},
             {"bpy": bpy, "_pending_auto_prepare": {
                 "scene_name": "Scene", "object_name": "Cube"},
-             "_auto_prepare_timer_registered": True, "_stop_requested": False},
+             "_auto_prepare_timer_registered": True, "_stop_requested": False,
+             "prepare_task_active": lambda: False,
+             "_start_prepare_task": lambda _context, automatic=False: True},
         )
         namespace["_run_auto_prepare"]()
         self.assertIn("ERROR:", helper.memory_preflight_status)
+
+    def test_prepare_click_is_async_with_owned_progress(self):
+        execute = self._method(
+            self.operators, "GPUCloth_PrepareSimulation", "execute")
+        scheduled = {
+            node.func.id
+            for node in ast.walk(execute)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+        }
+        native_calls = {
+            node.func.attr
+            for node in ast.walk(execute)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+        }
+        self.assertIn("_start_prepare_task", scheduled)
+        self.assertNotIn("GPUCloth_v3_cloth_build", native_calls)
+
+        calls = []
+        namespace = {
+            "_start_prepare_task": lambda context, automatic=False: (
+                calls.append((context, automatic)) or True),
+        }
+        exec(compile(ast.Module(body=[execute], type_ignores=[]),
+                     "<contract>", "exec"), namespace)
+        reports = []
+        operator = SimpleNamespace(
+            report=lambda level, message: reports.append((level, message)))
+        context = object()
+        self.assertEqual(
+            namespace["execute"](operator, context), {'FINISHED'})
+        self.assertEqual(calls, [(context, False)])
+
+        worker = self._function(self.operators, "_run_prepare_native")
+        self.assertNotIn(
+            "bpy",
+            {node.id for node in ast.walk(worker) if isinstance(node, ast.Name)},
+        )
+        worker_namespace = {}
+        exec(compile(ast.Module(body=[worker], type_ignores=[]),
+                     "<contract>", "exec"), worker_namespace)
+        outcomes = []
+        worker_namespace["_run_prepare_native"](
+            SimpleNamespace(put=outcomes.append), 7,
+            lambda left, right: left + right, (2, 3))
+        self.assertEqual(outcomes, [(7, True, 5)])
+        self.assertIn("prepare_progress: IntProperty", self.properties)
+        self.assertIn("prepare_status: StringProperty", self.properties)
+        self.assertIn('helper, "prepare_progress"', self.ui)
 
     def test_memory_preflight_allow_reject_contract(self):
         namespace = self._functions(
@@ -161,6 +231,7 @@ class AddonLifecycleContractTest(unittest.TestCase):
         namespace = {
             "bpy": bpy,
             "cancel_auto_prepare": lambda: calls.append("cancel_timer"),
+            "prepare_task_active": lambda: False,
             "free_gpu_memory": lambda context, shutdown_runtime=False: (
                 calls.append(("free", shutdown_runtime)) or True),
             "_stop_requested": False,
@@ -178,6 +249,7 @@ class AddonLifecycleContractTest(unittest.TestCase):
 
         handler = self._function(self.operators, "_frame_change_handler")
         namespace = {
+            "prepare_task_active": lambda: False,
             "_teardown_failure": False, "_stop_requested": True,
         }
         exec(compile(ast.Module(body=[handler], type_ignores=[]),
@@ -188,6 +260,7 @@ class AddonLifecycleContractTest(unittest.TestCase):
         update = self._method(
             self.operators, "GPUCloth_UpdateSimulation", "execute")
         namespace = {
+            "prepare_task_active": lambda: False,
             "_teardown_failure": False, "_stop_requested": True,
         }
         exec(compile(ast.Module(body=[update], type_ignores=[]),

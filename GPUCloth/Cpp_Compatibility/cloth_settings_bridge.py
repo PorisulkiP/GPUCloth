@@ -590,11 +590,21 @@ def select_backend(obj, backend, scene=None):
     result = None
     if backend == "GPU":
         modifiers = find_cpu_cloth_modifiers(obj)
-        if len(modifiers) != 1:
+        error = None
+        if not modifiers:
+            try:
+                obj.modifiers.new(name="Cloth", type="CLOTH")
+            except (AttributeError, RuntimeError, TypeError) as exc:
+                error = f"{obj.name!r} failed to create Cloth modifier: {exc}"
+            else:
+                modifiers = find_cpu_cloth_modifiers(obj)
+        if error is None and len(modifiers) != 1:
+            error = (
+                f"{obj.name!r} requires exactly one Cloth modifier; "
+                f"found {len(modifiers)}")
+        if error is not None:
             result = {
-                "errors": [
-                    f"{obj.name!r} requires exactly one Cloth modifier; "
-                    f"found {len(modifiers)}"],
+                "errors": [error],
                 "unsupported_non_default": [],
             }
             _store_report(obj, {
@@ -617,8 +627,12 @@ def select_backend(obj, backend, scene=None):
 
     from . import operators
     if obj in operators.g_clothOBJs:
+        preparing = operators.prepare_task_active(obj)
         operators.cancel_auto_prepare()
-        released = operators.free_gpu_memory(shutdown_runtime=True)
+        if preparing and operators.prepare_task_active(obj):
+            released = True
+        else:
+            released = operators.free_gpu_memory(shutdown_runtime=True)
         if scene is not None and hasattr(scene, "gpu_cloth_springs_built"):
             scene.gpu_cloth_springs_built = False
         if not released:

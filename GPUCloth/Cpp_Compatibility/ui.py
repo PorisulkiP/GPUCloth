@@ -60,8 +60,10 @@ class GPUCLOTH_PT_main(bpy.types.Panel):
         row.operator("gpucloth.sync_cpu_settings", text="", icon='FILE_REFRESH')
         if cpu_modifier is None:
             row.label(
-                text=_t("CPU Cloth not found", "CPU Cloth не найден"),
-                icon='ERROR')
+                text=_t(
+                    "Cloth will be created on GPU activation",
+                    "Cloth будет создан при включении GPU"),
+                icon='INFO')
         elif settings.cpu_sync_errors or settings.cpu_sync_blockers:
             if settings.cpu_sync_errors:
                 row.label(
@@ -96,22 +98,36 @@ class GPUCLOTH_PT_main(bpy.types.Panel):
         prepared = (
             scene.gpu_cloth_springs_built
             and obj in operators.g_clothOBJs)
+        preparing = operators.prepare_task_active(obj)
 
         layout.separator()
 
         status = layout.row(align=True)
         status.label(
             text=_t("Ready", "Готово") if prepared else
-                 _t("Not prepared", "Не подготовлено"),
-            icon='CHECKMARK' if prepared else 'INFO')
+                 (_t("Preparing", "Подготовка") if preparing else
+                  _t("Not prepared", "Не подготовлено")),
+            icon='CHECKMARK' if prepared else ('TIME' if preparing else 'INFO'))
         prepare = status.row(align=True)
-        prepare.enabled = operators.g_dll is not None and not prepared
+        prepare.enabled = not prepared and not preparing
         prepare.operator(
             "gpucloth.prepare_simulation",
             text=_t("Prepare", "Подготовить"), icon='PLAY')
         layout.prop(
             settings, "auto_prepare",
             text=_t("Auto Prepare", "Автоподготовка"))
+        helper = scene.gpu_cloth_helper
+        if preparing:
+            progress = layout.row()
+            progress.enabled = False
+            progress.prop(
+                helper, "prepare_progress",
+                text=helper.prepare_status or _t("Preparing", "Подготовка"),
+                slider=True)
+        elif helper.prepare_state in {'ERROR', 'CANCELLED'}:
+            layout.label(
+                text=helper.prepare_status,
+                icon='ERROR' if helper.prepare_state == 'ERROR' else 'CANCEL')
         if getattr(scene.gpu_cloth_helper, "memory_preflight_status", ""):
             layout.label(
                 text=scene.gpu_cloth_helper.memory_preflight_status,

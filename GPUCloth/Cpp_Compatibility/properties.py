@@ -37,24 +37,6 @@ def _on_is_active_change(self, context):
             return
     elif not self.is_active and self.execution_backend != 'CPU':
         self.execution_backend = 'CPU'
-    if self.is_active:
-        from . import operators as ops
-        if ops.g_dll is None:
-            try:
-                load_result = bpy.ops.gpucloth.load_dll()
-            except Exception as exc:
-                load_result = {'CANCELLED'}
-                load_error = f"GPUCloth DLL activation failed: {exc}"
-            else:
-                load_error = "GPUCloth DLL activation failed"
-            if 'FINISHED' not in load_result:
-                from . import cloth_settings_bridge
-                cloth_settings_bridge.record_runtime_error(
-                    self.id_data, load_error)
-                self.is_active = False
-                self.execution_backend = 'CPU'
-                cloth_settings_bridge.apply_modifier_ownership(
-                    self.id_data, 'CPU')
 
 
 _backend_switch_active = False
@@ -1225,6 +1207,30 @@ class GPUClothSceneSettings(PropertyGroup):
         description="Visible lower-bound GPU memory admission diagnostic",
         default="",
         options={'HIDDEN'},
+    )
+
+    prepare_state: StringProperty(
+        name="Prepare State",
+        description="Transient asynchronous preparation state",
+        default="IDLE",
+        options={'HIDDEN', 'SKIP_SAVE'},
+    )
+
+    prepare_status: StringProperty(
+        name="Prepare Status",
+        description="Current asynchronous preparation phase",
+        default="",
+        options={'HIDDEN', 'SKIP_SAVE'},
+    )
+
+    prepare_progress: IntProperty(
+        name="Prepare Progress",
+        description="Current asynchronous preparation percentage",
+        default=0,
+        min=0,
+        max=100,
+        subtype='PERCENTAGE',
+        options={'HIDDEN', 'SKIP_SAVE'},
     )
 
     bake_start: IntProperty(

@@ -19,9 +19,11 @@ import hashlib
 import json
 import math
 import os
+import queue
 import struct
 import sys
 import subprocess
+import threading
 import time
 from fractions import Fraction
 
@@ -95,7 +97,11 @@ _drape_status_by_uid = {}
 _teardown_failure = False
 _pending_auto_prepare = None
 _auto_prepare_timer_registered = False
+_prepare_task = None
+_prepare_timer_registered = False
+_prepare_task_serial = 0
 _stop_requested = False
+_PREPARE_POLL_INTERVAL = 0.05
 _MODIFIER_VISIBILITY = (
     "show_viewport", "show_render", "show_in_editmode", "show_on_cage")
 
@@ -121,7 +127,23 @@ def _runtime_owners_retained():
         _initial_positions)
 
 
+def prepare_task_active(obj=None):
+    task = _prepare_task
+    if task is None:
+        return False
+    return obj is None or task.get("object_name") == getattr(
+        obj, "name_full", getattr(obj, "name", None))
+
+
+def _prepare_native_worker_active():
+    task = _prepare_task
+    worker = task.get("worker") if task is not None else None
+    return worker is not None and worker.is_alive()
+
+
 def auto_prepare_pending(obj=None):
+    if prepare_task_active(obj):
+        return True
     request = _pending_auto_prepare
     if request is None:
         return False
@@ -133,19 +155,21 @@ def cancel_auto_prepare():
     """Cancel the single deferred prepare request and its timer owner."""
     global _pending_auto_prepare, _auto_prepare_timer_registered
     _pending_auto_prepare = None
-    if not _auto_prepare_timer_registered:
-        return
-    try:
-        if bpy.app.timers.is_registered(_run_auto_prepare):
-            bpy.app.timers.unregister(_run_auto_prepare)
-    except (AttributeError, RuntimeError):
-        pass
+    if _auto_prepare_timer_registered:
+        try:
+            if bpy.app.timers.is_registered(_run_auto_prepare):
+                bpy.app.timers.unregister(_run_auto_prepare)
+        except (AttributeError, RuntimeError):
+            pass
     _auto_prepare_timer_registered = False
+    cancel_prepare_task()
 
 
 def _run_auto_prepare():
     global _pending_auto_prepare, _auto_prepare_timer_registered
     request = _pending_auto_prepare
+    if request is not None and prepare_task_active():
+        return _PREPARE_POLL_INTERVAL
     _pending_auto_prepare = None
     _auto_prepare_timer_registered = False
     if request is None or _stop_requested:
@@ -182,7 +206,8 @@ def _run_auto_prepare():
             override["window"] = bpy.context.window
         with bpy.context.temp_override(
                 **override):
-            bpy.ops.gpucloth.prepare_simulation()
+            if not _start_prepare_task(bpy.context, automatic=True):
+                raise RuntimeError("another preparation task is active")
     except (AttributeError, RuntimeError) as exc:
         message = f"ERROR: deferred prepare failed: {exc}"
         if helper is not None:
@@ -213,6 +238,386 @@ def schedule_auto_prepare(obj, scene):
         _pending_auto_prepare = None
         return False
     _auto_prepare_timer_registered = True
+    return True
+
+
+def _tag_prepare_redraw():
+    try:
+        windows = tuple(bpy.context.window_manager.windows)
+    except (AttributeError, ReferenceError, RuntimeError):
+        return
+    for window in windows:
+        try:
+            areas = tuple(window.screen.areas)
+        except (AttributeError, ReferenceError, RuntimeError):
+            continue
+        for area in areas:
+            if getattr(area, "type", None) == 'PROPERTIES':
+                area.tag_redraw()
+
+
+def _set_prepare_status(scene, state, progress, message):
+    helper = getattr(scene, "gpu_cloth_helper", None)
+    if helper is not None:
+        helper.prepare_state = str(state)
+        helper.prepare_progress = max(0, min(100, int(progress)))
+        helper.prepare_status = str(message)
+    task = _prepare_task
+    if task is not None:
+        task["state"] = str(state)
+        task["progress"] = max(0, min(100, int(progress)))
+        if task.get("wm_progress"):
+            try:
+                bpy.context.window_manager.progress_update(task["progress"])
+            except (AttributeError, ReferenceError, RuntimeError):
+                task["wm_progress"] = False
+    _tag_prepare_redraw()
+
+
+def _prepare_progress(progress, message):
+    return {
+        "kind": "progress",
+        "progress": int(progress),
+        "message": str(message),
+    }
+
+
+def _prepare_native(function, args, progress, message):
+    return {
+        "kind": "native",
+        "function": function,
+        "args": tuple(args),
+        "progress": int(progress),
+        "message": str(message),
+    }
+
+
+def _run_prepare_native(result_queue, token, function, args):
+    """Run one pure native call; this worker never owns Blender data."""
+    try:
+        result = function(*args)
+    except BaseException as exc:
+        result_queue.put((token, False, exc))
+    else:
+        result_queue.put((token, True, result))
+
+
+class _PrepareRunner:
+    def __init__(self, scene_name):
+        self.scene_name = scene_name
+        self._native_prepare_mutated = False
+        self.last_report = ""
+
+    def report(self, levels, message):
+        self.last_report = str(message)
+        task = _prepare_task
+        if task is None or task.get("scene_name") != self.scene_name:
+            print(f"[GPUCloth] {message}")
+            return
+        scene = bpy.data.scenes.get(self.scene_name)
+        if scene is not None:
+            state = "ERROR" if 'ERROR' in levels else task["state"]
+            _set_prepare_status(scene, state, task["progress"], message)
+        print(f"[GPUCloth] {message}")
+
+
+def _prepare_context(task):
+    scene = bpy.data.scenes.get(task["scene_name"])
+    obj = bpy.data.objects.get(task["object_name"])
+    if scene is None or obj is None:
+        raise RuntimeError("preparation scene or object no longer exists")
+    view_layer = scene.view_layers.get(task["view_layer_name"])
+    if view_layer is None:
+        raise RuntimeError("preparation view layer no longer exists")
+    return scene, obj, view_layer
+
+
+def _resume_prepare_task(task):
+    scene, obj, view_layer = _prepare_context(task)
+    previous_active = view_layer.objects.active
+    previous_selected = tuple(
+        candidate for candidate in view_layer.objects
+        if candidate.select_get())
+    try:
+        view_layer.objects.active = obj
+        obj.select_set(True)
+        override = {
+            "scene": scene,
+            "view_layer": view_layer,
+            "object": obj,
+            "active_object": obj,
+        }
+        if bpy.context.window is not None:
+            override["window"] = bpy.context.window
+        with bpy.context.temp_override(**override):
+            if task["generator"] is None:
+                task["generator"] = (
+                    GPUCloth_PrepareSimulation._prepare_steps(
+                        task["runner"], bpy.context))
+            pending_exception = task.pop("pending_exception", None)
+            if pending_exception is not None:
+                return task["generator"].throw(pending_exception)
+            if task.pop("send_ready", False):
+                return task["generator"].send(task.pop("send_value", None))
+            return next(task["generator"])
+    finally:
+        try:
+            view_layer.objects.active = previous_active
+            for candidate in view_layer.objects:
+                candidate.select_set(candidate in previous_selected)
+        except (AttributeError, ReferenceError, RuntimeError):
+            pass
+
+
+def _restore_prepare_mode(task):
+    original_mode = task.get("original_mode")
+    if original_mode is None:
+        return
+    try:
+        scene, obj, view_layer = _prepare_context(task)
+        previous_active = view_layer.objects.active
+        previous_selected = tuple(
+            candidate for candidate in view_layer.objects
+            if candidate.select_get())
+        view_layer.objects.active = obj
+        obj.select_set(True)
+        override = {
+            "scene": scene,
+            "view_layer": view_layer,
+            "object": obj,
+            "active_object": obj,
+        }
+        if bpy.context.window is not None:
+            override["window"] = bpy.context.window
+        try:
+            with bpy.context.temp_override(**override):
+                if obj.mode != original_mode:
+                    bpy.ops.object.mode_set(mode=original_mode)
+        finally:
+            view_layer.objects.active = previous_active
+            for candidate in view_layer.objects:
+                candidate.select_set(candidate in previous_selected)
+    except (AttributeError, ReferenceError, RuntimeError):
+        pass
+
+
+def _finish_prepare_task(success=False, cancelled=False, error=None):
+    global _prepare_task, _prepare_timer_registered, _stop_requested
+    task = _prepare_task
+    if task is None:
+        return
+    worker = task.get("worker")
+    if worker is not None and worker.is_alive():
+        raise RuntimeError("cannot finish preparation while native worker runs")
+    generator = task.get("generator")
+    if generator is not None and not task.get("generator_finished"):
+        try:
+            generator.close()
+        except (RuntimeError, ValueError):
+            pass
+    _restore_prepare_mode(task)
+    scene = bpy.data.scenes.get(task["scene_name"])
+    runner = task["runner"]
+    native_mutated = bool(runner._native_prepare_mutated)
+    if not success:
+        if native_mutated:
+            try:
+                context_scene, context_obj, view_layer = _prepare_context(task)
+                override = {
+                    "scene": context_scene,
+                    "view_layer": view_layer,
+                    "object": context_obj,
+                    "active_object": context_obj,
+                }
+                if bpy.context.window is not None:
+                    override["window"] = bpy.context.window
+                with bpy.context.temp_override(**override):
+                    free_gpu_memory(bpy.context)
+            except (AttributeError, ReferenceError, RuntimeError):
+                free_gpu_memory()
+        else:
+            for modifier, visibility in task["modifier_state"]:
+                try:
+                    for attribute, value in zip(
+                            _MODIFIER_VISIBILITY, visibility):
+                        setattr(modifier, attribute, value)
+                except (AttributeError, ReferenceError, RuntimeError):
+                    pass
+        if scene is not None and hasattr(scene, "gpu_cloth_springs_built"):
+            scene.gpu_cloth_springs_built = (
+                False if native_mutated else task["original_springs_built"])
+
+    if task.get("wm_progress"):
+        try:
+            bpy.context.window_manager.progress_end()
+        except (AttributeError, ReferenceError, RuntimeError):
+            pass
+        task["wm_progress"] = False
+    if scene is not None:
+        if success:
+            message = "GPUCloth preparation complete"
+            state = "READY"
+            progress = 100
+        elif cancelled:
+            message = "GPUCloth preparation cancelled"
+            state = "CANCELLED"
+            progress = task["progress"]
+        else:
+            detail = str(error or runner.last_report or "unknown error")
+            message = detail if detail.startswith("ERROR:") else f"ERROR: {detail}"
+            state = "ERROR"
+            progress = task["progress"]
+        _set_prepare_status(scene, state, progress, message)
+    _prepare_task = None
+    _prepare_timer_registered = False
+    _stop_requested = not success
+    _tag_prepare_redraw()
+
+
+def _advance_prepare_task():
+    global _prepare_timer_registered
+    task = _prepare_task
+    if task is None:
+        _prepare_timer_registered = False
+        return None
+
+    worker = task.get("worker")
+    if worker is not None:
+        if worker.is_alive():
+            return _PREPARE_POLL_INTERVAL
+        try:
+            token, succeeded, payload = task["result_queue"].get_nowait()
+        except queue.Empty:
+            return _PREPARE_POLL_INTERVAL
+        task["worker"] = None
+        if token != task["token"]:
+            _finish_prepare_task(error="native worker token mismatch")
+            return None
+        if task["cancel_requested"]:
+            _finish_prepare_task(cancelled=True)
+            return None
+        if succeeded:
+            task["send_value"] = payload
+            task["send_ready"] = True
+        else:
+            task["pending_exception"] = payload
+
+    if task["cancel_requested"]:
+        _finish_prepare_task(cancelled=True)
+        return None
+
+    try:
+        event = _resume_prepare_task(task)
+    except StopIteration as completed:
+        task["generator_finished"] = True
+        result = completed.value
+        if result == {'FINISHED'} and not _teardown_failure:
+            _finish_prepare_task(success=True)
+        else:
+            _finish_prepare_task(
+                error=task["runner"].last_report or "preparation failed")
+        return None
+    except BaseException as exc:
+        _finish_prepare_task(error=f"Prepare transaction failed: {exc}")
+        return None
+
+    if not isinstance(event, dict):
+        _finish_prepare_task(error="invalid preparation task event")
+        return None
+    scene = bpy.data.scenes.get(task["scene_name"])
+    if scene is None:
+        _finish_prepare_task(error="preparation scene no longer exists")
+        return None
+    kind = event.get("kind")
+    _set_prepare_status(
+        scene, "BUILDING" if kind == "native" else "PREPARING",
+        event.get("progress", task["progress"]), event.get("message", ""))
+    if kind == "progress":
+        return 0.01
+    if kind != "native":
+        _finish_prepare_task(error=f"unsupported preparation event {kind!r}")
+        return None
+    result_queue = queue.Queue(maxsize=1)
+    worker = threading.Thread(
+        name=f"GPUClothPrepare-{task['token']}",
+        target=_run_prepare_native,
+        args=(result_queue, task["token"], event["function"], event["args"]),
+        daemon=False,
+    )
+    task["result_queue"] = result_queue
+    task["worker"] = worker
+    worker.start()
+    return _PREPARE_POLL_INTERVAL
+
+
+def _start_prepare_task(context, automatic=False):
+    global _prepare_task, _prepare_timer_registered, _prepare_task_serial
+    if _prepare_task is not None:
+        return False
+    scene = getattr(context, "scene", None)
+    obj = getattr(context, "object", None) or getattr(
+        context, "active_object", None)
+    view_layer = getattr(context, "view_layer", None)
+    if scene is None or obj is None or view_layer is None:
+        return False
+    _prepare_task_serial += 1
+    modifier_state = []
+    for candidate in tuple(getattr(scene, "objects", ())):
+        for modifier in tuple(getattr(candidate, "modifiers", ())):
+            if getattr(modifier, "type", None) == 'CLOTH':
+                modifier_state.append((
+                    modifier,
+                    tuple(bool(getattr(modifier, attribute, False))
+                          for attribute in _MODIFIER_VISIBILITY),
+                ))
+    runner = _PrepareRunner(scene.name_full)
+    _prepare_task = {
+        "token": _prepare_task_serial,
+        "scene_name": scene.name_full,
+        "object_name": obj.name_full,
+        "view_layer_name": view_layer.name,
+        "automatic": bool(automatic),
+        "runner": runner,
+        "generator": None,
+        "generator_finished": False,
+        "worker": None,
+        "cancel_requested": False,
+        "state": "QUEUED",
+        "progress": 0,
+        "original_mode": getattr(obj, "mode", None),
+        "original_springs_built": bool(getattr(
+            scene, "gpu_cloth_springs_built", False)),
+        "modifier_state": modifier_state,
+        "wm_progress": False,
+    }
+    try:
+        context.window_manager.progress_begin(0, 100)
+        _prepare_task["wm_progress"] = True
+    except (AttributeError, ReferenceError, RuntimeError):
+        pass
+    _set_prepare_status(scene, "QUEUED", 0, "GPUCloth preparation queued")
+    try:
+        bpy.app.timers.register(_advance_prepare_task, first_interval=0.0)
+    except (AttributeError, RuntimeError):
+        _finish_prepare_task(error="failed to register preparation timer")
+        return False
+    _prepare_timer_registered = True
+    return True
+
+
+def cancel_prepare_task():
+    task = _prepare_task
+    if task is None:
+        return False
+    task["cancel_requested"] = True
+    scene = bpy.data.scenes.get(task["scene_name"])
+    if scene is not None:
+        _set_prepare_status(
+            scene, "CANCELLING", task["progress"],
+            "Cancelling GPUCloth preparation")
+    worker = task.get("worker")
+    if worker is None or not worker.is_alive():
+        _finish_prepare_task(cancelled=True)
     return True
 
 
@@ -366,82 +771,12 @@ def _opaque_handle_value(handle):
     return int(value or 0)
 
 
-def _guard_prepare_teardown(execute):
-    def wrapped(operator, context):
-        active_object = getattr(context, "active_object", None)
-        original_mode = getattr(active_object, "mode", None)
-        original_springs_built = bool(getattr(
-            context.scene, "gpu_cloth_springs_built", False))
-        modifier_state = []
-        for obj in tuple(getattr(context.scene, "objects", ())):
-            for modifier in tuple(getattr(obj, "modifiers", ())):
-                if getattr(modifier, "type", None) == 'CLOTH':
-                    modifier_state.append((
-                        modifier,
-                        tuple(bool(getattr(modifier, attribute, False))
-                              for attribute in _MODIFIER_VISIBILITY),
-                    ))
-        if _teardown_failure:
-            if not free_gpu_memory(context):
-                operator.report(
-                    {'ERROR'},
-                    "Native teardown retry failed; retained owners block "
-                    "prepare")
-                return {'CANCELLED'}
-
-        failure = None
-        try:
-            result = execute(operator, context)
-        except Exception as exc:
-            failure = exc
-            result = {'CANCELLED'}
-            operator.report({'ERROR'}, f"Prepare transaction failed: {exc}")
-
-        if original_mode is not None:
-            active_object = getattr(context, "active_object", None)
-            try:
-                if (active_object is not None and
-                        active_object.mode != original_mode):
-                    bpy.ops.object.mode_set(mode=original_mode)
-            except (AttributeError, RuntimeError):
-                if failure is None:
-                    failure = RuntimeError(
-                        f"cannot restore Blender mode {original_mode}")
-                    operator.report({'ERROR'}, str(failure))
-
-        native_mutated = bool(getattr(
-            operator, "_native_prepare_mutated", False))
-        succeeded = (
-            result == {'FINISHED'} and failure is None and
-            not _teardown_failure)
-        if not succeeded:
-            if native_mutated:
-                free_gpu_memory(context)
-            if not native_mutated:
-                for modifier, visibility in modifier_state:
-                    try:
-                        for attribute, value in zip(
-                                _MODIFIER_VISIBILITY, visibility):
-                            setattr(modifier, attribute, value)
-                    except (AttributeError, ReferenceError, RuntimeError):
-                        pass
-            if hasattr(context.scene, "gpu_cloth_springs_built"):
-                context.scene.gpu_cloth_springs_built = (
-                    False if native_mutated else original_springs_built)
-
-        if _teardown_failure:
-            operator.report(
-                {'ERROR'},
-                "Native teardown failed; retained owners block prepare")
-            return {'CANCELLED'}
-        if failure is not None:
-            return {'CANCELLED'}
-        return result
-    return wrapped
-
-
 def ensure_native_teardown(shutdown_runtime=False):
     """Resolve retained native owners before package registration mutation."""
+    if prepare_task_active():
+        cancel_prepare_task()
+        if prepare_task_active():
+            return False
     if not (_teardown_failure or _runtime_owners_retained()):
         return True
     return free_gpu_memory(shutdown_runtime=shutdown_runtime)
@@ -4674,7 +5009,8 @@ def _cache_source_generation(scene):
             "bake_start", "bake_end", "bake_progress",
             "is_baked", "is_baking", "is_outdated", "is_frame_skip",
             "cache_info", "cached_frame_count", "playback_mode",
-            "memory_preflight_status",
+            "memory_preflight_status", "prepare_state", "prepare_status",
+            "prepare_progress",
         })
     _cache_hash_value(hasher, "render.fps", scene.render.fps)
     _cache_hash_value(hasher, "render.fps_base", scene.render.fps_base)
@@ -5100,7 +5436,8 @@ def _cache_write_frame(scene, frame, values, vertex_count):
 
 
 def _cache_input_change_handler(scene, depsgraph):
-    if (_cache_playback_guard['active'] or g_dll is None or
+    if (prepare_task_active() or _cache_playback_guard['active'] or
+            g_dll is None or
             not g_clothOBJs or _cache_source_state['generation'] == 0):
         return
     helper = scene.gpu_cloth_helper
@@ -5127,7 +5464,7 @@ def _cache_input_change_handler(scene, depsgraph):
 
 
 def _frame_change_handler(scene, depsgraph):
-    if _teardown_failure or _stop_requested:
+    if prepare_task_active() or _teardown_failure or _stop_requested:
         return
     if _cache_playback_guard['active']:
         return
@@ -5184,6 +5521,10 @@ def free_gpu_memory(context=None, shutdown_runtime=False):
     global g_cache_owner
     global g_clothOBJs, g_simulationOBJs, g_clothCollisionOBJs, g_proxy_handles
     global _teardown_failure, _collider_history
+
+    if _prepare_native_worker_active():
+        print("free_gpu_memory: native preparation worker is active")
+        return False
 
     if g_dll is None and _runtime_owners_retained():
         print(
@@ -5245,8 +5586,12 @@ class GPUCloth_FreeVRAM(bpy.types.Operator):
 
     def execute(self, context):
         global _stop_requested
+        was_preparing = prepare_task_active()
         cancel_auto_prepare()
         _stop_requested = True
+        if was_preparing and prepare_task_active():
+            self.report({'INFO'}, "GPUCloth preparation cancellation requested")
+            return {'FINISHED'}
         try:
             bpy.ops.screen.animation_cancel()
         except (AttributeError, RuntimeError):
@@ -5261,6 +5606,75 @@ class GPUCloth_FreeVRAM(bpy.types.Operator):
 # ===========================================================================
 #  Оператор: загрузка DLL
 # ===========================================================================
+
+def _load_gpucloth_dll_native(filename):
+    """Load and validate the DLL without touching Blender's Python API."""
+    try:
+        result = subprocess.run(
+            ["nvidia-smi"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=True,
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError) as exc:
+        raise RuntimeError("nvidia-smi CUDA check failed") from exc
+    if ("CUDA Version" not in result.stdout and
+            "CUDA UMD Version" not in result.stdout):
+        raise RuntimeError("NVIDIA driver does not report CUDA support")
+
+    dll_dir = os.path.dirname(filename)
+    if dll_dir not in os.environ.get("PATH", ""):
+        os.environ["PATH"] = (
+            dll_dir + os.pathsep + os.environ.get("PATH", ""))
+    directory_handles = []
+    try:
+        if hasattr(os, "add_dll_directory"):
+            candidates = [dll_dir]
+            cuda_path = os.environ.get("CUDA_PATH")
+            if cuda_path:
+                candidates.extend((
+                    os.path.join(cuda_path, "bin", "x64"),
+                    os.path.join(cuda_path, "bin"),
+                ))
+            for path_entry in os.environ.get("PATH", "").split(os.pathsep):
+                if (path_entry and
+                        (os.path.isfile(os.path.join(
+                            path_entry, "cublas64_13.dll")) or
+                         os.path.isfile(os.path.join(
+                            path_entry, "cusparse64_12.dll")))):
+                    candidates.append(path_entry)
+            for directory in dict.fromkeys(
+                    os.path.abspath(path) for path in candidates):
+                if os.path.isdir(directory):
+                    directory_handles.append(os.add_dll_directory(directory))
+        dll = cdll.LoadLibrary(filename)
+        _bind_gpucloth_v3_exports(dll)
+        _validate_product_abi(dll)
+        _validate_descriptor_layout(dll)
+    except BaseException:
+        for handle in reversed(directory_handles):
+            try:
+                handle.close()
+            except OSError:
+                pass
+        raise
+    return dll, tuple(directory_handles)
+
+
+def _build_v3_cloth_native(
+        dll, cloth_handle, prepared_constraint_network, prepared_shrink_bounds,
+        object_id, topology_generation, geometry_generation):
+    """Build one native cloth and validate its accepted typed inputs."""
+    result = int(dll.GPUCloth_v3_cloth_build(cloth_handle))
+    if result != CType.GPUCLOTH_ABI_OK:
+        raise RuntimeError(f"v3 cloth build rejected with {result}")
+    _validate_constraint_network_status(
+        dll, cloth_handle, prepared_constraint_network)
+    _validate_shrink_status(
+        dll, cloth_handle, prepared_shrink_bounds,
+        object_id, topology_generation, geometry_generation)
+    return result
 
 class GPUCloth_LoadDLL(bpy.types.Operator):
     """Загрузить нативную библиотеку GPUCloth (DLL / .so)"""
@@ -5364,7 +5778,7 @@ class GPUCloth_UnloadDLL(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        return g_dll is not None
+        return g_dll is not None and not prepare_task_active()
 
     def execute(self, context):
         global g_dll, _dll_directory_handles
@@ -5403,13 +5817,20 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        return True
+        return not prepare_task_active()
 
     # ── Вспомогательные методы ───────────────────────────────────────────────
 
-    @_guard_prepare_teardown
     def execute(self, context):
+        if not _start_prepare_task(context, automatic=False):
+            self.report({'WARNING'}, "GPUCloth preparation is already active")
+            return {'CANCELLED'}
+        self.report({'INFO'}, "GPUCloth preparation started")
+        return {'FINISHED'}
+
+    def _prepare_steps(self, context):
         global g_dll, g_cloth_handles
+        global _dll_directory_handles
         global _cloth_input_owners, _readback_owners
         global g_clothOBJs, g_simulationOBJs
         global g_clothCollisionOBJs, g_proxy_handles
@@ -5417,12 +5838,33 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
 
         self._native_prepare_mutated = False
 
+        if _teardown_failure:
+            if not free_gpu_memory(context):
+                self.report(
+                    {'ERROR'},
+                    "Native teardown retry failed; retained owners block "
+                    "prepare")
+                return {'CANCELLED'}
+
+        yield _prepare_progress(2, "Loading GPUCloth runtime")
+
         # 1. Загружаем DLL если нужно
         if g_dll is None:
-            bpy.ops.gpucloth.load_dll()
-            if g_dll is None:
-                self.report({'ERROR'}, "Не удалось загрузить DLL")
+            filename = vcu.get_dll_path("GPUCloth.dll")
+            if filename is None:
+                self.report({'ERROR'}, "GPUCloth.dll was not found")
                 return {'CANCELLED'}
+            try:
+                loaded_dll, directory_handles = yield _prepare_native(
+                    _load_gpucloth_dll_native, (filename,), 5,
+                    "Loading and validating GPUCloth.dll")
+            except (AttributeError, OSError, RuntimeError) as exc:
+                self.report({'ERROR'}, f"GPUCloth DLL load failed: {exc}")
+                return {'CANCELLED'}
+            g_dll = loaded_dll
+            _dll_directory_handles.extend(directory_handles)
+
+        yield _prepare_progress(10, "Saving Blender inputs")
 
         # 2. Сохраняем файл (DLL нужен путь к blend для ряда операций)
         if not bpy.data.is_saved:
@@ -5438,6 +5880,7 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
         bpy.ops.object.mode_set(mode='OBJECT')
 
         # 4. Preflight every Blender-owned input before native mutation.
+        yield _prepare_progress(15, "Reading Blender cloth inputs")
         view_layer_objects = tuple(
             getattr(context.view_layer, "objects", context.scene.objects))
         active_cloth = [
@@ -5499,6 +5942,8 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
             f"PASS: lower bound {memory['lower_bound_bytes']} bytes; "
             f"free {memory['free_bytes']} bytes")
         _stop_requested = False
+
+        yield _prepare_progress(25, "Capturing evaluated cloth geometry")
 
         # One generation owns the complete initial publication.  Keep the
         # runtime generation monotonic across destroy/recreate so a new
@@ -5601,6 +6046,8 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
             except (AttributeError, ReferenceError, RuntimeError):
                 pass
 
+        yield _prepare_progress(40, "Creating GPUCloth runtime owners")
+
         # 5. Native mutation starts only after complete preflight.
         self._native_prepare_mutated = True
         if (_runtime_owners_retained() or
@@ -5639,6 +6086,8 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
             free_gpu_memory(context)
             bpy.ops.object.mode_set(mode=mode)
             return {'CANCELLED'}
+
+        yield _prepare_progress(48, "Creating native cloth objects")
 
         if external_playback:
             # External playback owns only the v3 runtime/cache and Blender
@@ -5679,6 +6128,8 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
             free_gpu_memory(context)
             bpy.ops.object.mode_set(mode=mode)
             return {'CANCELLED'}
+
+        yield _prepare_progress(55, "Configuring native cloth solvers")
 
         # 7. Live simulation owns the native scene and solver state.
         for i in range(len(g_clothOBJs)):
@@ -5735,18 +6186,24 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
                 free_gpu_memory(context)
                 bpy.ops.object.mode_set(mode=mode)
                 return {'CANCELLED'}
+            cloth_progress = 60 + int(
+                (20 * i) / max(1, len(g_clothOBJs)))
             try:
-                result = int(g_dll.GPUCloth_v3_cloth_build(cloth_handle))
+                result = yield _prepare_native(
+                    _build_v3_cloth_native,
+                    (
+                        g_dll, cloth_handle,
+                        prepared_constraint_networks[i],
+                        prepared_shrink_bounds[i],
+                        _cloth_input_owners[i]["object_id"],
+                        _cloth_input_owners[i]["topology_generation"],
+                        _cloth_input_owners[i]["geometry_generation"],
+                    ),
+                    cloth_progress,
+                    f"Building cloth {i + 1}/{len(g_clothOBJs)} on GPU",
+                )
                 if result != CType.GPUCLOTH_ABI_OK:
-                    raise RuntimeError(
-                        f"v3 cloth build rejected with {result}")
-                _validate_constraint_network_status(
-                    g_dll, cloth_handle, prepared_constraint_networks[i])
-                _validate_shrink_status(
-                    g_dll, cloth_handle, prepared_shrink_bounds[i],
-                    _cloth_input_owners[i]["object_id"],
-                    _cloth_input_owners[i]["topology_generation"],
-                    _cloth_input_owners[i]["geometry_generation"])
+                    raise RuntimeError(f"v3 cloth build returned {result}")
             except (OSError, RuntimeError) as exc:
                 self.report({'ERROR'}, f"v3 cloth build failed: {exc}")
                 free_gpu_memory(context)
@@ -5769,6 +6226,11 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
                 bpy.ops.object.mode_set(mode=mode)
                 return {'CANCELLED'}
 
+            yield _prepare_progress(
+                60 + int((20 * (i + 1)) / max(1, len(g_clothOBJs))),
+                f"Cloth {i + 1}/{len(g_clothOBJs)} built")
+
+        yield _prepare_progress(84, "Publishing initial GPU state")
         try:
             for cloth_handle, owners in zip(
                     g_cloth_handles, prepared_collections):
@@ -5814,6 +6276,8 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
             free_gpu_memory(context)
             bpy.ops.object.mode_set(mode=mode)
             return {'CANCELLED'}
+
+        yield _prepare_progress(94, "Finalizing Blender ownership")
 
         # 8. Create one typed v3 proxy owner per render/simulation binding.
         g_proxy_handles.clear()
@@ -5890,7 +6354,7 @@ class GPUCloth_UpdateSimulation(bpy.types.Operator):
         global g_dll
         global g_clothOBJs, g_simulationOBJs
 
-        if _teardown_failure or _stop_requested:
+        if prepare_task_active() or _teardown_failure or _stop_requested:
             self.report(
                 {'ERROR'},
                 "Simulation is stopped; prepare is required before update")
@@ -7264,7 +7728,7 @@ def register():
     # OGC contact-bounds visualiser — register once, draw callback checks flag
 def unregister():
     global g_dll
-    global _stop_requested
+    global _stop_requested, _prepare_timer_registered
     cancel_auto_prepare()
     _stop_requested = True
     if not ensure_native_teardown(shutdown_runtime=True):
@@ -7272,6 +7736,12 @@ def unregister():
             "GPUCloth unregister retained handlers, classes, DLL, and "
             "owners because native teardown failed")
         return False
+    try:
+        if bpy.app.timers.is_registered(_advance_prepare_task):
+            bpy.app.timers.unregister(_advance_prepare_task)
+    except (AttributeError, RuntimeError):
+        pass
+    _prepare_timer_registered = False
 
     global _ogc_draw_handle
     if _ogc_draw_handle is not None:

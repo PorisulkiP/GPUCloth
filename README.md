@@ -16,10 +16,11 @@ at runtime; implementation sources are not part of this repository.
 ## Install
 
 1. Install the NVIDIA driver and compatible CUDA 13.3 runtime libraries.
-2. Download `gpucloth-<version>-windows-x64.zip` from the release.
-3. In Blender 4.2, open **Edit > Preferences > Get Extensions**.
-4. Open the menu, choose **Install from Disk**, and select the ZIP.
-5. Enable **GPUCloth** if Blender does not enable it automatically.
+2. Remove any legacy add-on installed as `scripts/addons/python`.
+3. Download `gpucloth-<version>-windows-x64.zip` from the release.
+4. In Blender 4.2, open **Edit > Preferences > Get Extensions**.
+5. Open the menu, choose **Install from Disk**, and select the ZIP.
+6. Enable **GPUCloth** if Blender does not enable it automatically.
 
 Do not extract or rearrange the ZIP. It contains the Python add-on,
 `GPUCloth.dll`, DirectStorage dependencies, and the required OptiX PTX files.
@@ -28,6 +29,11 @@ The CUDA runtime must provide `cublas64_13.dll`, `cusparse64_12.dll`, and
 
 The loader fails closed when the DLL is absent, an export is missing, or ABI
 layout/version checks do not match.
+
+GPU activation queues preparation without blocking the property callback.
+Blender shows phase and percentage progress in the GPU Cloth panel and status
+bar. **Stop** requests cancellation; native teardown waits for the active DLL
+call to finish.
 
 ## Validate the public boundary
 
@@ -52,7 +58,7 @@ isolated Blender profile:
 
 ```powershell
 py -3 tools/test_blender_release.py `
-  --package dist/gpucloth-0.1.0-windows-x64.zip `
+  --package dist/gpucloth-0.1.2-windows-x64.zip `
   --blender "C:\Program Files\Blender Foundation\Blender 4.2\blender.exe"
 ```
 
