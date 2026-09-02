@@ -15,6 +15,7 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import bpy
+import ctypes
 import hashlib
 import json
 import math
@@ -27,7 +28,7 @@ from fractions import Fraction
 
 import numpy as np
 from ctypes import (
-    addressof, cdll, windll, POINTER, pointer, cast,
+    addressof, cdll, POINTER, pointer, cast,
     c_bool, c_float, c_int, c_uint, c_uint64, c_void_p, c_size_t,
     c_char_p,
     create_string_buffer, sizeof,
@@ -52,7 +53,10 @@ if sys.gettrace() is not None:
 #  Глобальное состояние симуляции
 # ===========================================================================
 
-g_dll                = None   # Загруженная DLL / .so
+# One native-library handle.  POSIX keeps this CDLL process-resident after
+# teardown/unregister because explicit dlclose is unsafe for native backends;
+# subsequent loads reuse the same handle and never accumulate dlopen calls.
+g_dll                = None   # Загруженная DLL / .so / .dylib
 g_runtime_handle     = CType.GPUClothV3RuntimeHandle(0)
 g_cache_handle       = CType.GPUClothV3CacheHandle(0)
 g_cache_owner        = None   # copied v3 cache identity/config; no hot-path query
@@ -5058,9 +5062,10 @@ class GPUCloth_LoadDLL(bpy.types.Operator):
     bl_idname = "gpucloth.load_dll"
     bl_label  = "Load GPUCloth DLL"
 
-    # ── Проверка CUDA ────────────────────────────────────────────────────────
+    # ── Platform preflight ───────────────────────────────────────────────────
 
-    def check_cuda_support(self):
+    def _check_windows_cuda_legacy(self):
+        """Check legacy Windows/CUDA prerequisite, not Vulkan readiness."""
         try:
             result = subprocess.run(
                 ["nvidia-smi"],
@@ -5077,6 +5082,15 @@ class GPUCloth_LoadDLL(bpy.types.Operator):
                 "nvidia-smi не найден. Убедитесь что установлены драйверы NVIDIA.")
         return False
 
+    def _platform_gate(self):
+        """Run platform-only preflight; load/ABI/runtime validate readiness."""
+        # CUDA/nvidia-smi applies only to legacy Windows backend.  POSIX Vulkan
+        # readiness is established by native load, ABI validation, then runtime.
+        # This gate is not a Vulkan device probe; _runtime_create is authoritative.
+        if sys.platform == "win32":
+            return self._check_windows_cuda_legacy()
+        return True
+
     # ── Загрузка библиотеки и привязка функций ───────────────────────────────
 
     def load_dll(self):
@@ -5084,39 +5098,50 @@ class GPUCloth_LoadDLL(bpy.types.Operator):
         if g_dll is not None:
             return True  # уже загружена
 
-        if not self.check_cuda_support():
+        if not self._platform_gate():
             return False
 
-        # Ищем DLL через vcu (относительно директории аддона, без хардкода)
+        # Ищем native library through vcu (relative to installed addon).
         filename = vcu.get_dll_path("GPUCloth.dll")
         if filename is None:
             lib_dir   = vcu.get_lib_directory()
-            addon_dir = vcu.get_addon_directory()
+            expected_name = (
+                "GPUCloth.dll" if sys.platform == "win32" else
+                "GPUCloth.dylib" if sys.platform == "darwin" else
+                "GPUCloth.so")
             self.report({'ERROR'},
-                f"GPUCloth.dll не найдена. "
-                f"Ожидаемый путь: {os.path.join(lib_dir, 'GPUCloth.dll')}. "
-                f"Скопируйте GPUCloth.dll в {lib_dir}")
+                f"{expected_name} не найдена. "
+                f"Ожидаемый путь: {os.path.join(lib_dir, expected_name)}. "
+                f"Скопируйте {expected_name} в {lib_dir}")
             return False
 
         dll_dir = os.path.dirname(filename)
-        if dll_dir not in os.environ.get("PATH", ""):
-            os.environ["PATH"] = dll_dir + os.pathsep + os.environ.get("PATH", "")
-        if hasattr(os, 'add_dll_directory'):
-            candidates = [dll_dir]
-            cuda_path = os.environ.get("CUDA_PATH")
-            if cuda_path:
-                candidates.extend((
-                    os.path.join(cuda_path, "bin", "x64"),
-                    os.path.join(cuda_path, "bin"),
-                ))
-            for path_entry in os.environ.get("PATH", "").split(os.pathsep):
-                if (path_entry and
-                        (os.path.isfile(os.path.join(path_entry, "cublas64_12.dll")) or
-                         os.path.isfile(os.path.join(path_entry, "cusparse64_12.dll")))):
-                    candidates.append(path_entry)
-            for directory in dict.fromkeys(os.path.abspath(path) for path in candidates):
-                if os.path.isdir(directory):
-                    _dll_directory_handles.append(os.add_dll_directory(directory))
+        # Windows DLL dependency search is explicit.  On POSIX, let dyld/ld.so
+        # resolve packaged dependencies; do not mutate process search paths.
+        if sys.platform == "win32":
+            if dll_dir not in os.environ.get("PATH", ""):
+                os.environ["PATH"] = (
+                    dll_dir + os.pathsep + os.environ.get("PATH", ""))
+            if hasattr(os, 'add_dll_directory'):
+                candidates = [dll_dir]
+                cuda_path = os.environ.get("CUDA_PATH")
+                if cuda_path:
+                    candidates.extend((
+                        os.path.join(cuda_path, "bin", "x64"),
+                        os.path.join(cuda_path, "bin"),
+                    ))
+                for path_entry in os.environ.get("PATH", "").split(os.pathsep):
+                    if (path_entry and
+                            (os.path.isfile(os.path.join(
+                                path_entry, "cublas64_12.dll")) or
+                             os.path.isfile(os.path.join(
+                                 path_entry, "cusparse64_12.dll")))):
+                        candidates.append(path_entry)
+                for directory in dict.fromkeys(
+                        os.path.abspath(path) for path in candidates):
+                    if os.path.isdir(directory):
+                        _dll_directory_handles.append(
+                            os.add_dll_directory(directory))
 
         try:
             g_dll = cdll.LoadLibrary(filename)
@@ -5149,7 +5174,7 @@ class GPUCloth_LoadDLL(bpy.types.Operator):
 # ===========================================================================
 
 class GPUCloth_UnloadDLL(bpy.types.Operator):
-    """Выгрузить нативную библиотеку GPUCloth из Blender"""
+    """Teardown native owners; unload only Windows DLL safely."""
     bl_idname = "gpucloth.unload_dll"
     bl_label  = "Unload GPUCloth DLL"
 
@@ -5168,11 +5193,18 @@ class GPUCloth_UnloadDLL(bpy.types.Operator):
                 "DLL retained because native solver teardown failed")
             return {'CANCELLED'}
         try:
-            # Windows: FreeLibrary через kernel32
+            if sys.platform != "win32":
+                # Explicit dlclose can crash when ctypes/native static state
+                # outlives Python. Keep one POSIX handle process-resident;
+                # load_dll reuses it on later registration/load operations.
+                self.report(
+                    {'INFO'},
+                    "Нативная библиотека оставлена загруженной после teardown.")
+                return {'FINISHED'}
+
             handle = c_void_p(g_dll._handle)
-            result = windll.kernel32.FreeLibrary(handle)
+            result = ctypes.WinDLL("kernel32").FreeLibrary(handle)
             if result == 0:
-                import ctypes
                 raise ctypes.WinError()
             self.report({'INFO'}, "DLL успешно выгружена.")
         except Exception as e:
@@ -7056,7 +7088,9 @@ def unregister():
     for cls in reversed(_OPERATOR_CLASSES):
         bpy.utils.unregister_class(cls)
 
-    # Очищаем состояние
-    g_dll                = None
+    # Windows ctypes handle can be released with module teardown.  POSIX
+    # intentionally retains the single process-resident CDLL reference.
+    if sys.platform == "win32":
+        g_dll = None
     _close_dll_directories()
     return True
