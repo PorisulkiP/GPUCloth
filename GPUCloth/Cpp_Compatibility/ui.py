@@ -142,6 +142,48 @@ class GPUCLOTH_PT_main(bpy.types.Panel):
             "gpucloth.destroy_simulation_data",
             text=_t("Stop", "Остановить"), icon='CANCEL')
 
+        # MD-style grab: armed here, active only while the simulation plays.
+        tool = operators.vertex_drag_tool_state(context)
+        box = layout.box()
+        box.label(
+            text=_t("Move Cloth By Vertex (MD-style)",
+                    "Перемещение ткани за вершину (MD)"),
+            icon='HAND')
+        button = box.row(align=True)
+        button.operator(
+            "gpucloth.move_cloth_by_vertex",
+            text=_t("Move Cloth By Vertex (MD-style)",
+                    "Перемещение ткани за вершину (MD)"),
+            icon='CANCEL' if tool["armed"] else 'TRIA_RIGHT',
+            depress=tool["armed"])
+        if not tool["armed"]:
+            box.label(
+                text=(
+                    _t("Inactive - arm it, then play and drag a vertex",
+                       "Выключено - включите, запустите анимацию и тяните")
+                    if tool["available"] else
+                    _t("Inactive - prepare the simulation first",
+                       "Выключено - сначала выполните Prepare")),
+                icon='INFO')
+        elif tool["dragging"]:
+            box.label(
+                text=_t(
+                    f"Dragging vertex {tool['vertex_index']} of "
+                    f"{tool['object_name']}",
+                    f"Тянем вершину {tool['vertex_index']} объекта "
+                    f"{tool['object_name']}"),
+                icon='PLAY')
+        elif tool["playing"]:
+            box.label(
+                text=_t("Active - click a cloth vertex and drag it",
+                        "Активно - потяните вершину ткани"),
+                icon='PLAY')
+        else:
+            box.label(
+                text=_t("Active - waiting for playback",
+                        "Активно - ожидание воспроизведения"),
+                icon='PAUSE')
+
 
 # ===========================================================================
 #  Sub-panel: Solver

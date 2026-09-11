@@ -28,12 +28,15 @@ import time
 from fractions import Fraction
 
 import numpy as np
+from bpy_extras.view3d_utils import (
+    location_3d_to_region_2d, region_2d_to_location_3d)
 from ctypes import (
     addressof, cdll, windll, POINTER, pointer, cast,
     c_bool, c_float, c_int, c_uint, c_uint64, c_void_p, c_size_t,
     c_char_p,
     create_string_buffer, sizeof,
 )
+from mathutils import Vector
 
 from . import cpp_types as CType
 from .proxy_binding import ProxyBindingError, validate_proxy_binding
@@ -43,6 +46,7 @@ from .vertex_channels import (
     prepare_pin_snapshot,
     publish_pin_snapshot,
     vertex_group_weights,
+    with_dragged_vertex_pin,
 )
 from ..utils import version_compatibility_utils as vcu
 
@@ -4954,10 +4958,12 @@ def _publish_frame_inputs(context, depsgraph):
         prepared_dynamic_meshes = []
         for index, (cloth_obj, simulation_obj) in enumerate(zip(
                 g_clothOBJs, g_simulationOBJs)):
-            prepared_pins.append(_capture_pin_snapshot(
-                cloth_obj, simulation_obj, capture_depsgraph,
-                _pin_snapshot_states[index]["topology_generation"],
-                generation))
+            prepared_pins.append(_vertex_drag_pin_snapshot(
+                index,
+                _capture_pin_snapshot(
+                    cloth_obj, simulation_obj, capture_depsgraph,
+                    _pin_snapshot_states[index]["topology_generation"],
+                    generation)))
             dynamic_state = _dynamic_mesh_states[index]
             enabled = bool(cloth_obj.GPUCloth.use_dynamic_mesh)
             if enabled != bool(dynamic_state["enabled"]):
@@ -8084,6 +8090,601 @@ class GPUCloth_TestOGCBounds(bpy.types.Operator):
 
 
 # ===========================================================================
+#  Interaction: move the cloth by dragging one vertex (MD-style grab)
+# ===========================================================================
+#
+#  Reference behaviour (C++ TestScene application):
+#    * TestScene_UI.cpp:3435-3470 — a scene click not consumed by the UI grabs
+#      the nearest cloth vertex; releasing the button clears the grab.
+#    * TestScene_UI.cpp:2716-2731 — the cursor delta is converted with
+#      worldPerPx = depth * tanHalfFov * 2 / H and applied along the camera
+#      right / screen-up axes, so the target stays in the camera plane at the
+#      grabbed vertex's depth and the vertex follows the cursor.
+#    * TestScene.cpp:3491-3504 — while a grab is live the drag target is
+#      written into that vertex's positional constraint
+#      (cv.xconst = m_dragTarget, CLOTH_VERT_FLAG_PINNED) once per frame, and
+#      restored after the solver step, so the cloth is driven by the solver
+#      rather than by directly written coordinates.
+#
+#  The add-on cannot write xconst directly: GPUCLOTH_VERTEX_PIN_WEIGHT and
+#  GPUCLOTH_VERTEX_PIN_TARGET_XYZ are rejected as NOT_CONFIGURABLE, and the
+#  animated pin snapshot owns all per-vertex pin state.  The grab therefore
+#  folds its target into the pin snapshot that _publish_frame_inputs already
+#  commits once per simulated frame, which the native commit turns into
+#  exactly PINNED + xconst for that one vertex.  The tool is inert outside
+#  playback: the gate below is the only place that lets the modal touch the
+#  mouse, and every other event is passed through to Blender unchanged.
+
+_VERTEX_DRAG_POLL_INTERVAL = 0.02
+_VERTEX_DRAG_PICK_RADIUS_PX = 14.0
+_VERTEX_DRAG_MARKER_FRACTION = 0.02
+
+_vertex_drag_state = {
+    'armed': False,        # the tool was switched on from the panel
+    'modal_live': False,   # a modal handler owns the timer right now
+    'dragging': False,     # one vertex is currently held
+    'object_index': -1,    # index into g_clothOBJs / g_simulationOBJs
+    'object_uid': 0,       # Blender session UID of the grabbed cloth object
+    'vertex_index': -1,
+    'target_world': None,  # mathutils.Vector; the live constraint target
+    'last_mouse': (0.0, 0.0),
+    'timer': None,
+    'status': "",
+}
+_vertex_drag_draw_handle = None
+
+
+def _animation_is_playing(context):
+    """True only while Blender plays back the animation (live sim drive)."""
+    screen = getattr(context, "screen", None)
+    if screen is None:
+        return False
+    try:
+        return bool(screen.is_animation_playing)
+    except (AttributeError, ReferenceError, RuntimeError, TypeError):
+        return False
+
+
+def _vertex_drag_simulation_ready(scene):
+    """True when a live (non-baked) simulation can consume a drag target."""
+    if g_dll is None or not g_clothOBJs or not g_simulationOBJs:
+        return False
+    if scene is None or not bool(
+            getattr(scene, "gpu_cloth_springs_built", False)):
+        return False
+    helper = getattr(scene, "gpu_cloth_helper", None)
+    if helper is not None and bool(getattr(helper, "is_baked", False)):
+        return False
+    if prepare_task_active() or _teardown_failure or _stop_requested:
+        return False
+    return True
+
+
+def _vertex_drag_gate(context):
+    """The only condition under which the tool may consume the mouse.
+
+    Outside playback (and outside a live simulation) this returns False and
+    the modal handler passes every event through, so clicks keep selecting
+    objects and mesh elements exactly as Blender normally does.
+    """
+    if not _vertex_drag_state['armed']:
+        return False
+    if not _animation_is_playing(context):
+        return False
+    return _vertex_drag_simulation_ready(getattr(context, "scene", None))
+
+
+def _vertex_drag_region(context):
+    """Return (region, rv3d) when the event belongs to a 3D viewport."""
+    region = getattr(context, "region", None)
+    space = getattr(context, "space_data", None)
+    region_data = getattr(context, "region_data", None)
+    if region is None or space is None or region_data is None:
+        return None, None
+    if getattr(region, "type", None) != 'WINDOW':
+        return None, None
+    if getattr(space, "type", None) != 'VIEW_3D':
+        return None, None
+    return region, region_data
+
+
+def _vertex_drag_release(reason):
+    """Drop the grabbed vertex so the cloth stops being constrained."""
+    state = _vertex_drag_state
+    if not state['dragging']:
+        return False
+    state['dragging'] = False
+    state['object_index'] = -1
+    state['object_uid'] = 0
+    state['vertex_index'] = -1
+    state['target_world'] = None
+    state['last_mouse'] = (0.0, 0.0)
+    state['status'] = reason
+    return True
+
+
+def _vertex_drag_grab_is_live():
+    """The held vertex still exists in the mesh the solver owns."""
+    state = _vertex_drag_state
+    index = state['object_index']
+    if index < 0 or index >= len(g_simulationOBJs):
+        return False
+    obj = g_simulationOBJs[index]
+    if obj is None:
+        return False
+    try:
+        vertex_count = len(obj.data.vertices)
+        object_uid = int(obj.session_uid)
+    except (AttributeError, ReferenceError, RuntimeError, TypeError):
+        return False
+    if object_uid != state['object_uid']:
+        return False
+    return 0 <= state['vertex_index'] < vertex_count
+
+
+def _simulation_vertex_world_positions(obj, depsgraph):
+    """Homogeneous world-space positions of one simulation mesh, as (n, 4)."""
+    try:
+        vertices = obj.evaluated_get(depsgraph).data.vertices
+    except (AttributeError, ReferenceError, RuntimeError, TypeError):
+        try:
+            vertices = obj.data.vertices
+        except (AttributeError, ReferenceError, RuntimeError, TypeError):
+            return None
+    vertex_count = len(vertices)
+    if vertex_count == 0:
+        return None
+    local = np.empty(vertex_count * 3, dtype=np.float64)
+    vertices.foreach_get("co", local)
+    try:
+        matrix = np.array(obj.matrix_world, dtype=np.float64)
+    except (ReferenceError, RuntimeError, TypeError, ValueError):
+        return None
+    positions = np.empty((vertex_count, 4), dtype=np.float64)
+    positions[:, :3] = local.reshape(vertex_count, 3)
+    positions[:, 3] = 1.0
+    return positions @ matrix.T
+
+
+def _vertex_drag_pick(region, rv3d, depsgraph, mouse):
+    """Nearest simulation vertex under the cursor, within the pick radius.
+
+    Mirrors TestScene::PickClosestVertex: project every candidate into the
+    region and keep the closest one, or nothing when the cursor is not close
+    to any cloth vertex.
+    """
+    try:
+        projection = np.array(rv3d.perspective_matrix, dtype=np.float64)
+    except (AttributeError, RuntimeError, TypeError, ValueError):
+        return None
+    half_width = float(region.width) * 0.5
+    half_height = float(region.height) * 0.5
+    best = None
+    best_distance = _VERTEX_DRAG_PICK_RADIUS_PX ** 2
+    for index, obj in enumerate(g_simulationOBJs):
+        positions = _simulation_vertex_world_positions(obj, depsgraph)
+        if positions is None:
+            continue
+        clip = positions @ projection.T
+        w = clip[:, 3]
+        valid = w > 1.0e-6
+        if not bool(valid.any()):
+            continue
+        inverse_w = np.where(valid, 1.0 / np.where(valid, w, 1.0), 0.0)
+        px = half_width + half_width * clip[:, 0] * inverse_w
+        py = half_height + half_height * clip[:, 1] * inverse_w
+        distance = (px - mouse[0]) ** 2 + (py - mouse[1]) ** 2
+        distance = np.where(valid, distance, np.inf)
+        candidate = int(np.argmin(distance))
+        if float(distance[candidate]) >= best_distance:
+            continue
+        best_distance = float(distance[candidate])
+        best = (
+            index,
+            candidate,
+            Vector(positions[candidate, :3]),
+        )
+    return best
+
+
+def _vertex_drag_local_target(index):
+    """The live drag target expressed in the simulation object's space."""
+    state = _vertex_drag_state
+    if not state['dragging'] or state['target_world'] is None:
+        return None
+    if index < 0 or index >= len(g_simulationOBJs):
+        return None
+    obj = g_simulationOBJs[index]
+    if obj is None:
+        return None
+    try:
+        matrix = obj.matrix_world.inverted()
+    except (AttributeError, ReferenceError, RuntimeError, TypeError, ValueError):
+        _vertex_drag_release("grab rejected: cloth transform is singular")
+        return None
+    return matrix @ state['target_world']
+
+
+def _vertex_drag_pin_snapshot(index, snapshot):
+    """Fold the live drag target into one frame's pin snapshot.
+
+    Called once per simulated frame from _publish_frame_inputs, so the
+    constraint target is re-sampled every frame and released as soon as the
+    grab ends.
+    """
+    state = _vertex_drag_state
+    if (not state['dragging'] or state['object_index'] != index or
+            state['vertex_index'] < 0):
+        return snapshot
+    if not _vertex_drag_grab_is_live():
+        _vertex_drag_release("grab released: cloth topology changed")
+        return snapshot
+    target = _vertex_drag_local_target(index)
+    if target is None:
+        return snapshot
+    try:
+        return with_dragged_vertex_pin(
+            snapshot, state['vertex_index'], tuple(target))
+    except VertexChannelError as exc:
+        _vertex_drag_release(f"grab rejected: {exc}")
+        return snapshot
+
+
+def _vertex_drag_begin(context, event):
+    """Grab the nearest cloth vertex under the cursor."""
+    region, rv3d = _vertex_drag_region(context)
+    if region is None:
+        return False
+    mouse = (float(event.mouse_region_x), float(event.mouse_region_y))
+    try:
+        depsgraph = context.evaluated_depsgraph_get()
+    except (AttributeError, ReferenceError, RuntimeError, TypeError):
+        return False
+    hit = _vertex_drag_pick(region, rv3d, depsgraph, mouse)
+    if hit is None:
+        return False
+    index, vertex_index, world = hit
+    try:
+        object_uid = int(g_clothOBJs[index].session_uid)
+    except (AttributeError, IndexError, ReferenceError, RuntimeError, TypeError):
+        return False
+    state = _vertex_drag_state
+    state['dragging'] = True
+    state['object_index'] = index
+    state['object_uid'] = object_uid
+    state['vertex_index'] = vertex_index
+    state['target_world'] = world
+    state['last_mouse'] = mouse
+    state['status'] = f"dragging vertex {vertex_index}"
+    return True
+
+
+def _vertex_drag_update(context, event):
+    """Move the constraint target with the cursor, in the camera plane."""
+    state = _vertex_drag_state
+    region, rv3d = _vertex_drag_region(context)
+    if region is None or state['target_world'] is None:
+        return False
+    mouse = (float(event.mouse_region_x), float(event.mouse_region_y))
+    previous = state['last_mouse']
+    delta_x = mouse[0] - previous[0]
+    delta_y = mouse[1] - previous[1]
+    state['last_mouse'] = mouse
+    if delta_x == 0.0 and delta_y == 0.0:
+        return False
+    target = state['target_world']
+    try:
+        base = region_2d_to_location_3d(region, rv3d, mouse, target)
+        right = region_2d_to_location_3d(
+            region, rv3d, (mouse[0] + 1.0, mouse[1]), target)
+        up = region_2d_to_location_3d(
+            region, rv3d, (mouse[0], mouse[1] + 1.0), target)
+    except (AttributeError, ReferenceError, RuntimeError, TypeError, ValueError):
+        return False
+    if base is None or right is None or up is None:
+        return False
+    # Per-pixel world vectors along the camera right / screen-up axes at the
+    # grabbed vertex's depth; this is TestScene's worldPerPx conversion
+    # (depth * tanHalfFov * 2 / H) taken from the region projection, so it
+    # also holds for orthographic views.
+    state['target_world'] = (
+        target + (right - base) * delta_x + (up - base) * delta_y)
+    return True
+
+
+def _vertex_drag_tag_redraw(context):
+    screen = getattr(context, "screen", None)
+    if screen is None:
+        return
+    for area in getattr(screen, "areas", ()):
+        if getattr(area, "type", None) == 'VIEW_3D':
+            area.tag_redraw()
+
+
+def _vertex_drag_timer_remove(window_manager):
+    state = _vertex_drag_state
+    timer = state['timer']
+    state['timer'] = None
+    if timer is None or window_manager is None:
+        return
+    try:
+        window_manager.event_timer_remove(timer)
+    except (AttributeError, RuntimeError, TypeError):
+        pass
+
+
+def _vertex_drag_arm(context, operator):
+    """Arm the tool and register the modal handler that owns its events."""
+    state = _vertex_drag_state
+    if state['armed']:
+        return True
+    if state['modal_live']:
+        # The previous session still owns its timer and is leaving on its next
+        # poll; a second handler would orphan that timer.
+        return False
+    window = getattr(context, "window", None)
+    window_manager = getattr(context, "window_manager", None)
+    if window is None or window_manager is None:
+        return False
+    try:
+        state['timer'] = window_manager.event_timer_add(
+            _VERTEX_DRAG_POLL_INTERVAL, window=window)
+        window_manager.modal_handler_add(operator)
+    except (AttributeError, RuntimeError, TypeError) as exc:
+        _vertex_drag_timer_remove(window_manager)
+        print(f"GPUCloth vertex drag: cannot start modal tool: {exc}")
+        return False
+    state['armed'] = True
+    state['modal_live'] = True
+    state['status'] = "armed: play the animation, then drag a cloth vertex"
+    return True
+
+
+def _vertex_drag_teardown(context):
+    """Symmetric counterpart of _vertex_drag_arm."""
+    state = _vertex_drag_state
+    _vertex_drag_release("grab released: tool off")
+    state['armed'] = False
+    _vertex_drag_timer_remove(getattr(context, "window_manager", None))
+    state['modal_live'] = False
+    _vertex_drag_tag_redraw(context)
+
+
+def _vertex_drag_disarm(context, status):
+    """Leave the tool switched on as a modal handler but stop its grab.
+
+    The armed modal handler removes itself, and its timer, on its next poll;
+    removing the timer here would leave it unable to observe the flag.
+    """
+    state = _vertex_drag_state
+    _vertex_drag_release(status)
+    state['armed'] = False
+    state['status'] = status
+
+
+def vertex_drag_tool_state(context=None):
+    """Read-only tool state for the panel."""
+    context = bpy.context if context is None else context
+    state = _vertex_drag_state
+    dragging = bool(state['dragging'])
+    object_name = ""
+    if dragging and 0 <= state['object_index'] < len(g_clothOBJs):
+        try:
+            object_name = g_clothOBJs[state['object_index']].name
+        except (AttributeError, IndexError, ReferenceError, RuntimeError):
+            object_name = ""
+    return {
+        "armed": bool(state['armed']),
+        "dragging": dragging,
+        "vertex_index": int(state['vertex_index']) if dragging else -1,
+        "object_name": object_name,
+        "playing": _animation_is_playing(context),
+        "available": _vertex_drag_simulation_ready(
+            getattr(context, "scene", None)),
+        "status": state['status'] or "",
+    }
+
+
+def _vertex_drag_draw():
+    """Viewport overlay: grabbed vertex, live constraint target."""
+    state = _vertex_drag_state
+    if not state['dragging'] or state['target_world'] is None:
+        return
+    index = state['object_index']
+    vertex_index = state['vertex_index']
+    if index < 0 or index >= len(g_simulationOBJs):
+        return
+    obj = g_simulationOBJs[index]
+    if obj is None:
+        return
+    try:
+        import gpu
+        from gpu_extras.batch import batch_for_shader
+    except ImportError:
+        return
+    try:
+        vertices = obj.data.vertices
+    except (AttributeError, ReferenceError, RuntimeError, TypeError):
+        return
+    if vertex_index < 0 or vertex_index >= len(vertices):
+        return
+    try:
+        right = Vector((1.0, 0.0, 0.0))
+        up = Vector((0.0, 0.0, 1.0))
+        region_data = bpy.context.region_data
+        size = max(
+            abs(float(region_data.view_distance)) * _VERTEX_DRAG_MARKER_FRACTION,
+            1.0e-5)
+        right = region_data.view_rotation @ right
+        up = region_data.view_rotation @ up
+    except (AttributeError, RuntimeError, TypeError, ValueError):
+        right = Vector((1.0, 0.0, 0.0))
+        up = Vector((0.0, 0.0, 1.0))
+        size = 0.01
+    try:
+        vertex_world = obj.matrix_world @ vertices[vertex_index].co
+    except (AttributeError, ReferenceError, RuntimeError, TypeError):
+        return
+
+    target = state['target_world']
+    target_lines = [
+        target - right * size, target + right * size,
+        target - up * size, target + up * size,
+    ]
+    vertex_lines = [
+        vertex_world - right * size - up * size,
+        vertex_world + right * size - up * size,
+        vertex_world + right * size - up * size,
+        vertex_world + right * size + up * size,
+        vertex_world + right * size + up * size,
+        vertex_world - right * size + up * size,
+        vertex_world - right * size + up * size,
+        vertex_world - right * size - up * size,
+    ]
+    shader = gpu.shader.from_builtin('UNIFORM_COLOR')
+    gpu.state.blend_set('ALPHA')
+    gpu.state.line_width_set(2.0)
+    shader.bind()
+    shader.uniform_float("color", (1.0, 0.30, 0.30, 1.0))
+    batch = batch_for_shader(
+        shader, 'LINES',
+        {"pos": [tuple(point) for point in vertex_lines]})
+    batch.draw(shader)
+    shader.uniform_float("color", (1.0, 0.85, 0.10, 1.0))
+    batch = batch_for_shader(
+        shader, 'LINES',
+        {"pos": [tuple(point) for point in target_lines]})
+    batch.draw(shader)
+    gpu.state.blend_set('NONE')
+
+
+def _vertex_drag_load_post_handler(*_args):
+    """A new file owns no native grab; drop the tool's transient state."""
+    _vertex_drag_shutdown()
+
+
+def _vertex_drag_shutdown():
+    """Release every transient surface the tool owns (unregister path)."""
+    global _vertex_drag_draw_handle
+    _vertex_drag_teardown(bpy.context)
+    if _vertex_drag_draw_handle is not None:
+        try:
+            bpy.types.SpaceView3D.draw_handler_remove(
+                _vertex_drag_draw_handle, 'WINDOW')
+        except (AttributeError, RuntimeError, TypeError) as exc:
+            print(f"GPUCloth vertex drag: overlay teardown failed: {exc}")
+        _vertex_drag_draw_handle = None
+
+
+def _vertex_drag_add_draw_handler():
+    global _vertex_drag_draw_handle
+    if _vertex_drag_draw_handle is None:
+        _vertex_drag_draw_handle = bpy.types.SpaceView3D.draw_handler_add(
+            _vertex_drag_draw, (), 'WINDOW', 'POST_VIEW')
+
+
+class GPUCloth_MoveClothByVertex(bpy.types.Operator):
+    """Move the cloth by dragging one vertex while the simulation plays
+
+    The grab is active only during animation playback: while the animation is
+    stopped every event is handed back to Blender, so clicking keeps
+    selecting as usual.
+    """
+    bl_idname = "gpucloth.move_cloth_by_vertex"
+    bl_label = "Move Cloth By Vertex (MD-style)"
+    bl_options = {'REGISTER'}
+
+    @classmethod
+    def poll(cls, context):
+        return (
+            _vertex_drag_state['armed'] or
+            _vertex_drag_simulation_ready(getattr(context, "scene", None))
+        )
+
+    def invoke(self, context, event):
+        state = _vertex_drag_state
+        if state['armed']:
+            _vertex_drag_disarm(context, "tool off")
+            self.report({'INFO'}, "Move Cloth By Vertex: off")
+            return {'FINISHED'}
+        if state['modal_live']:
+            self.report(
+                {'INFO'},
+                "Move Cloth By Vertex is still stopping; try again")
+            return {'CANCELLED'}
+        if not _vertex_drag_simulation_ready(getattr(context, "scene", None)):
+            self.report(
+                {'ERROR'},
+                "Prepare the simulation before moving cloth by vertex")
+            return {'CANCELLED'}
+        if not _vertex_drag_arm(context, self):
+            self.report({'ERROR'}, "Move Cloth By Vertex needs a window")
+            return {'CANCELLED'}
+        self.report(
+            {'INFO'},
+            "Move Cloth By Vertex armed: play the animation, then drag a "
+            "cloth vertex")
+        return {'RUNNING_MODAL'}
+
+    def execute(self, context):
+        if _vertex_drag_state['armed']:
+            _vertex_drag_disarm(context, "tool off")
+            return {'FINISHED'}
+        bpy.ops.gpucloth.move_cloth_by_vertex('INVOKE_DEFAULT')
+        return {'FINISHED'}
+
+    def modal(self, context, event):
+        state = _vertex_drag_state
+
+        if event.type == 'TIMER':
+            if not state['armed']:
+                _vertex_drag_teardown(context)
+                return {'CANCELLED'}
+            if state['dragging'] and (
+                    not _vertex_drag_gate(context) or
+                    not _vertex_drag_grab_is_live()):
+                _vertex_drag_release("grab released: simulation stopped")
+                _vertex_drag_tag_redraw(context)
+            return {'PASS_THROUGH'}
+
+        if not _vertex_drag_gate(context):
+            # Not playing: never take the mouse, let Blender select normally.
+            if state['dragging']:
+                _vertex_drag_release("grab released: simulation stopped")
+                _vertex_drag_tag_redraw(context)
+            return {'PASS_THROUGH'}
+
+        if event.type == 'ESC':
+            if state['dragging']:
+                _vertex_drag_release("grab cancelled")
+                _vertex_drag_tag_redraw(context)
+                return {'RUNNING_MODAL'}
+            _vertex_drag_disarm(context, "tool off")
+            return {'RUNNING_MODAL'}
+
+        if state['dragging']:
+            if event.type == 'MOUSEMOVE':
+                if _vertex_drag_update(context, event):
+                    _vertex_drag_tag_redraw(context)
+                return {'RUNNING_MODAL'}
+            if event.type == 'LEFTMOUSE' and event.value == 'RELEASE':
+                _vertex_drag_release("grab released")
+                _vertex_drag_tag_redraw(context)
+                return {'RUNNING_MODAL'}
+            if event.type == 'RIGHTMOUSE' and event.value == 'PRESS':
+                _vertex_drag_release("grab cancelled")
+                _vertex_drag_tag_redraw(context)
+                return {'RUNNING_MODAL'}
+            return {'PASS_THROUGH'}
+
+        if event.type == 'LEFTMOUSE' and event.value == 'PRESS':
+            if _vertex_drag_begin(context, event):
+                _vertex_drag_tag_redraw(context)
+                return {'RUNNING_MODAL'}
+        return {'PASS_THROUGH'}
+
+
+# ===========================================================================
 #  OGC contact-bounds visualiser (SpaceView3D draw callback)
 # ===========================================================================
 
@@ -8254,6 +8855,7 @@ _OPERATOR_CLASSES = [
     GPUCloth_CopyInvariantDiagnostics,
     GPUCloth_SaveInvariantDiagnostics,
     GPUCloth_BakeSimulation,
+    GPUCloth_MoveClothByVertex,
     GPUCloth_FreeCache,
     GPUCloth_ExportAlembic,
     GPUCloth_ExportUSD,
@@ -8273,6 +8875,8 @@ def _register_operator_surfaces():
     frame_handler_added = False
     cache_handler_added = False
     draw_handler_added = False
+    vertex_drag_draw_handler_added = False
+    load_handler_added = False
     try:
         for cls in _OPERATOR_CLASSES:
             bpy.utils.register_class(cls)
@@ -8289,7 +8893,19 @@ def _register_operator_surfaces():
             _ogc_draw_handle = bpy.types.SpaceView3D.draw_handler_add(
                 _ogc_bounds_draw, (), 'WINDOW', 'POST_VIEW')
             draw_handler_added = True
+        if _vertex_drag_draw_handle is None:
+            _vertex_drag_add_draw_handler()
+            vertex_drag_draw_handler_added = True
+        if (_vertex_drag_load_post_handler not in
+                bpy.app.handlers.load_post):
+            bpy.app.handlers.load_post.append(_vertex_drag_load_post_handler)
+            load_handler_added = True
     except Exception:
+        if load_handler_added and (_vertex_drag_load_post_handler in
+                bpy.app.handlers.load_post):
+            bpy.app.handlers.load_post.remove(_vertex_drag_load_post_handler)
+        if vertex_drag_draw_handler_added:
+            _vertex_drag_shutdown()
         if draw_handler_added and _ogc_draw_handle is not None:
             bpy.types.SpaceView3D.draw_handler_remove(
                 _ogc_draw_handle, 'WINDOW')
@@ -8334,6 +8950,13 @@ def unregister():
     _prepare_timer_registered = False
 
     global _ogc_draw_handle
+    # The vertex drag owns a modal handler, a timer, an overlay and at most
+    # one live positional constraint.  Release all of them before the
+    # operator classes they reference are unregistered.
+    _vertex_drag_shutdown()
+    if _vertex_drag_load_post_handler in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.remove(_vertex_drag_load_post_handler)
+
     if _ogc_draw_handle is not None:
         bpy.types.SpaceView3D.draw_handler_remove(_ogc_draw_handle, 'WINDOW')
         _ogc_draw_handle = None

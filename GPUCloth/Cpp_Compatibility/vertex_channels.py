@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import ctypes
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 
 class VertexChannelError(ValueError):
@@ -332,6 +332,56 @@ def prepare_pin_snapshot(types, snapshot):
         "targets": targets,
         "snapshot": snapshot,
     }
+
+
+def with_dragged_vertex_pin(snapshot, vertex_index, target):
+    """Return a snapshot that hard-pins exactly one vertex to ``target``.
+
+    The v3 product ABI owns every per-vertex pin value through this snapshot:
+    ``GPUCLOTH_VERTEX_PIN_WEIGHT`` and ``GPUCLOTH_VERTEX_PIN_TARGET_XYZ`` are
+    NOT_CONFIGURABLE vertex channels, and the native commit of this snapshot
+    writes its targets into ``ClothVertex::xconst`` and raises
+    ``CLOTH_VERT_FLAG_PINNED`` for members whose goal reaches SOFTGOALSNAP
+    (``goal = weight ** 4``).  A full weight for one member therefore
+    reproduces the transient per-frame pin the reference TestScene applies to
+    the vertex under the cursor.
+
+    Every other vertex keeps its membership, weight and target, so the drag
+    constrains one vertex and leaves the rest of the cloth untouched.
+    """
+    index = int(vertex_index)
+    if index < 0 or index >= snapshot.vertex_count:
+        raise VertexChannelError(
+            f"drag vertex index {index} is outside the pin snapshot")
+    try:
+        components = tuple(float(component) for component in target)
+    except (TypeError, ValueError) as exc:
+        raise VertexChannelError(
+            "drag target is not a 3-component value") from exc
+    if len(components) != 3:
+        raise VertexChannelError("drag target is not a 3-component value")
+    coordinates = tuple(
+        _finite_float32(value, f"drag target component {axis}")
+        for axis, value in enumerate(components))
+
+    membership = list(snapshot.membership)
+    raw_weights = list(snapshot.raw_weights)
+    evaluated_targets = list(snapshot.evaluated_targets)
+    membership[index] = 1
+    raw_weights[index] = 1.0
+    offset = index * 3
+    evaluated_targets[offset:offset + 3] = coordinates
+    return replace(
+        snapshot,
+        group_present=True,
+        # A snapshot without a pin group carries no membership view and gives
+        # every vertex goal 0.  Publishing membership for the dragged vertex
+        # must not turn the configured default goal on for the others.
+        goal_default=snapshot.goal_default if snapshot.group_present else 0.0,
+        membership=tuple(membership),
+        raw_weights=tuple(raw_weights),
+        evaluated_targets=tuple(evaluated_targets),
+    )
 
 
 def publish_pin_snapshot(dll, types, cloth_handle, snapshot):
