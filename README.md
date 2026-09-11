@@ -39,6 +39,39 @@ Collider sidedness follows Blender's **Single Sided** setting. Blender 4.2's
 default `(use_culling=True, use_normal=False)` maps automatically to the native
 one-sided-normal contract. Disabling **Single Sided** selects two-sided contact.
 
+## 🧪 Test scenes
+
+Built-in builders mirror the native `TestScene` set.
+Every `SceneType` has one builder; remaining gaps are listed below.
+
+| # | Scene | Blender operator | Status |
+|---|---|---|---|
+| 1 | DrapeOnSphere | `gpucloth.test_drape_on_sphere` | Pins wired (`Pin` group, 2 top corners) |
+| 2 | TwistTest | `gpucloth.test_twist` | Static pins wired; rotating pair stays solver-side |
+| 3 | MultiLayerDrop | `gpucloth.test_multi_layer_drop` | N layers (default 2, range 1–50, dz 0.15); OGC auto sizing |
+| 4 | CushionDrop | `gpucloth.test_cushion_drop` | Closed side walls; pressure ratio 1.3 via target volume |
+| 5 | CapeProject | `gpucloth.test_cape` | Static body; seams wired as loose sewing edges |
+| 6 | MDHorizontalContact | `gpucloth.test_md_horizontal_contact` | MD fixture garment on a static plate |
+
+All builders are one-button: 3D Viewport sidebar `GPUCloth > Create Test Scene`.
+A headless audit (no DLL/GPU) executes every operator and checks the mesh and
+parity contracts.
+
+Known gaps to full parity (tracked for next slices):
+
+- Twist: missing rotating bottom-pin pair animation (needs solver animated-pin path).
+- Cushion: pressure reference volume is the closed mesh as authored (18.72 m³);
+  the native pressure builder swaps the lower sheet and uses the enclosed
+  volume (22.60 m³). The exposed `pressure.ratio` 1.3 is reproduced.
+- Cape/MD: imported areal-density vertex mass (32.0 mg / 16.4 mg per vertex)
+  is below the `vertex_mass` RNA floor of 1 g, so the builders cannot set it.
+- Cape: missing animated body (`CBODY002` sampling per frame).
+- Collision: the native contact-convergence loop count is reproducible through
+  `collision_quality`; the C++ `max_sewing = 0` override has no product owner.
+
+> All 6 scenes exist as builders; remaining gaps are runtime-side
+> (twist rotation, animated body) plus the RNA-owned values above.
+
 ## Validate the public boundary
 
 ```powershell
