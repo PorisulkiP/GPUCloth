@@ -1507,6 +1507,9 @@ class GPUClothDiagnosticsStatus(Structure):
         ("solve_count", c_uint64),
         ("failure_count", c_uint64),
         ("event_generation", c_uint64),
+        # Additive W2 diagnostic: selected joint-bank stable-orientation
+        # conflicts for the last solved frame (0 = none reported).
+        ("joint_orientation_conflicts", c_uint),
         ("reserved", c_uint64 * 2),
     ]
 
