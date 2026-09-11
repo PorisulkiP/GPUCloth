@@ -2464,6 +2464,9 @@ def _solver_diagnostic_snapshot(index):
         "solve_count": int(status.solve_count),
         "failure_count": int(status.failure_count),
         "event_generation": int(status.event_generation),
+        # Additive W2 diagnostic: selected joint-bank stable-orientation
+        # conflicts for the last solved frame (0 = none reported).
+        "joint_orientation_conflicts": int(status.joint_orientation_conflicts),
     }
     events = []
     if result == CType.GPUCLOTH_ABI_OK:
