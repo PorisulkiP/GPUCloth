@@ -16,7 +16,7 @@ from pathlib import Path, PurePosixPath
 
 
 ROOT = Path(__file__).resolve().parents[1]
-PACKAGE_SOURCE = ROOT / "GPUCloth"
+PACKAGE_SOURCE = ROOT / "src" / "python"
 DEFAULT_BLENDER = Path(
     r"C:\Program Files\Blender Foundation\Blender 4.2\blender.exe"
 )
@@ -107,8 +107,19 @@ def stage_package(stage: Path, core_build_dir: Path) -> None:
     shutil.copytree(
         PACKAGE_SOURCE,
         stage,
-        ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo"),
+        ignore=shutil.ignore_patterns(
+            "__pycache__", "*.pyc", "*.pyo", *FORBIDDEN_PACKAGE_NAMES),
     )
+    shutil.copytree(ROOT / "cape_import", stage / "cape_import")
+    # Scene 6 reads only the baked fixture from the MD catalog
+    # (TestScene.cpp:416-428); the OBJ/receipt provenance tree stays out of
+    # the extension archive.
+    md_fixture = ROOT / "md_comparison" / "MDHorizontalContact.clothbin"
+    if not md_fixture.is_file():
+        raise FileNotFoundError(f"MD fixture not found: {md_fixture}")
+    md_dir = stage / "md_comparison"
+    md_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(md_fixture, md_dir / md_fixture.name)
     shutil.copy2(ROOT / "LICENSE", stage / "LICENSE")
 
     lib_dir = stage / "lib"

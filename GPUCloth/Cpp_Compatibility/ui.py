@@ -1009,6 +1009,46 @@ class GPUCLOTH_PT_solver_advanced(bpy.types.Panel):
 
 
 # ===========================================================================
+#  Developer panel: Create Test Scene (3D Viewport sidebar)
+#  Deliberately NOT in _PANEL_CLASSES: the product-surface audit forbids
+#  developer operators in Properties panels, so this dev surface owns
+#  the one-button scene builders instead.
+# ===========================================================================
+
+class GPUCLOTH_PT_test_scenes(bpy.types.Panel):
+    bl_label       = "Create Test Scene"
+    bl_idname      = "GPUCLOTH_PT_test_scenes"
+    bl_space_type  = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category    = "GPUCloth"
+
+    def draw(self, context):
+        layout = self.layout
+        col = layout.column(align=True)
+        col.operator("gpucloth.test_drape_on_sphere",
+                     text="1: Drape on Sphere", icon='MESH_GRID')
+        col.operator("gpucloth.test_twist",
+                     text="2: Twist / Self-Col", icon='MOD_SIMPLEDEFORM')
+        col.operator("gpucloth.test_multi_layer_drop",
+                     text="3: Multi-Layer Drop", icon='MOD_CLOTH')
+        col.operator("gpucloth.test_cushion_drop",
+                     text="4: Cushion (Pressure)", icon='MESH_UVSPHERE')
+        col.operator("gpucloth.test_cape",
+                     text="5: Cape ZPRJ (panels + seams)",
+                     icon='OUTLINER_OB_MESH')
+        col.operator("gpucloth.test_md_horizontal_contact",
+                     text="6: MD Horizontal Contact", icon='MESH_PLANE')
+        col.separator()
+        col.operator("gpucloth.test_ogc_bounds",
+                     text="OGC Bounds Viz", icon='MESH_CIRCLE')
+
+
+_DEV_PANEL_CLASSES = [
+    GPUCLOTH_PT_test_scenes,
+]
+
+
+# ===========================================================================
 #  Registration
 # ===========================================================================
 
@@ -1035,8 +1075,12 @@ _PANEL_CLASSES = [
 def register():
     for cls in _PANEL_CLASSES:
         bpy.utils.register_class(cls)
+    for cls in _DEV_PANEL_CLASSES:
+        bpy.utils.register_class(cls)
 
 
 def unregister():
+    for cls in reversed(_DEV_PANEL_CLASSES):
+        bpy.utils.unregister_class(cls)
     for cls in reversed(_PANEL_CLASSES):
         bpy.utils.unregister_class(cls)

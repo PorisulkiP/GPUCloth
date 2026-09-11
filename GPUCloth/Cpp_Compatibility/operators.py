@@ -1025,7 +1025,9 @@ def _create_v3_cloth_owner(
     inverse_matrix = _matrix_signature(
         _matrix_inverse(
             simulation_obj.matrix_world,
-            f"{simulation_obj.name_full!r} world transform"),
+            f"{simulation_obj.name_full!r} world transform",
+            require_rigid_transform=(
+                int(backend) == CType.GPUCLOTH_V3_BACKEND_FAST)),
         f"{simulation_obj.name_full!r} inverse transform")
     config = CType.GPUClothV3ClothCreateConfig()
     config.struct_size = sizeof(config)
@@ -3740,19 +3742,75 @@ def _matrix_signature(matrix, label):
     return _finite_float32_tuple(values, label)
 
 
-def _matrix_inverse(matrix, label):
-    _matrix_signature(matrix, label)
+# Blender's matrix values are published as float32.  The largest expression
+# below is a three-term dot product or a 3x3 determinant; 64 unit roundoffs
+# (64 * 2**-23 ~= 7.63e-6) bounds their accumulated float32 error.  The
+# explicit 1e-5 ceiling leaves a small conversion margin and is only a
+# roundoff allowance; it does not rescale geometry or admit measurable scale.
+_RIGID_TRANSFORM_TOLERANCE = 1.0e-5
+
+
+def _validate_rigid_transform(matrix, label):
+    """Require an affine transform with unit scale and no shear."""
+    values = _matrix_signature(matrix, label)
+    tolerance = _RIGID_TRANSFORM_TOLERANCE
+    if (
+            abs(values[12]) > tolerance or
+            abs(values[13]) > tolerance or
+            abs(values[14]) > tolerance or
+            abs(values[15] - 1.0) > tolerance):
+        raise RuntimeError(
+            f"{label} must be an affine rigid transform with applied scale")
+    columns = tuple(
+        tuple(values[row * 4 + column] for row in range(3))
+        for column in range(3))
+    for column in columns:
+        if abs(sum(value * value for value in column) - 1.0) > tolerance:
+            raise RuntimeError(
+                f"{label} must be an affine rigid transform with applied scale")
+    for first in range(3):
+        for second in range(first + 1, 3):
+            if abs(sum(
+                    columns[first][index] * columns[second][index]
+                    for index in range(3))) > tolerance:
+                raise RuntimeError(
+                    f"{label} must be an affine rigid transform with applied scale")
+    determinant = (
+        columns[0][0] * (
+            columns[1][1] * columns[2][2] -
+            columns[1][2] * columns[2][1]) -
+        columns[1][0] * (
+            columns[0][1] * columns[2][2] -
+            columns[0][2] * columns[2][1]) +
+        columns[2][0] * (
+            columns[0][1] * columns[1][2] -
+            columns[0][2] * columns[1][1]))
+    if abs(determinant - 1.0) > tolerance:
+        raise RuntimeError(
+            f"{label} must be an affine rigid transform with applied scale")
+    return matrix
+
+
+def _matrix_inverse(matrix, label, require_rigid_transform=False):
+    if require_rigid_transform:
+        _validate_rigid_transform(matrix, label)
+    else:
+        _matrix_signature(matrix, label)
     try:
         inverse = matrix.inverted()
     except (
             AttributeError, ReferenceError, RuntimeError, TypeError,
             ValueError, ZeroDivisionError) as exc:
         raise RuntimeError(f"{label} is singular") from exc
-    _matrix_signature(inverse, f"{label} inverse")
+    if require_rigid_transform:
+        _validate_rigid_transform(inverse, f"{label} inverse")
+    else:
+        _matrix_signature(inverse, f"{label} inverse")
     return inverse
 
 
-def _cloth_local_matrix(cloth_inverse, object_matrix, label):
+def _cloth_local_matrix(
+        cloth_inverse, object_matrix, label, require_rigid_transform=False):
     try:
         relative = cloth_inverse @ object_matrix
     except (
@@ -3760,7 +3818,10 @@ def _cloth_local_matrix(cloth_inverse, object_matrix, label):
             ValueError) as exc:
         raise RuntimeError(
             f"cannot transform {label} into cloth-local space") from exc
-    _matrix_signature(relative, f"{label} cloth-local transform")
+    if require_rigid_transform:
+        _validate_rigid_transform(relative, f"{label} cloth-local transform")
+    else:
+        _matrix_signature(relative, f"{label} cloth-local transform")
     return relative
 
 
@@ -3809,7 +3870,8 @@ def _resolve_collider_surface_contract(settings):
 
 def _capture_collider_payload(
     occurrence, modifier_index, depsgraph, cloth_owner_id, collection_id,
-        snapshot_generation, collider_history, cloth_inverse):
+        snapshot_generation, collider_history, cloth_inverse,
+        require_rigid_transform=False):
     evaluated = occurrence["evaluated_object"]
     mesh = None
     mesh_owner = None
@@ -3866,7 +3928,8 @@ def _capture_collider_payload(
         cloth_local_positions = [None] * (vertex_count * 3)
         relative_matrix = _cloth_local_matrix(
             cloth_inverse, occurrence["matrix_world"],
-            f"collider {occurrence['source_object'].name_full!r}")
+            f"collider {occurrence['source_object'].name_full!r}",
+            require_rigid_transform)
         for vertex in mesh.vertices:
             index = int(vertex.index)
             if index < 0 or index >= vertex_count:
@@ -4487,6 +4550,8 @@ def _prepare_collection_snapshots(
         cloth_owner_id = _blender_session_uid(
             owner_obj, "cloth simulation object")
         settings = cloth_obj.GPUCloth
+        require_rigid_transform = (
+            str(getattr(settings, "solver_type", "")) == "PD")
         try:
             evaluated_cloth = cloth_obj.evaluated_get(depsgraph)
             cloth_world = evaluated_cloth.matrix_world.copy()
@@ -4498,7 +4563,8 @@ def _prepare_collection_snapshots(
                 f"{cloth_obj.name_full!r}") from exc
         cloth_inverse = _matrix_inverse(
             cloth_world,
-            f"cloth {cloth_obj.name_full!r} evaluated world transform")
+            f"cloth {cloth_obj.name_full!r} evaluated world transform",
+            require_rigid_transform)
         collision_selection = _collision_collection_selection(settings)
         effector_selection = _collection_selection(
             settings.effector_weights.collection, "effector")
@@ -4518,7 +4584,8 @@ def _prepare_collection_snapshots(
                 occurrence, modifier_index, depsgraph, cloth_owner_id,
                 collision_selection["collection_id"]
                 if collision_selection is not None else 0,
-                snapshot_generation, collider_history, cloth_inverse))
+                snapshot_generation, collider_history, cloth_inverse,
+                require_rigid_transform))
 
         effector_payloads = []
         effector_sources = []
@@ -5722,7 +5789,7 @@ class GPUCloth_LoadDLL(bpy.types.Operator):
             addon_dir = vcu.get_addon_directory()
             self.report({'ERROR'},
                 f"GPUCloth.dll не найдена. "
-                f"Ожидаемый путь: {os.path.join(lib_dir, 'GPUCloth.dll')}. "
+                f"Искали в: {lib_dir} , {addon_dir} , {addon_dir}\\build\\ . "
                 f"Скопируйте GPUCloth.dll в {lib_dir}")
             return False
 
@@ -7193,20 +7260,164 @@ class GPUCloth_ExportUSD(bpy.types.Operator):
 #  Test scene operators
 # ===========================================================================
 
-import bmesh
+# ── C++ TestScene scene registry (authoritative parameters) ────────────────
+# enum class SceneType {
+#     DrapeOnSphere = 0, TwistTest = 1, MultiLayerDrop = 2,
+#     CushionDrop = 3, CapeProject = 4, MDHorizontalContact = 5 };
+#     src/engine/TestScene/TestScene.h:159
+# static const char* kSceneNames[6] = {...};
+#     src/engine/TestScene/TestScene_UI.cpp:1321
+#
+# Every numeric scene parameter below cites its C++ definition.  Solver type,
+# substep/iteration counts and frame timing deliberately stay on the add-on
+# defaults shared by all six operators; only scene authoring is mirrored.
+TESTSCENE_CLOTH_NX = 128            # TestScene.h:443-444 m_clothNX = m_clothNY
+TESTSCENE_GRID_QUADS = TESTSCENE_CLOTH_NX - 1   # TestScene.cpp:2287 NX=m_clothNX-1
+TESTSCENE_CLOTH_HALF_SIZE = 3.0     # TestScene.h:54  CLOTH_HALF_SIZE
+TESTSCENE_INIT_Z = 4.0              # TestScene.cpp:2289 initZ
+TESTSCENE_TWIST_INIT_Z = 0.0        # TestScene.cpp:2289 TwistTest initZ
+TESTSCENE_SPHERE_RADIUS = 1.8       # TestScene.h:55  SPHERE_RADIUS
+TESTSCENE_SPHERE_CZ = 0.5           # TestScene.h:58  SPHERE_CZ
+TESTSCENE_SPHERE_RINGS = 10         # TestScene.h:59  SPHERE_RINGS
+TESTSCENE_SPHERE_SECTORS = 12       # TestScene.h:60  SPHERE_SECTORS
+TESTSCENE_CYLINDER_RADIUS = 1.5     # TestScene.h:64  CYLINDER_RADIUS
+TESTSCENE_CYLINDER_HALF_LEN = 4.5   # TestScene.h:65  CYLINDER_HALF_LEN
+TESTSCENE_CYLINDER_CZ = 0.3         # TestScene.h:68  CYLINDER_CZ
+TESTSCENE_CYLINDER_RINGS = 20       # TestScene.h:69  CYLINDER_RINGS
+TESTSCENE_CYLINDER_STACKS = 10      # TestScene.h:70  CYLINDER_STACKS
+TESTSCENE_FLOOR_Z = -2.0            # TestScene.h:71  FLOOR_Z
+TESTSCENE_FLOOR_HALF = 12.0         # TestScene.h:72  FLOOR_HALF
+TESTSCENE_MULTILAYER_BASE_Z = 4.0   # TestScene.h:74  MULTILAYER_BASE_Z
+TESTSCENE_MULTILAYER_LAYER_DZ = 0.15  # TestScene.h:75 MULTILAYER_LAYER_DZ
+TESTSCENE_MULTILAYER_COUNT = 2      # TestScene.h:490 m_layerCount{2}
+TESTSCENE_CUSHION_DOME_H = TESTSCENE_CLOTH_HALF_SIZE * 0.25   # TestScene.h:81
+TESTSCENE_CUSHION_INIT_SEP = 0.02   # TestScene.h:82  CUSHION_INIT_SEP
+TESTSCENE_CUSHION_INIT_Z = (        # TestScene.h:83  CUSHION_INIT_Z
+    TESTSCENE_FLOOR_Z + TESTSCENE_CUSHION_DOME_H
+    + TESTSCENE_CUSHION_INIT_SEP * 0.5 + 2.0)
+TESTSCENE_CUSHION_PRESSURE_RATIO = 1.3   # TestScene.cpp:2634 pressure.ratio
+TESTSCENE_GRAVITY_Z = -9.81         # TestScene.cpp:1908 gravity.z (m/s^2)
+TESTSCENE_CAPE_CONTACT_THICKNESS = 0.003    # TestScene.cpp:2532
+TESTSCENE_MD_CONTACT_THICKNESS = 0.0025     # TestScene.cpp:2532
+TESTSCENE_CONTACT_FRICTION = 0.5            # TestScene.cpp:2535
+TESTSCENE_COLLISION_LOOPS = 4               # TestScene.cpp:2541
+TESTSCENE_CAPE_OGC_RADIUS_MM = 3.0          # TestScene.cpp:5099
+TESTSCENE_CAPE_OGC_KC = 1000.0              # TestScene.cpp:5100
+TESTSCENE_CAPE_OGC_FRICTION = 0.3           # TestScene.cpp:5101
+# MD fixture guard: TestScene.cpp:421-422.
+TESTSCENE_MD_EXPECTED = {
+    "nv": 9149, "nt": 17994, "nseam": 0, "npin": 0,
+    "body_nv": 4, "body_nt": 2,
+}
+# OGC auto sizing for generated grid scenes, TestScene_UI.cpp:2531-2576:
+#   r_m = clamp(radius_frac * avg_spring_len, 0.002, 0.08)
+#   kc  = clamp(20 / r_m, 10, 100000)
+TESTSCENE_MULTILAYER_OGC_RADIUS_FRAC = 0.60   # TestScene_UI.cpp:2542
+TESTSCENE_OGC_FRICTION = 0.3                  # TestScene_UI.cpp:2567
+TESTSCENE_OGC_GAMMA_P = 0.45                  # TestScene_UI.cpp:2425
+
+# Cloth/material parameters, TestScene.cpp:1870-1907 / 1433-1448.  They are
+# applied explicitly so a preset (PD/COTTON would raise tension to 30) or a
+# future RNA default change cannot drift away from the C++ scene.
+TESTSCENE_MATERIAL = {
+    "vertex_mass": 0.3,             # RegisterParam("mass", 0.3f)
+    "tension": 15.0,                # cloth.tension
+    "compression": 15.0,            # cloth.compression
+    "shear": 5.0,                   # cloth.shear
+    "bending_stiffness": 0.5,       # cloth.bending
+    "tension_damp": 5.0,            # cloth.tension_damp
+    "compression_damp": 5.0,        # cloth.compression_damp
+    "shear_damp": 5.0,              # cloth.shear_damp
+    "bending_damping": 0.5,         # cloth.bending_damp
+    "vel_damping": 0.0,             # cloth.vel_damping
+    "max_tension": 500.0,           # cloth.max_tension
+    "max_compression": 500.0,       # cloth.max_compression
+    "max_shear": 500.0,             # cloth.max_shear
+    "max_bend": 100.0,              # cloth.max_bend
+}
 
 
-def _make_grid_mesh(name, nx, ny, half_size, height, pin_corners=False):
-    """Create a subdivided grid mesh and return (obj, mesh_data)."""
-    mesh_data = bpy.data.meshes.new(name + "_mesh")
-    obj = bpy.data.objects.new(name, mesh_data)
-    bpy.context.collection.objects.link(obj)
+def _testscene_avg_edge(half_size, quads):
+    """Mean structural rest length of a uniform grid.
 
+    ``avg_spring_len`` is the arithmetic mean over structural springs
+    (src/engine/source/kernel/intern/cloth.cu:3461-3483); on a regular grid
+    every structural spring is one cell long, so the mean is exact.
+    """
+    return 2.0 * half_size / float(quads)
+
+
+def _testscene_ogc_auto(avg_edge, radius_frac):
+    """OGC auto radius/stiffness for generated grid scenes (radii in mm)."""
+    r_m = max(0.002, min(radius_frac * avg_edge, 0.08))
+    return r_m * 1000.0, max(10.0, min(20.0 / r_m, 100000.0))
+
+
+def _setup_testscene_cloth(obj, solver='PD'):
+    """Enable GPUCloth with the C++ TestScene material/physical settings."""
+    _setup_cloth(obj, solver=solver, material='CUSTOM')
+    for prop_name, value in TESTSCENE_MATERIAL.items():
+        setattr(obj.GPUCloth, prop_name, value)
+    obj.GPUCloth.use_object_collision = True   # TestScene.h:387
+    return obj
+
+
+def _set_scene_gravity(context, x=0.0, y=0.0, z=TESTSCENE_GRAVITY_Z):
+    helper = context.scene.gpu_cloth_helper
+    helper.gravity_x = x
+    helper.gravity_y = y
+    helper.gravity_z = z
+
+
+def _imported_cloth_edges(asset):
+    """Mesh edge list for an imported cloth asset, with seams appended.
+
+    The asset edge tail reproduces the native ``medge`` array; each seam pair
+    becomes one extra loose edge, which the add-on uploads as a sewing record
+    with rest length 0 (``_upload_sewing``) — exactly the explicit seam spring
+    the C++ builder appends (TestScene.cpp:2570-2580: ij/kl pair, restlen
+    CAPE_SEAM_WELD_LENGTH_M).
+    """
+    edges = []
+    seen = set()
+    for index in range(0, len(asset["edges"]), 2):
+        key = (int(asset["edges"][index]), int(asset["edges"][index + 1]))
+        edges.append(key)
+        seen.add(key)
+    for index in range(0, len(asset["seams"]), 2):
+        a, b = int(asset["seams"][index]), int(asset["seams"][index + 1])
+        key = (a, b) if a < b else (b, a)
+        if key in seen:
+            continue
+        seen.add(key)
+        edges.append(key)
+    return edges
+
+
+def _closed_mesh_volume(mesh):
+    """|signed volume| of a closed mesh (TestScene.cpp:2614-2629).
+
+    ``V0`` is the pressure reference volume; the C++ builder sums the signed
+    tetrahedron volumes and negates the result when it comes out negative.
+    """
+    total = 0.0
+    for triangle in vcu.calc_mesh_loop_triangles(mesh):
+        i0, i1, i2 = (int(index) for index in triangle.vertices)
+        p0 = mesh.vertices[i0].co
+        p1 = mesh.vertices[i1].co
+        p2 = mesh.vertices[i2].co
+        total += (p0[0] * (p1[1] * p2[2] - p1[2] * p2[1])
+                  + p0[1] * (p1[2] * p2[0] - p1[0] * p2[2])
+                  + p0[2] * (p1[0] * p2[1] - p1[1] * p2[0])) / 6.0
+    return abs(total)
+
+
+def _grid_verts_faces(nx, ny, half_size, height):
+    """Shared grid topology; one layer at height. Returns (verts, faces)."""
     sx = nx + 1
-    sy = ny + 1
     verts = []
-    for row in range(sy):
-        for col in range(sx):
+    for row in range(ny + 1):
+        for col in range(nx + 1):
             x = -half_size + 2.0 * half_size * col / nx
             y = -half_size + 2.0 * half_size * row / ny
             verts.append((x, y, height))
@@ -7216,67 +7427,77 @@ def _make_grid_mesh(name, nx, ny, half_size, height, pin_corners=False):
         for col in range(nx):
             i = row * sx + col
             faces.append((i, i + 1, i + sx + 1, i + sx))
+    return verts, faces
+
+
+def _make_grid_mesh(name, nx, ny, half_size, height, pin_corners=False):
+    """Create a subdivided grid mesh and return (obj, mesh_data)."""
+    mesh_data = bpy.data.meshes.new(name + "_mesh")
+    obj = bpy.data.objects.new(name, mesh_data)
+    bpy.context.collection.objects.link(obj)
+
+    verts, faces = _grid_verts_faces(nx, ny, half_size, height)
 
     mesh_data.from_pydata(verts, [], faces)
     mesh_data.update()
 
     if pin_corners:
-        for v in obj.data.vertices:
-            pinned = False
-            if (abs(v.co.x - (-half_size)) < 0.01 and abs(v.co.y - half_size) < 0.01):
-                pinned = True
-            if (abs(v.co.x - half_size) < 0.01 and abs(v.co.y - half_size) < 0.01):
-                pinned = True
-            if pinned:
-                v.co.z += 0.0
-        mesh_data.update()
+        # Native DrapeOnSphere/TwistTest pin the two top corners
+        # vi(0, NY) + vi(NX, NY) with goal 1. Same corners here.
+        sx = nx + 1
+        pin_group = obj.vertex_groups.new(name="Pin")
+        pin_group.add([(ny * sx) + 0, (ny * sx) + nx], 1.0, 'REPLACE')
 
     return obj, mesh_data
 
 
-def _make_uv_sphere(name, radius, cx, cy, cz, rings=10, sectors=12):
-    """Create a UV sphere collision object and return it."""
+def _make_multilayer_mesh(name, nx, ny, half_size, base_z, dz, layers):
+    """Stack N grid layers base_z + k*dz into one mesh, native layout."""
     mesh_data = bpy.data.meshes.new(name + "_mesh")
     obj = bpy.data.objects.new(name, mesh_data)
     bpy.context.collection.objects.link(obj)
 
-    bm = bmesh.new()
-    segs_loop = sectors
-    segs_ring = rings
-    import math
-    for i in range(segs_ring + 1):
-        phi = math.pi * i / segs_ring
-        for j in range(segs_loop + 1):
-            theta = 2.0 * math.pi * j / segs_loop
-            x = cx + radius * math.sin(phi) * math.cos(theta)
-            y = cy + radius * math.sin(phi) * math.sin(theta)
-            z = cz + radius * math.cos(phi)
-            bm.verts.new((x, y, z))
+    layer_verts, layer_faces = _grid_verts_faces(nx, ny, half_size, base_z)
+    per_layer = len(layer_verts)
+    verts = []
+    faces = []
+    for k in range(layers):
+        z = base_z + k * dz
+        verts.extend((x, y, z) for x, y, _ in layer_verts)
+        base = k * per_layer
+        faces.extend((a + base, b + base, c + base, d + base)
+                     for a, b, c, d in layer_faces)
 
-    bm.verts.ensure_lookup_table()
-    w = segs_loop + 1
-    for i in range(segs_ring):
-        for j in range(segs_loop):
-            a = i * w + j
-            b = i * w + j + 1
-            c = (i + 1) * w + j + 1
-            d = (i + 1) * w + j
-            bm.faces.new([bm.verts[a], bm.verts[b], bm.verts[c], bm.verts[d]])
-    bm.to_mesh(mesh_data)
-    bm.free()
+    mesh_data.from_pydata(verts, [], faces)
     mesh_data.update()
+    return obj, mesh_data
+
+
+def _make_uv_sphere(name, radius, cx, cy, cz, rings=10, sectors=12):
+    """Create a UV sphere collision object and return it.
+
+    Uses the Blender primitive: hand-rolled grids duplicate pole verts,
+    which makes zero-area fan triangles that the native hard preflight
+    (DEGENERATE_TRIANGLE) correctly rejects.
+    """
+    bpy.ops.mesh.primitive_uv_sphere_add(
+        segments=sectors, ring_count=rings, radius=radius,
+        location=(cx, cy, cz))
+    obj = bpy.context.view_layer.objects.active
+    obj.name = name
+    obj.data.name = name + "_mesh"
     return obj
 
 
-def _make_cylinder_floor(name, radius, half_len, cx, cy, cz, floor_z, floor_half):
-    """Create a cylinder + floor collision object."""
+def _make_cylinder_floor(name, radius, half_len, cx, cy, cz, floor_z, floor_half,
+                         rings=TESTSCENE_CYLINDER_RINGS,
+                         stacks=TESTSCENE_CYLINDER_STACKS):
+    """Create a cylinder + floor collision object (native CollisionCylinder)."""
     mesh_data = bpy.data.meshes.new(name + "_mesh")
     obj = bpy.data.objects.new(name, mesh_data)
     bpy.context.collection.objects.link(obj)
 
     verts = []
-    rings = 20
-    stacks = 10
     for s in range(stacks + 1):
         y = cy - half_len + 2.0 * half_len * s / stacks
         for r in range(rings + 1):
@@ -7336,9 +7557,36 @@ def _make_cushion_mesh(name, nx, ny, half_size, init_z, sep, dome_height):
                 i = base + row * sx + col
                 faces.append((i, i + 1, i + sx + 1, i + sx))
 
+    # Side walls closing the volume, native CushionMesh layout: quads join
+    # the boundary loops of both sheets so pressure sees a closed mesh.
+    def _gvi(sh, col, row):
+        return sh * sx * sy + row * sx + col
+
+    for col in range(nx):
+        faces.append((_gvi(0, col, 0), _gvi(0, col + 1, 0),
+                      _gvi(1, col + 1, 0), _gvi(1, col, 0)))
+        faces.append((_gvi(0, col + 1, ny), _gvi(0, col, ny),
+                      _gvi(1, col, ny), _gvi(1, col + 1, ny)))
+    for row in range(ny):
+        faces.append((_gvi(0, 0, row + 1), _gvi(0, 0, row),
+                      _gvi(1, 0, row), _gvi(1, 0, row + 1)))
+        faces.append((_gvi(0, nx, row), _gvi(0, nx, row + 1),
+                      _gvi(1, nx, row + 1), _gvi(1, nx, row)))
+
     mesh_data.from_pydata(verts, [], faces)
     mesh_data.update()
     return obj
+
+
+def _make_two_sided_collider(obj):
+    """Explicit two-sided surface contract for scene collider builders.
+
+    Matches the Smoke fixture (tools/blender_product_gate.py): product
+    preflight requires an explicit surface contract, while Blender 4.2
+    defaults (culling on) resolve to ONE_SIDED_NORMAL.
+    """
+    obj.collision.use_culling = False
+    obj.collision.use_normal = False
 
 
 def _setup_cloth(obj, solver='PD', material='COTTON'):
@@ -7357,17 +7605,27 @@ class GPUCloth_TestDrapeOnSphere(bpy.types.Operator):
     def execute(self, context):
         bpy.ops.object.select_all(action='DESELECT')
 
-        cloth_obj, _ = _make_grid_mesh("DrapeCloth", 64, 64, 3.0, 4.0)
-        sphere_obj = _make_uv_sphere("CollisionSphere", 1.8, 0.0, 0.0, 0.5)
+        # TestScene.cpp:2540-2542 grid = ClothGrid(NX, NY, CLOTH_HALF_SIZE,
+        # CLOTH_HALF_SIZE, initZ) at 128x128 verts; pins vi(0,NY)/vi(NX,NY)
+        # at TestScene.cpp:2646-2656.
+        cloth_obj, _ = _make_grid_mesh(
+            "DrapeCloth", TESTSCENE_GRID_QUADS, TESTSCENE_GRID_QUADS,
+            TESTSCENE_CLOTH_HALF_SIZE, TESTSCENE_INIT_Z, pin_corners=True)
+        sphere_obj = _make_uv_sphere(
+            "CollisionSphere", TESTSCENE_SPHERE_RADIUS, 0.0, 0.0,
+            TESTSCENE_SPHERE_CZ, TESTSCENE_SPHERE_RINGS,
+            TESTSCENE_SPHERE_SECTORS)
 
-        col_mod = sphere_obj.modifiers.new(name="Collision", type='COLLISION')
+        sphere_obj.modifiers.new(name="Collision", type='COLLISION')
+        _make_two_sided_collider(sphere_obj)
 
         bpy.context.view_layer.objects.active = cloth_obj
         cloth_obj.select_set(True)
 
-        _setup_cloth(cloth_obj, solver='PD', material='COTTON')
+        _setup_testscene_cloth(cloth_obj, solver='PD')
+        cloth_obj.GPUCloth.vgroup_mass = "Pin"
 
-        context.scene.gpu_cloth_helper.gravity_z = -9.81
+        _set_scene_gravity(context)
 
         self.report({'INFO'}, "DrapeOnSphere test scene created")
         return {'FINISHED'}
@@ -7382,16 +7640,26 @@ class GPUCloth_TestTwist(bpy.types.Operator):
     def execute(self, context):
         bpy.ops.object.select_all(action='DESELECT')
 
-        cloth_obj, _ = _make_grid_mesh("TwistCloth", 64, 64, 3.0, 0.0)
+        # Static top-corner pins mirror native TwistTest (TestScene.cpp:2735).
+        # The rotating bottom pair (TestScene.cpp:3349-3375, twist.speed
+        # 0.8 rad/s about the top-pin axis) needs per-frame kinematic pin
+        # targets; the add-on captures pin targets from the evaluated mesh
+        # only, so the pair is created as "TwistRotate" for inspection.
+        cloth_obj, _ = _make_grid_mesh(
+            "TwistCloth", TESTSCENE_GRID_QUADS, TESTSCENE_GRID_QUADS,
+            TESTSCENE_CLOTH_HALF_SIZE, TESTSCENE_TWIST_INIT_Z,
+            pin_corners=True)
+        rotate_group = cloth_obj.vertex_groups.new(name="TwistRotate")
+        rotate_group.add([0, TESTSCENE_GRID_QUADS], 1.0, 'REPLACE')
 
         bpy.context.view_layer.objects.active = cloth_obj
         cloth_obj.select_set(True)
 
-        _setup_cloth(cloth_obj, solver='PD', material='COTTON')
+        _setup_testscene_cloth(cloth_obj, solver='PD')
+        cloth_obj.GPUCloth.vgroup_mass = "Pin"
 
-        context.scene.gpu_cloth_helper.gravity_x = 0.0
-        context.scene.gpu_cloth_helper.gravity_y = 0.0
-        context.scene.gpu_cloth_helper.gravity_z = 0.0
+        # TestScene.cpp:3434-3435: gravity is forced to zero for TwistTest.
+        _set_scene_gravity(context, 0.0, 0.0, 0.0)
 
         self.report({'INFO'}, "TwistTest scene created")
         return {'FINISHED'}
@@ -7403,25 +7671,51 @@ class GPUCloth_TestMultiLayerDrop(bpy.types.Operator):
     bl_label = "Multi Layer Drop"
     bl_options = {'REGISTER', 'UNDO'}
 
+    # Native bounds: MULTILAYER_COUNT_MIN/MAX/STEP = 1/50/1, default 2.
+    layer_count: bpy.props.IntProperty(
+        name="Layers",
+        description="Cloth layer count (native default 2, dz 0.15)",
+        default=TESTSCENE_MULTILAYER_COUNT,
+        min=1,
+        max=50,
+    )
+
     def execute(self, context):
         bpy.ops.object.select_all(action='DESELECT')
 
-        cloth_obj, _ = _make_grid_mesh("MultiLayerCloth", 64, 64, 3.0, 4.0)
+        # No pins: all N layers fall freely, OGC owns inter-layer contact.
+        cloth_obj, _ = _make_multilayer_mesh(
+            "MultiLayerCloth", TESTSCENE_GRID_QUADS, TESTSCENE_GRID_QUADS,
+            TESTSCENE_CLOTH_HALF_SIZE, TESTSCENE_MULTILAYER_BASE_Z,
+            TESTSCENE_MULTILAYER_LAYER_DZ, self.layer_count)
         collision_obj = _make_cylinder_floor(
             "CollisionCylinder",
-            1.5, 4.5, 0.0, 0.0, 0.3, -2.0, 12.0)
+            TESTSCENE_CYLINDER_RADIUS, TESTSCENE_CYLINDER_HALF_LEN,
+            0.0, 0.0, TESTSCENE_CYLINDER_CZ,
+            TESTSCENE_FLOOR_Z, TESTSCENE_FLOOR_HALF,
+            TESTSCENE_CYLINDER_RINGS, TESTSCENE_CYLINDER_STACKS)
 
-        col_mod = collision_obj.modifiers.new(name="Collision", type='COLLISION')
+        collision_obj.modifiers.new(name="Collision", type='COLLISION')
+        _make_two_sided_collider(collision_obj)
 
         bpy.context.view_layer.objects.active = cloth_obj
         cloth_obj.select_set(True)
 
-        _setup_cloth(cloth_obj, solver='PD', material='COTTON')
+        _setup_testscene_cloth(cloth_obj, solver='PD')
+        # Inter-layer contact is OGC self-collision; the C++ auto sizer
+        # (TestScene_UI.cpp:2531-2576) derives radius and kc from the grid's
+        # mean structural spring length.
+        avg_edge = _testscene_avg_edge(
+            TESTSCENE_CLOTH_HALF_SIZE, TESTSCENE_GRID_QUADS)
+        ogc_radius_mm, ogc_kc = _testscene_ogc_auto(
+            avg_edge, TESTSCENE_MULTILAYER_OGC_RADIUS_FRAC)
         cloth_obj.GPUCloth.use_self_collision = True
-        cloth_obj.GPUCloth.ogc_radius = 150.0
-        cloth_obj.GPUCloth.ogc_friction = 0.3
+        cloth_obj.GPUCloth.ogc_radius = ogc_radius_mm
+        cloth_obj.GPUCloth.ogc_kc = ogc_kc
+        cloth_obj.GPUCloth.ogc_friction = TESTSCENE_OGC_FRICTION
+        cloth_obj.GPUCloth.ogc_gamma_p = TESTSCENE_OGC_GAMMA_P
 
-        context.scene.gpu_cloth_helper.gravity_z = -9.81
+        _set_scene_gravity(context)
 
         self.report({'INFO'}, "MultiLayerDrop test scene created")
         return {'FINISHED'}
@@ -7436,29 +7730,318 @@ class GPUCloth_TestCushionDrop(bpy.types.Operator):
     def execute(self, context):
         bpy.ops.object.select_all(action='DESELECT')
 
-        init_z = -2.0 + 3.0 * 0.25 + 0.02 * 0.5 + 2.0
+        # TestScene.cpp:2410-2431: dome = 0.25 * CLOTH_HALF_SIZE, sep 0.02,
+        # initZ = FLOOR_Z + dome + sep/2 + 2.
         cushion_obj = _make_cushion_mesh(
-            "CushionCloth", 32, 32, 3.0, init_z, 0.02, 3.0 * 0.25)
+            "CushionCloth", TESTSCENE_GRID_QUADS, TESTSCENE_GRID_QUADS,
+            TESTSCENE_CLOTH_HALF_SIZE, TESTSCENE_CUSHION_INIT_Z,
+            TESTSCENE_CUSHION_INIT_SEP, TESTSCENE_CUSHION_DOME_H)
 
+        # TestScene.cpp:2501-2508: the visible floor quad (FLOOR_Z, half
+        # FLOOR_HALF).  The C++ object also carries a degenerate 1x1 cylinder
+        # 100 m below the floor; that sliver cannot contact the cloth and its
+        # coincident vertices are rejected by the Blender preflight.
         floor_mesh = bpy.data.meshes.new("Floor_mesh")
         floor_obj = bpy.data.objects.new("Floor", floor_mesh)
         bpy.context.collection.objects.link(floor_obj)
-        fh = 12.0
-        fz = -2.0
+        fh = TESTSCENE_FLOOR_HALF
+        fz = TESTSCENE_FLOOR_Z
         floor_verts = [(-fh, -fh, fz), (fh, -fh, fz), (fh, fh, fz), (-fh, fh, fz)]
         floor_faces = [(0, 1, 2, 3)]
         floor_mesh.from_pydata(floor_verts, [], floor_faces)
         floor_mesh.update()
-        col_mod = floor_obj.modifiers.new(name="Collision", type='COLLISION')
+        floor_obj.modifiers.new(name="Collision", type='COLLISION')
+        _make_two_sided_collider(floor_obj)
 
         bpy.context.view_layer.objects.active = cushion_obj
         cushion_obj.select_set(True)
 
-        _setup_cloth(cushion_obj, solver='PD', material='COTTON')
+        _setup_testscene_cloth(cushion_obj, solver='PD')
+        # Closed side-wall volume: pressure.ratio 1.3 (TestScene.cpp:2634) is
+        # expressed as target_volume = 1.3 * V0, the product RNA's only owner
+        # of Pressure_create's pressure_ratio.
+        cushion_obj.GPUCloth.use_pressure = True
+        cushion_obj.GPUCloth.use_pressure_volume = True
+        cushion_obj.GPUCloth.target_volume = (
+            TESTSCENE_CUSHION_PRESSURE_RATIO
+            * _closed_mesh_volume(cushion_obj.data))
 
-        context.scene.gpu_cloth_helper.gravity_z = -9.81
+        _set_scene_gravity(context)
 
         self.report({'INFO'}, "CushionDrop test scene created")
+        return {'FINISHED'}
+
+
+# --- Imported cloth asset layout (mirrors TestScene.cpp LoadCapeClothBin) ---
+# Cape and MD scenes share the binary layout; only Cape consumes
+# seams/pins/animation (TestScene.h:166-178).  Asset directories mirror the
+# executable-relative catalogs CapeAssetPath/MDAssetPath (TestScene.cpp:135-151).
+_CAPE_MAGIC = b"CCAPE002"
+_CAPE_VERSION = 2
+_CAPE_ASSET_SUBDIR = "cape_import"
+_CAPE_ASSET_FILE = "cape.clothbin"
+_MD_ASSET_SUBDIR = "md_comparison"
+_MD_ASSET_FILE = "MDHorizontalContact.clothbin"
+
+
+def _find_cloth_asset_dir(subdir, filename, explicit=""):
+    """Locate a directory holding ``filename``, or return None.
+
+    The release stage puts both catalogs beside the add-on package
+    (tools/build_blender_release.py), so the add-on root and the source-tree
+    root are both searched before giving up.
+    """
+    candidates = []
+    if explicit:
+        candidates.append(explicit)
+    try:
+        addon_dir = os.path.dirname(os.path.abspath(__file__))
+        for steps in ("..", os.path.join("..", ".."),
+                      os.path.join("..", "..", "..")):
+            candidates.append(os.path.join(addon_dir, steps, subdir))
+    except Exception:
+        pass
+    for candidate in candidates:
+        if os.path.isfile(os.path.join(candidate, filename)):
+            return os.path.normpath(candidate)
+    return None
+
+
+def _find_cape_asset_dir(explicit=""):
+    """Locate cape_import/ holding cape.clothbin, or return None."""
+    return _find_cloth_asset_dir(
+        _CAPE_ASSET_SUBDIR, _CAPE_ASSET_FILE, explicit)
+
+
+def _find_md_asset_dir(explicit=""):
+    """Locate md_comparison/ holding MDHorizontalContact.clothbin, or None."""
+    return _find_cloth_asset_dir(
+        _MD_ASSET_SUBDIR, _MD_ASSET_FILE, explicit)
+
+
+def _read_cape_cloth_bin(path, require_seams=True):
+    """Parse CCAPE002 asset with the native header guards, or return None."""
+    try:
+        with open(path, "rb") as handle:
+            payload = handle.read()
+    except OSError:
+        return None
+    if len(payload) < 48 or payload[0:8] != _CAPE_MAGIC:
+        return None
+    (version, panels, nv, nt, ne, nseam, npin,
+     body_nv, body_nt, scale) = struct.unpack("<9If", payload[8:48])
+    if (version != _CAPE_VERSION or panels == 0 or nv == 0
+            or nt == 0 or ne == 0 or (require_seams and nseam == 0)
+            or body_nv == 0 or body_nt == 0 or scale <= 0.0):
+        return None
+    counts = (nv * 3, nt * 3, ne * 2, nseam * 2, npin,
+              body_nv * 3, body_nt * 3)
+    formats = ("f", "I", "I", "I", "I", "f", "I")
+    if len(payload) != 48 + sum(counts) * 4:
+        return None
+    parts = []
+    offset = 48
+    for count, kind in zip(counts, formats):
+        parts.append(struct.unpack("<%d%s" % (count, kind),
+                                   payload[offset:offset + count * 4])
+                     if count else ())
+        offset += count * 4
+    keys = ("verts", "tris", "edges", "seams", "pins",
+            "body_verts", "body_tris")
+    asset = dict(zip(keys, parts))
+    asset.update(panels=panels, nv=nv, nt=nt, ne=ne, nseam=nseam,
+                 npin=npin, body_nv=body_nv, body_nt=body_nt, scale=scale)
+    return asset
+
+
+def _read_md_cloth_bin(path):
+    """Parse the MD horizontal-contact fixture, or return None.
+
+    The fixture has no seams and no pins, and its body is a two-triangle
+    plate; the counts are a hard guard (TestScene.cpp:421-422).
+    """
+    asset = _read_cape_cloth_bin(path, require_seams=False)
+    if asset is None:
+        return None
+    for key, expected in TESTSCENE_MD_EXPECTED.items():
+        if int(asset[key]) != int(expected):
+            return None
+    return asset
+
+
+def _imported_cloth_objects(asset):
+    """Build (cloth_obj, body_obj) from a parsed cloth asset, unscaled."""
+    scale = asset["scale"]
+    verts = [(asset["verts"][i] * scale,
+              asset["verts"][i + 1] * scale,
+              asset["verts"][i + 2] * scale)
+             for i in range(0, asset["nv"] * 3, 3)]
+    faces = [(asset["tris"][i], asset["tris"][i + 1], asset["tris"][i + 2])
+             for i in range(0, asset["nt"] * 3, 3)]
+    body_verts = [(asset["body_verts"][i] * scale,
+                   asset["body_verts"][i + 1] * scale,
+                   asset["body_verts"][i + 2] * scale)
+                  for i in range(0, asset["body_nv"] * 3, 3)]
+    body_faces = [(asset["body_tris"][i], asset["body_tris"][i + 1],
+                   asset["body_tris"][i + 2])
+                  for i in range(0, asset["body_nt"] * 3, 3)]
+    return verts, faces, body_verts, body_faces
+
+
+def _apply_imported_contact_settings(cloth_obj, contact_thickness):
+    """C++ contact thickness/friction/convergence for imported garments.
+
+    TestScene.cpp:2525-2542: epsilon = selfepsilon = contact thickness,
+    friction 0.5, and four collision-iteration passes.
+    """
+    settings = cloth_obj.GPUCloth
+    settings.epsilon = contact_thickness
+    settings.selfepsilon = contact_thickness
+    settings.collision_friction = TESTSCENE_CONTACT_FRICTION
+    settings.collision_quality = TESTSCENE_COLLISION_LOOPS
+
+
+class GPUCloth_TestCape(bpy.types.Operator):
+    """Create CapeProject scene: sewn garment panels over body collider"""
+    bl_idname = "gpucloth.test_cape"
+    bl_label = "Cape Project"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    asset_dir: bpy.props.StringProperty(
+        name="Cape Asset Dir",
+        description="Directory holding cape.clothbin (default: addon cape_import/)",
+        default="",
+    )
+
+    collar_pins: bpy.props.BoolProperty(
+        name="Collar Pins",
+        description=(
+            "Pin the imported garment at the collar.  Native default is off "
+            "(TESTSCENE_CAPE_COLLAR_PINS=0), i.e. an MD-style free garment"),
+        default=False,
+    )
+
+    def execute(self, context):
+        asset_dir = _find_cape_asset_dir(self.asset_dir)
+        if asset_dir is None:
+            self.report({'ERROR'},
+                        "cape.clothbin not found: set asset_dir or ship "
+                        "cape_import/ beside the addon")
+            return {'CANCELLED'}
+        asset = _read_cape_cloth_bin(
+            os.path.join(asset_dir, _CAPE_ASSET_FILE))
+        if asset is None:
+            self.report({'ERROR'}, "invalid cape.clothbin header or payload")
+            return {'CANCELLED'}
+
+        bpy.ops.object.select_all(action='DESELECT')
+        verts, faces, body_verts, body_faces = _imported_cloth_objects(asset)
+        cloth_mesh = bpy.data.meshes.new("CapeCloth_mesh")
+        cloth_obj = bpy.data.objects.new("CapeCloth", cloth_mesh)
+        bpy.context.collection.objects.link(cloth_obj)
+        # Explicit sewing springs: one loose edge per imported seam pair
+        # (TestScene.cpp:2554-2584).
+        cloth_mesh.from_pydata(verts, _imported_cloth_edges(asset), faces)
+        cloth_mesh.update()
+
+        body_mesh = bpy.data.meshes.new("CapeBody_mesh")
+        body_obj = bpy.data.objects.new("CapeBody", body_mesh)
+        bpy.context.collection.objects.link(body_obj)
+        body_mesh.from_pydata(body_verts, [], body_faces)
+        body_mesh.update()
+        body_obj.modifiers.new(name="Collision", type='COLLISION')
+        _make_two_sided_collider(body_obj)
+
+        if asset["npin"]:
+            pin_group = cloth_obj.vertex_groups.new(name="CapePin")
+            pin_group.add(list(asset["pins"]), 1.0, 'REPLACE')
+
+        bpy.context.view_layer.objects.active = cloth_obj
+        cloth_obj.select_set(True)
+
+        _setup_testscene_cloth(cloth_obj, solver='PD')
+        _apply_imported_contact_settings(
+            cloth_obj, TESTSCENE_CAPE_CONTACT_THICKNESS)
+        cloth_obj.GPUCloth.use_self_collision = True
+        cloth_obj.GPUCloth.ogc_radius = TESTSCENE_CAPE_OGC_RADIUS_MM
+        cloth_obj.GPUCloth.ogc_kc = TESTSCENE_CAPE_OGC_KC
+        cloth_obj.GPUCloth.ogc_friction = TESTSCENE_CAPE_OGC_FRICTION
+        cloth_obj.GPUCloth.use_sewing_springs = True
+        if self.collar_pins and asset["npin"]:
+            cloth_obj.GPUCloth.vgroup_mass = "CapePin"
+
+        _set_scene_gravity(context)
+
+        self.report({'INFO'},
+                    "CapeProject test scene created: %d panels, %d verts, "
+                    "%d tris, %d seams, %d pins%s" % (
+                        asset["panels"], asset["nv"], asset["nt"],
+                        asset["nseam"], asset["npin"],
+                        "" if self.collar_pins else " (collar pins off)"))
+        return {'FINISHED'}
+
+
+class GPUCloth_TestMDHorizontalContact(bpy.types.Operator):
+    """Create MDHorizontalContact scene: MD-imported cloth on a static plate"""
+    bl_idname = "gpucloth.test_md_horizontal_contact"
+    bl_label = "MD Horizontal Contact"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    asset_dir: bpy.props.StringProperty(
+        name="MD Asset Dir",
+        description=(
+            "Directory holding MDHorizontalContact.clothbin "
+            "(default: addon md_comparison/)"),
+        default="",
+    )
+
+    def execute(self, context):
+        asset_dir = _find_md_asset_dir(self.asset_dir)
+        if asset_dir is None:
+            self.report({'ERROR'},
+                        "MDHorizontalContact.clothbin not found: set "
+                        "asset_dir or ship md_comparison/ beside the addon")
+            return {'CANCELLED'}
+        asset = _read_md_cloth_bin(os.path.join(asset_dir, _MD_ASSET_FILE))
+        if asset is None:
+            self.report({'ERROR'},
+                        "invalid MDHorizontalContact.clothbin header, "
+                        "payload, or fixture counts")
+            return {'CANCELLED'}
+
+        bpy.ops.object.select_all(action='DESELECT')
+        verts, faces, body_verts, body_faces = _imported_cloth_objects(asset)
+        cloth_mesh = bpy.data.meshes.new("MDCloth_mesh")
+        cloth_obj = bpy.data.objects.new("MDCloth", cloth_mesh)
+        bpy.context.collection.objects.link(cloth_obj)
+        cloth_mesh.from_pydata(verts, _imported_cloth_edges(asset), faces)
+        cloth_mesh.update()
+
+        body_mesh = bpy.data.meshes.new("MDContactBody_mesh")
+        body_obj = bpy.data.objects.new("MDContactBody", body_mesh)
+        bpy.context.collection.objects.link(body_obj)
+        body_mesh.from_pydata(body_verts, [], body_faces)
+        body_mesh.update()
+        body_obj.modifiers.new(name="Collision", type='COLLISION')
+        _make_two_sided_collider(body_obj)
+
+        bpy.context.view_layer.objects.active = cloth_obj
+        cloth_obj.select_set(True)
+
+        # TestScene.cpp:5108-5125: no proxy, no SDB bending, no self
+        # collision, PD only.  No pins and no seams (TestScene.cpp:2728-2731).
+        _setup_testscene_cloth(cloth_obj, solver='PD')
+        _apply_imported_contact_settings(
+            cloth_obj, TESTSCENE_MD_CONTACT_THICKNESS)
+        cloth_obj.GPUCloth.use_self_collision = False
+        cloth_obj.GPUCloth.use_proxy = False
+
+        _set_scene_gravity(context)
+
+        self.report({'INFO'},
+                    "MDHorizontalContact test scene created: %d verts, "
+                    "%d tris, static body %d verts" % (
+                        asset["nv"], asset["nt"], asset["body_nv"]))
         return {'FINISHED'}
 
 
@@ -7678,6 +8261,8 @@ _OPERATOR_CLASSES = [
     GPUCloth_TestTwist,
     GPUCloth_TestMultiLayerDrop,
     GPUCloth_TestCushionDrop,
+    GPUCloth_TestCape,
+    GPUCloth_TestMDHorizontalContact,
     GPUCloth_TestOGCBounds,
 ]
 
