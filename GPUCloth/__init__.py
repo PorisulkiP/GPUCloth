@@ -17,8 +17,8 @@
 bl_info = {
     "name": "GPUCloth",
     "author": "Bubnov Aleksey (PorisulkiP)",
-    "version": (0, 1, 0),
-    "blender": (4, 0, 0),
+    "version": (0, 1, 3),
+    "blender": (4, 2, 0),
     "location": "Properties > Physics > GPU Cloth",
     "description": "Cloth simulation on GPU (CUDA)",
     "doc_url": "https://github.com/PorisulkiP/GPUCloth",

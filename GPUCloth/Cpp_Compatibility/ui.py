@@ -60,8 +60,10 @@ class GPUCLOTH_PT_main(bpy.types.Panel):
         row.operator("gpucloth.sync_cpu_settings", text="", icon='FILE_REFRESH')
         if cpu_modifier is None:
             row.label(
-                text=_t("CPU Cloth not found", "CPU Cloth не найден"),
-                icon='ERROR')
+                text=_t(
+                    "Cloth will be created on GPU activation",
+                    "Cloth будет создан при включении GPU"),
+                icon='INFO')
         elif settings.cpu_sync_errors or settings.cpu_sync_blockers:
             if settings.cpu_sync_errors:
                 row.label(
@@ -96,24 +98,91 @@ class GPUCLOTH_PT_main(bpy.types.Panel):
         prepared = (
             scene.gpu_cloth_springs_built
             and obj in operators.g_clothOBJs)
+        preparing = operators.prepare_task_active(obj)
 
         layout.separator()
 
         status = layout.row(align=True)
         status.label(
             text=_t("Ready", "Готово") if prepared else
-                 _t("Not prepared", "Не подготовлено"),
-            icon='CHECKMARK' if prepared else 'INFO')
+                 (_t("Preparing", "Подготовка") if preparing else
+                  _t("Not prepared", "Не подготовлено")),
+            icon='CHECKMARK' if prepared else ('TIME' if preparing else 'INFO'))
         prepare = status.row(align=True)
-        prepare.enabled = operators.g_dll is not None and not prepared
+        prepare.enabled = not prepared and not preparing
         prepare.operator(
             "gpucloth.prepare_simulation",
             text=_t("Prepare", "Подготовить"), icon='PLAY')
+        layout.prop(
+            settings, "auto_prepare",
+            text=_t("Auto Prepare", "Автоподготовка"))
+        helper = scene.gpu_cloth_helper
+        if preparing:
+            progress = layout.row()
+            progress.enabled = False
+            progress.prop(
+                helper, "prepare_progress",
+                text=helper.prepare_status or _t("Preparing", "Подготовка"),
+                slider=True)
+        elif helper.prepare_state in {'ERROR', 'CANCELLED'}:
+            layout.label(
+                text=helper.prepare_status,
+                icon='ERROR' if helper.prepare_state == 'ERROR' else 'CANCEL')
+        if getattr(scene.gpu_cloth_helper, "memory_preflight_status", ""):
+            layout.label(
+                text=scene.gpu_cloth_helper.memory_preflight_status,
+                icon=(
+                    'CHECKMARK'
+                    if scene.gpu_cloth_helper.memory_preflight_status.startswith(
+                        "PASS:")
+                    else 'ERROR'))
         stop = status.row(align=True)
-        stop.enabled = operators.g_dll is not None and prepared
+        stop.enabled = prepared or operators.auto_prepare_pending(obj)
         stop.operator(
             "gpucloth.destroy_simulation_data",
             text=_t("Stop", "Остановить"), icon='CANCEL')
+
+        # MD-style grab: armed here, active only while the simulation plays.
+        tool = operators.vertex_drag_tool_state(context)
+        box = layout.box()
+        box.label(
+            text=_t("Move Cloth By Vertex (MD-style)",
+                    "Перемещение ткани за вершину (MD)"),
+            icon='HAND')
+        button = box.row(align=True)
+        button.operator(
+            "gpucloth.move_cloth_by_vertex",
+            text=_t("Move Cloth By Vertex (MD-style)",
+                    "Перемещение ткани за вершину (MD)"),
+            icon='CANCEL' if tool["armed"] else 'TRIA_RIGHT',
+            depress=tool["armed"])
+        if not tool["armed"]:
+            box.label(
+                text=(
+                    _t("Inactive - arm it, then play and drag a vertex",
+                       "Выключено - включите, запустите анимацию и тяните")
+                    if tool["available"] else
+                    _t("Inactive - prepare the simulation first",
+                       "Выключено - сначала выполните Prepare")),
+                icon='INFO')
+        elif tool["dragging"]:
+            box.label(
+                text=_t(
+                    f"Dragging vertex {tool['vertex_index']} of "
+                    f"{tool['object_name']}",
+                    f"Тянем вершину {tool['vertex_index']} объекта "
+                    f"{tool['object_name']}"),
+                icon='PLAY')
+        elif tool["playing"]:
+            box.label(
+                text=_t("Active - click a cloth vertex and drag it",
+                        "Активно - потяните вершину ткани"),
+                icon='PLAY')
+        else:
+            box.label(
+                text=_t("Active - waiting for playback",
+                        "Активно - ожидание воспроизведения"),
+                icon='PAUSE')
 
 
 # ===========================================================================
@@ -982,6 +1051,46 @@ class GPUCLOTH_PT_solver_advanced(bpy.types.Panel):
 
 
 # ===========================================================================
+#  Developer panel: Create Test Scene (3D Viewport sidebar)
+#  Deliberately NOT in _PANEL_CLASSES: the product-surface audit forbids
+#  developer operators in Properties panels, so this dev surface owns
+#  the one-button scene builders instead.
+# ===========================================================================
+
+class GPUCLOTH_PT_test_scenes(bpy.types.Panel):
+    bl_label       = "Create Test Scene"
+    bl_idname      = "GPUCLOTH_PT_test_scenes"
+    bl_space_type  = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category    = "GPUCloth"
+
+    def draw(self, context):
+        layout = self.layout
+        col = layout.column(align=True)
+        col.operator("gpucloth.test_drape_on_sphere",
+                     text="1: Drape on Sphere", icon='MESH_GRID')
+        col.operator("gpucloth.test_twist",
+                     text="2: Twist / Self-Col", icon='MOD_SIMPLEDEFORM')
+        col.operator("gpucloth.test_multi_layer_drop",
+                     text="3: Multi-Layer Drop", icon='MOD_CLOTH')
+        col.operator("gpucloth.test_cushion_drop",
+                     text="4: Cushion (Pressure)", icon='MESH_UVSPHERE')
+        col.operator("gpucloth.test_cape",
+                     text="5: Cape ZPRJ (panels + seams)",
+                     icon='OUTLINER_OB_MESH')
+        col.operator("gpucloth.test_md_horizontal_contact",
+                     text="6: MD Horizontal Contact", icon='MESH_PLANE')
+        col.separator()
+        col.operator("gpucloth.test_ogc_bounds",
+                     text="OGC Bounds Viz", icon='MESH_CIRCLE')
+
+
+_DEV_PANEL_CLASSES = [
+    GPUCLOTH_PT_test_scenes,
+]
+
+
+# ===========================================================================
 #  Registration
 # ===========================================================================
 
@@ -1008,8 +1117,12 @@ _PANEL_CLASSES = [
 def register():
     for cls in _PANEL_CLASSES:
         bpy.utils.register_class(cls)
+    for cls in _DEV_PANEL_CLASSES:
+        bpy.utils.register_class(cls)
 
 
 def unregister():
+    for cls in reversed(_DEV_PANEL_CLASSES):
+        bpy.utils.unregister_class(cls)
     for cls in reversed(_PANEL_CLASSES):
         bpy.utils.unregister_class(cls)

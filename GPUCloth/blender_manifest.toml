@@ -1,0 +1,11 @@
+schema_version = "1.0.0"
+id = "gpucloth"
+version = "0.1.3"
+name = "GPUCloth"
+tagline = "GPU cloth simulation for Blender"
+maintainer = "PorisulkiP"
+type = "add-on"
+website = "https://github.com/PorisulkiP/GPUCloth"
+blender_version_min = "4.2.0"
+license = ["SPDX:AGPL-3.0-only"]
+platforms = ["windows-x64"]

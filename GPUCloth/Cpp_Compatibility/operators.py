@@ -20,19 +20,24 @@ import hashlib
 import json
 import math
 import os
+import queue
 import struct
 import sys
 import subprocess
+import threading
 import time
 from fractions import Fraction
 
 import numpy as np
+from bpy_extras.view3d_utils import (
+    location_3d_to_region_2d, region_2d_to_location_3d)
 from ctypes import (
     addressof, cdll, POINTER, pointer, cast,
     c_bool, c_float, c_int, c_uint, c_uint64, c_void_p, c_size_t,
     c_char_p,
     create_string_buffer, sizeof,
 )
+from mathutils import Vector
 
 from . import cpp_types as CType
 from .proxy_binding import ProxyBindingError, validate_proxy_binding
@@ -42,6 +47,7 @@ from .vertex_channels import (
     prepare_pin_snapshot,
     publish_pin_snapshot,
     vertex_group_weights,
+    with_dragged_vertex_pin,
 )
 from ..utils import version_compatibility_utils as vcu
 
@@ -97,6 +103,13 @@ _effector_publication_state = {
 _collider_history = {}
 _drape_status_by_uid = {}
 _teardown_failure = False
+_pending_auto_prepare = None
+_auto_prepare_timer_registered = False
+_prepare_task = None
+_prepare_timer_registered = False
+_prepare_task_serial = 0
+_stop_requested = False
+_PREPARE_POLL_INTERVAL = 0.05
 _MODIFIER_VISIBILITY = (
     "show_viewport", "show_render", "show_in_editmode", "show_on_cage")
 
@@ -120,6 +133,500 @@ def _runtime_owners_retained():
         _collection_snapshots or _effector_weight_states or
         _collider_history or
         _initial_positions)
+
+
+def prepare_task_active(obj=None):
+    task = _prepare_task
+    if task is None:
+        return False
+    return obj is None or task.get("object_name") == getattr(
+        obj, "name_full", getattr(obj, "name", None))
+
+
+def _prepare_native_worker_active():
+    task = _prepare_task
+    worker = task.get("worker") if task is not None else None
+    return worker is not None and worker.is_alive()
+
+
+def auto_prepare_pending(obj=None):
+    if prepare_task_active(obj):
+        return True
+    request = _pending_auto_prepare
+    if request is None:
+        return False
+    return obj is None or request.get("object_name") == getattr(
+        obj, "name_full", getattr(obj, "name", None))
+
+
+def cancel_auto_prepare():
+    """Cancel the single deferred prepare request and its timer owner."""
+    global _pending_auto_prepare, _auto_prepare_timer_registered
+    _pending_auto_prepare = None
+    if _auto_prepare_timer_registered:
+        try:
+            if bpy.app.timers.is_registered(_run_auto_prepare):
+                bpy.app.timers.unregister(_run_auto_prepare)
+        except (AttributeError, RuntimeError):
+            pass
+    _auto_prepare_timer_registered = False
+    cancel_prepare_task()
+
+
+def _run_auto_prepare():
+    global _pending_auto_prepare, _auto_prepare_timer_registered
+    request = _pending_auto_prepare
+    if request is not None and prepare_task_active():
+        return _PREPARE_POLL_INTERVAL
+    _pending_auto_prepare = None
+    _auto_prepare_timer_registered = False
+    if request is None or _stop_requested:
+        return None
+    scene = bpy.data.scenes.get(request["scene_name"])
+    obj = bpy.data.objects.get(request["object_name"])
+    if scene is None or obj is None:
+        return None
+    settings = getattr(obj, "GPUCloth", None)
+    if (settings is None or settings.execution_backend != 'GPU' or
+            not settings.is_active or not settings.auto_prepare):
+        return None
+    view_layer = scene.view_layers[0] if scene.view_layers else None
+    helper = getattr(scene, "gpu_cloth_helper", None)
+    if view_layer is None:
+        if helper is not None:
+            helper.memory_preflight_status = (
+                "ERROR: deferred prepare has no scene view layer")
+        return None
+    previous_active = view_layer.objects.active
+    previous_selected = tuple(
+        candidate for candidate in view_layer.objects
+        if candidate.select_get())
+    try:
+        view_layer.objects.active = obj
+        obj.select_set(True)
+        override = {
+            "scene": scene,
+            "view_layer": view_layer,
+            "object": obj,
+            "active_object": obj,
+        }
+        if bpy.context.window is not None:
+            override["window"] = bpy.context.window
+        with bpy.context.temp_override(
+                **override):
+            if not _start_prepare_task(bpy.context, automatic=True):
+                raise RuntimeError("another preparation task is active")
+    except (AttributeError, RuntimeError) as exc:
+        message = f"ERROR: deferred prepare failed: {exc}"
+        if helper is not None:
+            helper.memory_preflight_status = message
+        print(f"[GPUCloth] {message}")
+    finally:
+        view_layer.objects.active = previous_active
+        for candidate in view_layer.objects:
+            candidate.select_set(candidate in previous_selected)
+    return None
+
+
+def schedule_auto_prepare(obj, scene):
+    """Queue one Blender-main-thread prepare after property callbacks return."""
+    global _pending_auto_prepare, _auto_prepare_timer_registered, _stop_requested
+    if obj is None or scene is None:
+        return False
+    _stop_requested = False
+    _pending_auto_prepare = {
+        "object_name": getattr(obj, "name_full", obj.name),
+        "scene_name": getattr(scene, "name_full", scene.name),
+    }
+    if _auto_prepare_timer_registered:
+        return True
+    try:
+        bpy.app.timers.register(_run_auto_prepare, first_interval=0.0)
+    except (AttributeError, RuntimeError):
+        _pending_auto_prepare = None
+        return False
+    _auto_prepare_timer_registered = True
+    return True
+
+
+def _tag_prepare_redraw():
+    try:
+        windows = tuple(bpy.context.window_manager.windows)
+    except (AttributeError, ReferenceError, RuntimeError):
+        return
+    for window in windows:
+        try:
+            areas = tuple(window.screen.areas)
+        except (AttributeError, ReferenceError, RuntimeError):
+            continue
+        for area in areas:
+            if getattr(area, "type", None) == 'PROPERTIES':
+                area.tag_redraw()
+
+
+def _set_prepare_status(scene, state, progress, message):
+    helper = getattr(scene, "gpu_cloth_helper", None)
+    if helper is not None:
+        helper.prepare_state = str(state)
+        helper.prepare_progress = max(0, min(100, int(progress)))
+        helper.prepare_status = str(message)
+    task = _prepare_task
+    if task is not None:
+        task["state"] = str(state)
+        task["progress"] = max(0, min(100, int(progress)))
+        if task.get("wm_progress"):
+            try:
+                bpy.context.window_manager.progress_update(task["progress"])
+            except (AttributeError, ReferenceError, RuntimeError):
+                task["wm_progress"] = False
+    _tag_prepare_redraw()
+
+
+def _prepare_progress(progress, message):
+    return {
+        "kind": "progress",
+        "progress": int(progress),
+        "message": str(message),
+    }
+
+
+def _prepare_native(function, args, progress, message):
+    return {
+        "kind": "native",
+        "function": function,
+        "args": tuple(args),
+        "progress": int(progress),
+        "message": str(message),
+    }
+
+
+def _run_prepare_native(result_queue, token, function, args):
+    """Run one pure native call; this worker never owns Blender data."""
+    try:
+        result = function(*args)
+    except BaseException as exc:
+        result_queue.put((token, False, exc))
+    else:
+        result_queue.put((token, True, result))
+
+
+class _PrepareRunner:
+    def __init__(self, scene_name):
+        self.scene_name = scene_name
+        self._native_prepare_mutated = False
+        self.last_report = ""
+
+    def report(self, levels, message):
+        self.last_report = str(message)
+        task = _prepare_task
+        if task is None or task.get("scene_name") != self.scene_name:
+            print(f"[GPUCloth] {message}")
+            return
+        scene = bpy.data.scenes.get(self.scene_name)
+        if scene is not None:
+            state = "ERROR" if 'ERROR' in levels else task["state"]
+            _set_prepare_status(scene, state, task["progress"], message)
+        print(f"[GPUCloth] {message}")
+
+
+def _prepare_context(task):
+    scene = bpy.data.scenes.get(task["scene_name"])
+    obj = bpy.data.objects.get(task["object_name"])
+    if scene is None or obj is None:
+        raise RuntimeError("preparation scene or object no longer exists")
+    view_layer = scene.view_layers.get(task["view_layer_name"])
+    if view_layer is None:
+        raise RuntimeError("preparation view layer no longer exists")
+    return scene, obj, view_layer
+
+
+def _resume_prepare_task(task):
+    scene, obj, view_layer = _prepare_context(task)
+    previous_active = view_layer.objects.active
+    previous_selected = tuple(
+        candidate for candidate in view_layer.objects
+        if candidate.select_get())
+    try:
+        view_layer.objects.active = obj
+        obj.select_set(True)
+        override = {
+            "scene": scene,
+            "view_layer": view_layer,
+            "object": obj,
+            "active_object": obj,
+        }
+        if bpy.context.window is not None:
+            override["window"] = bpy.context.window
+        with bpy.context.temp_override(**override):
+            if task["generator"] is None:
+                task["generator"] = (
+                    GPUCloth_PrepareSimulation._prepare_steps(
+                        task["runner"], bpy.context))
+            pending_exception = task.pop("pending_exception", None)
+            if pending_exception is not None:
+                return task["generator"].throw(pending_exception)
+            if task.pop("send_ready", False):
+                return task["generator"].send(task.pop("send_value", None))
+            return next(task["generator"])
+    finally:
+        try:
+            view_layer.objects.active = previous_active
+            for candidate in view_layer.objects:
+                candidate.select_set(candidate in previous_selected)
+        except (AttributeError, ReferenceError, RuntimeError):
+            pass
+
+
+def _restore_prepare_mode(task):
+    original_mode = task.get("original_mode")
+    if original_mode is None:
+        return
+    try:
+        scene, obj, view_layer = _prepare_context(task)
+        previous_active = view_layer.objects.active
+        previous_selected = tuple(
+            candidate for candidate in view_layer.objects
+            if candidate.select_get())
+        view_layer.objects.active = obj
+        obj.select_set(True)
+        override = {
+            "scene": scene,
+            "view_layer": view_layer,
+            "object": obj,
+            "active_object": obj,
+        }
+        if bpy.context.window is not None:
+            override["window"] = bpy.context.window
+        try:
+            with bpy.context.temp_override(**override):
+                if obj.mode != original_mode:
+                    bpy.ops.object.mode_set(mode=original_mode)
+        finally:
+            view_layer.objects.active = previous_active
+            for candidate in view_layer.objects:
+                candidate.select_set(candidate in previous_selected)
+    except (AttributeError, ReferenceError, RuntimeError):
+        pass
+
+
+def _finish_prepare_task(success=False, cancelled=False, error=None):
+    global _prepare_task, _prepare_timer_registered, _stop_requested
+    task = _prepare_task
+    if task is None:
+        return
+    worker = task.get("worker")
+    if worker is not None and worker.is_alive():
+        raise RuntimeError("cannot finish preparation while native worker runs")
+    generator = task.get("generator")
+    if generator is not None and not task.get("generator_finished"):
+        try:
+            generator.close()
+        except (RuntimeError, ValueError):
+            pass
+    _restore_prepare_mode(task)
+    scene = bpy.data.scenes.get(task["scene_name"])
+    runner = task["runner"]
+    native_mutated = bool(runner._native_prepare_mutated)
+    if not success:
+        if native_mutated:
+            try:
+                context_scene, context_obj, view_layer = _prepare_context(task)
+                override = {
+                    "scene": context_scene,
+                    "view_layer": view_layer,
+                    "object": context_obj,
+                    "active_object": context_obj,
+                }
+                if bpy.context.window is not None:
+                    override["window"] = bpy.context.window
+                with bpy.context.temp_override(**override):
+                    free_gpu_memory(bpy.context)
+            except (AttributeError, ReferenceError, RuntimeError):
+                free_gpu_memory()
+        else:
+            for modifier, visibility in task["modifier_state"]:
+                try:
+                    for attribute, value in zip(
+                            _MODIFIER_VISIBILITY, visibility):
+                        setattr(modifier, attribute, value)
+                except (AttributeError, ReferenceError, RuntimeError):
+                    pass
+        if scene is not None and hasattr(scene, "gpu_cloth_springs_built"):
+            scene.gpu_cloth_springs_built = (
+                False if native_mutated else task["original_springs_built"])
+
+    if task.get("wm_progress"):
+        try:
+            bpy.context.window_manager.progress_end()
+        except (AttributeError, ReferenceError, RuntimeError):
+            pass
+        task["wm_progress"] = False
+    if scene is not None:
+        if success:
+            message = "GPUCloth preparation complete"
+            state = "READY"
+            progress = 100
+        elif cancelled:
+            message = "GPUCloth preparation cancelled"
+            state = "CANCELLED"
+            progress = task["progress"]
+        else:
+            detail = str(error or runner.last_report or "unknown error")
+            message = detail if detail.startswith("ERROR:") else f"ERROR: {detail}"
+            state = "ERROR"
+            progress = task["progress"]
+        _set_prepare_status(scene, state, progress, message)
+    _prepare_task = None
+    _prepare_timer_registered = False
+    _stop_requested = not success
+    _tag_prepare_redraw()
+
+
+def _advance_prepare_task():
+    global _prepare_timer_registered
+    task = _prepare_task
+    if task is None:
+        _prepare_timer_registered = False
+        return None
+
+    worker = task.get("worker")
+    if worker is not None:
+        if worker.is_alive():
+            return _PREPARE_POLL_INTERVAL
+        try:
+            token, succeeded, payload = task["result_queue"].get_nowait()
+        except queue.Empty:
+            return _PREPARE_POLL_INTERVAL
+        task["worker"] = None
+        if token != task["token"]:
+            _finish_prepare_task(error="native worker token mismatch")
+            return None
+        if task["cancel_requested"]:
+            _finish_prepare_task(cancelled=True)
+            return None
+        if succeeded:
+            task["send_value"] = payload
+            task["send_ready"] = True
+        else:
+            task["pending_exception"] = payload
+
+    if task["cancel_requested"]:
+        _finish_prepare_task(cancelled=True)
+        return None
+
+    try:
+        event = _resume_prepare_task(task)
+    except StopIteration as completed:
+        task["generator_finished"] = True
+        result = completed.value
+        if result == {'FINISHED'} and not _teardown_failure:
+            _finish_prepare_task(success=True)
+        else:
+            _finish_prepare_task(
+                error=task["runner"].last_report or "preparation failed")
+        return None
+    except BaseException as exc:
+        _finish_prepare_task(error=f"Prepare transaction failed: {exc}")
+        return None
+
+    if not isinstance(event, dict):
+        _finish_prepare_task(error="invalid preparation task event")
+        return None
+    scene = bpy.data.scenes.get(task["scene_name"])
+    if scene is None:
+        _finish_prepare_task(error="preparation scene no longer exists")
+        return None
+    kind = event.get("kind")
+    _set_prepare_status(
+        scene, "BUILDING" if kind == "native" else "PREPARING",
+        event.get("progress", task["progress"]), event.get("message", ""))
+    if kind == "progress":
+        return 0.01
+    if kind != "native":
+        _finish_prepare_task(error=f"unsupported preparation event {kind!r}")
+        return None
+    result_queue = queue.Queue(maxsize=1)
+    worker = threading.Thread(
+        name=f"GPUClothPrepare-{task['token']}",
+        target=_run_prepare_native,
+        args=(result_queue, task["token"], event["function"], event["args"]),
+        daemon=False,
+    )
+    task["result_queue"] = result_queue
+    task["worker"] = worker
+    worker.start()
+    return _PREPARE_POLL_INTERVAL
+
+
+def _start_prepare_task(context, automatic=False):
+    global _prepare_task, _prepare_timer_registered, _prepare_task_serial
+    if _prepare_task is not None:
+        return False
+    scene = getattr(context, "scene", None)
+    obj = getattr(context, "object", None) or getattr(
+        context, "active_object", None)
+    view_layer = getattr(context, "view_layer", None)
+    if scene is None or obj is None or view_layer is None:
+        return False
+    _prepare_task_serial += 1
+    modifier_state = []
+    for candidate in tuple(getattr(scene, "objects", ())):
+        for modifier in tuple(getattr(candidate, "modifiers", ())):
+            if getattr(modifier, "type", None) == 'CLOTH':
+                modifier_state.append((
+                    modifier,
+                    tuple(bool(getattr(modifier, attribute, False))
+                          for attribute in _MODIFIER_VISIBILITY),
+                ))
+    runner = _PrepareRunner(scene.name_full)
+    _prepare_task = {
+        "token": _prepare_task_serial,
+        "scene_name": scene.name_full,
+        "object_name": obj.name_full,
+        "view_layer_name": view_layer.name,
+        "automatic": bool(automatic),
+        "runner": runner,
+        "generator": None,
+        "generator_finished": False,
+        "worker": None,
+        "cancel_requested": False,
+        "state": "QUEUED",
+        "progress": 0,
+        "original_mode": getattr(obj, "mode", None),
+        "original_springs_built": bool(getattr(
+            scene, "gpu_cloth_springs_built", False)),
+        "modifier_state": modifier_state,
+        "wm_progress": False,
+    }
+    try:
+        context.window_manager.progress_begin(0, 100)
+        _prepare_task["wm_progress"] = True
+    except (AttributeError, ReferenceError, RuntimeError):
+        pass
+    _set_prepare_status(scene, "QUEUED", 0, "GPUCloth preparation queued")
+    try:
+        bpy.app.timers.register(_advance_prepare_task, first_interval=0.0)
+    except (AttributeError, RuntimeError):
+        _finish_prepare_task(error="failed to register preparation timer")
+        return False
+    _prepare_timer_registered = True
+    return True
+
+
+def cancel_prepare_task():
+    task = _prepare_task
+    if task is None:
+        return False
+    task["cancel_requested"] = True
+    scene = bpy.data.scenes.get(task["scene_name"])
+    if scene is not None:
+        _set_prepare_status(
+            scene, "CANCELLING", task["progress"],
+            "Cancelling GPUCloth preparation")
+    worker = task.get("worker")
+    if worker is None or not worker.is_alive():
+        _finish_prepare_task(cancelled=True)
+    return True
 
 
 def _reject_unsupported_v3_owners(scene, cloth_objects):
@@ -172,6 +679,82 @@ def _reject_unsupported_v3_owners(scene, cloth_objects):
             ", ".join(unsupported))
 
 
+def _estimate_gpu_memory_bytes(simulation_objects, solver_types):
+    """Estimate explicitly described persistent v3 buffers, in bytes."""
+    if len(simulation_objects) != len(solver_types):
+        raise RuntimeError("GPU memory estimate inputs are inconsistent")
+    position_components = 3
+    edge_endpoints = 2
+    face_indices = 2
+    loop_indices = 2
+    solver_state_vectors = {"PD": 2, "Mil2": 3}
+    total = 0
+    for obj, solver in zip(simulation_objects, solver_types):
+        if solver not in solver_state_vectors:
+            raise RuntimeError(f"GPU memory estimate solver is unsupported: {solver}")
+        mesh = obj.data
+        vertices = len(mesh.vertices)
+        edges = len(mesh.edges)
+        faces = len(mesh.polygons)
+        loops = len(mesh.loops)
+        vertex_state = vertices * position_components * sizeof(c_float)
+        topology = (
+            edges * sizeof(c_uint) * edge_endpoints +
+            faces * sizeof(c_uint) * face_indices +
+            loops * sizeof(c_uint) * loop_indices)
+        solver_state = vertex_state * solver_state_vectors[solver]
+        total += vertex_state + topology + solver_state
+    return int(total)
+
+
+def _query_gpu_memory_bytes():
+    """Read device-0 free/total memory through the existing nvidia-smi path."""
+    try:
+        result = subprocess.run(
+            [
+                "nvidia-smi", "--query-gpu=memory.free,memory.total",
+                "--format=csv,noheader,nounits",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=True,
+        )
+        first = next(line for line in result.stdout.splitlines() if line.strip())
+        free_text, total_text = (item.strip() for item in first.split(",", 1))
+        free_mib = int(free_text)
+        total_mib = int(total_text)
+    except (FileNotFoundError, subprocess.CalledProcessError,
+            StopIteration, ValueError):
+        return None
+    if free_mib < 0 or total_mib <= 0 or free_mib > total_mib:
+        return None
+    return free_mib * 1024 * 1024, total_mib * 1024 * 1024
+
+
+def _require_gpu_memory_preflight(simulation_objects, solver_types):
+    """Admit only a visible lower-bound estimate; native allocation remains oracle."""
+    estimate = _estimate_gpu_memory_bytes(simulation_objects, solver_types)
+    required = estimate
+    available = _query_gpu_memory_bytes()
+    if available is None:
+        raise RuntimeError(
+            "GPU memory preflight unavailable: nvidia-smi free/total query "
+            "failed; native allocation not attempted")
+    free_bytes, total_bytes = available
+    if free_bytes < required:
+        raise RuntimeError(
+            "GPU memory preflight rejected: "
+            f"free={free_bytes} bytes, lower-bound={required} bytes, "
+            f"total={total_bytes} bytes")
+    return {
+        "free_bytes": free_bytes,
+        "total_bytes": total_bytes,
+        "estimate_bytes": estimate,
+        "lower_bound_bytes": required,
+    }
+
+
 def _runtime_handle_value():
     value = getattr(g_runtime_handle, "value", g_runtime_handle)
     return int(value or 0)
@@ -196,82 +779,12 @@ def _opaque_handle_value(handle):
     return int(value or 0)
 
 
-def _guard_prepare_teardown(execute):
-    def wrapped(operator, context):
-        active_object = getattr(context, "active_object", None)
-        original_mode = getattr(active_object, "mode", None)
-        original_springs_built = bool(getattr(
-            context.scene, "gpu_cloth_springs_built", False))
-        modifier_state = []
-        for obj in tuple(getattr(context.scene, "objects", ())):
-            for modifier in tuple(getattr(obj, "modifiers", ())):
-                if getattr(modifier, "type", None) == 'CLOTH':
-                    modifier_state.append((
-                        modifier,
-                        tuple(bool(getattr(modifier, attribute, False))
-                              for attribute in _MODIFIER_VISIBILITY),
-                    ))
-        if _teardown_failure:
-            if not free_gpu_memory(context):
-                operator.report(
-                    {'ERROR'},
-                    "Native teardown retry failed; retained owners block "
-                    "prepare")
-                return {'CANCELLED'}
-
-        failure = None
-        try:
-            result = execute(operator, context)
-        except Exception as exc:
-            failure = exc
-            result = {'CANCELLED'}
-            operator.report({'ERROR'}, f"Prepare transaction failed: {exc}")
-
-        if original_mode is not None:
-            active_object = getattr(context, "active_object", None)
-            try:
-                if (active_object is not None and
-                        active_object.mode != original_mode):
-                    bpy.ops.object.mode_set(mode=original_mode)
-            except (AttributeError, RuntimeError):
-                if failure is None:
-                    failure = RuntimeError(
-                        f"cannot restore Blender mode {original_mode}")
-                    operator.report({'ERROR'}, str(failure))
-
-        native_mutated = bool(getattr(
-            operator, "_native_prepare_mutated", False))
-        succeeded = (
-            result == {'FINISHED'} and failure is None and
-            not _teardown_failure)
-        if not succeeded:
-            if native_mutated and _runtime_owners_retained():
-                free_gpu_memory(context)
-            if not native_mutated:
-                for modifier, visibility in modifier_state:
-                    try:
-                        for attribute, value in zip(
-                                _MODIFIER_VISIBILITY, visibility):
-                            setattr(modifier, attribute, value)
-                    except (AttributeError, ReferenceError, RuntimeError):
-                        pass
-            if hasattr(context.scene, "gpu_cloth_springs_built"):
-                context.scene.gpu_cloth_springs_built = (
-                    False if native_mutated else original_springs_built)
-
-        if _teardown_failure:
-            operator.report(
-                {'ERROR'},
-                "Native teardown failed; retained owners block prepare")
-            return {'CANCELLED'}
-        if failure is not None:
-            return {'CANCELLED'}
-        return result
-    return wrapped
-
-
 def ensure_native_teardown(shutdown_runtime=False):
     """Resolve retained native owners before package registration mutation."""
+    if prepare_task_active():
+        cancel_prepare_task()
+        if prepare_task_active():
+            return False
     if not (_teardown_failure or _runtime_owners_retained()):
         return True
     return free_gpu_memory(shutdown_runtime=shutdown_runtime)
@@ -350,20 +863,20 @@ def _reject_active_shape_keys(obj):
 
 
 def _plan_modifier_evaluation(bindings):
+    from . import cloth_settings_bridge
     plans = []
     for binding_index, binding in enumerate(bindings):
         cloth_obj = binding["render_object"]
         simulation_obj = binding["simulation_object"]
         modifiers = tuple(getattr(cloth_obj, "modifiers", ()))
-        cloth_indices = [
-            index for index, modifier in enumerate(modifiers)
-            if getattr(modifier, "type", None) == 'CLOTH']
-        if len(cloth_indices) != 1:
+        cpu_cloth_modifiers = cloth_settings_bridge.find_cpu_cloth_modifiers(
+            cloth_obj)
+        if len(cpu_cloth_modifiers) != 1:
             raise RuntimeError(
                 f"{cloth_obj.name_full!r} requires exactly one Cloth "
                 "modifier")
-        cloth_index = cloth_indices[0]
-        cloth_modifier = modifiers[cloth_index]
+        cloth_modifier = cpu_cloth_modifiers[0]
+        cloth_index = modifiers.index(cloth_modifier)
         if bool(getattr(cloth_modifier, "use_pin_to_last", False)):
             raise RuntimeError(
                 f"{cloth_obj.name_full!r} Cloth use_pin_to_last is not "
@@ -520,7 +1033,9 @@ def _create_v3_cloth_owner(
     inverse_matrix = _matrix_signature(
         _matrix_inverse(
             simulation_obj.matrix_world,
-            f"{simulation_obj.name_full!r} world transform"),
+            f"{simulation_obj.name_full!r} world transform",
+            require_rigid_transform=(
+                int(backend) == CType.GPUCLOTH_V3_BACKEND_FAST)),
         f"{simulation_obj.name_full!r} inverse transform")
     config = CType.GPUClothV3ClothCreateConfig()
     config.struct_size = sizeof(config)
@@ -1959,6 +2474,9 @@ def _solver_diagnostic_snapshot(index):
         "solve_count": int(status.solve_count),
         "failure_count": int(status.failure_count),
         "event_generation": int(status.event_generation),
+        # Additive W2 diagnostic: selected joint-bank stable-orientation
+        # conflicts for the last solved frame (0 = none reported).
+        "joint_orientation_conflicts": int(status.joint_orientation_conflicts),
     }
     events = []
     if result == CType.GPUCLOTH_ABI_OK:
@@ -3232,19 +3750,75 @@ def _matrix_signature(matrix, label):
     return _finite_float32_tuple(values, label)
 
 
-def _matrix_inverse(matrix, label):
-    _matrix_signature(matrix, label)
+# Blender's matrix values are published as float32.  The largest expression
+# below is a three-term dot product or a 3x3 determinant; 64 unit roundoffs
+# (64 * 2**-23 ~= 7.63e-6) bounds their accumulated float32 error.  The
+# explicit 1e-5 ceiling leaves a small conversion margin and is only a
+# roundoff allowance; it does not rescale geometry or admit measurable scale.
+_RIGID_TRANSFORM_TOLERANCE = 1.0e-5
+
+
+def _validate_rigid_transform(matrix, label):
+    """Require an affine transform with unit scale and no shear."""
+    values = _matrix_signature(matrix, label)
+    tolerance = _RIGID_TRANSFORM_TOLERANCE
+    if (
+            abs(values[12]) > tolerance or
+            abs(values[13]) > tolerance or
+            abs(values[14]) > tolerance or
+            abs(values[15] - 1.0) > tolerance):
+        raise RuntimeError(
+            f"{label} must be an affine rigid transform with applied scale")
+    columns = tuple(
+        tuple(values[row * 4 + column] for row in range(3))
+        for column in range(3))
+    for column in columns:
+        if abs(sum(value * value for value in column) - 1.0) > tolerance:
+            raise RuntimeError(
+                f"{label} must be an affine rigid transform with applied scale")
+    for first in range(3):
+        for second in range(first + 1, 3):
+            if abs(sum(
+                    columns[first][index] * columns[second][index]
+                    for index in range(3))) > tolerance:
+                raise RuntimeError(
+                    f"{label} must be an affine rigid transform with applied scale")
+    determinant = (
+        columns[0][0] * (
+            columns[1][1] * columns[2][2] -
+            columns[1][2] * columns[2][1]) -
+        columns[1][0] * (
+            columns[0][1] * columns[2][2] -
+            columns[0][2] * columns[2][1]) +
+        columns[2][0] * (
+            columns[0][1] * columns[1][2] -
+            columns[0][2] * columns[1][1]))
+    if abs(determinant - 1.0) > tolerance:
+        raise RuntimeError(
+            f"{label} must be an affine rigid transform with applied scale")
+    return matrix
+
+
+def _matrix_inverse(matrix, label, require_rigid_transform=False):
+    if require_rigid_transform:
+        _validate_rigid_transform(matrix, label)
+    else:
+        _matrix_signature(matrix, label)
     try:
         inverse = matrix.inverted()
     except (
             AttributeError, ReferenceError, RuntimeError, TypeError,
             ValueError, ZeroDivisionError) as exc:
         raise RuntimeError(f"{label} is singular") from exc
-    _matrix_signature(inverse, f"{label} inverse")
+    if require_rigid_transform:
+        _validate_rigid_transform(inverse, f"{label} inverse")
+    else:
+        _matrix_signature(inverse, f"{label} inverse")
     return inverse
 
 
-def _cloth_local_matrix(cloth_inverse, object_matrix, label):
+def _cloth_local_matrix(
+        cloth_inverse, object_matrix, label, require_rigid_transform=False):
     try:
         relative = cloth_inverse @ object_matrix
     except (
@@ -3252,7 +3826,10 @@ def _cloth_local_matrix(cloth_inverse, object_matrix, label):
             ValueError) as exc:
         raise RuntimeError(
             f"cannot transform {label} into cloth-local space") from exc
-    _matrix_signature(relative, f"{label} cloth-local transform")
+    if require_rigid_transform:
+        _validate_rigid_transform(relative, f"{label} cloth-local transform")
+    else:
+        _matrix_signature(relative, f"{label} cloth-local transform")
     return relative
 
 
@@ -3287,9 +3864,22 @@ def _collider_motion_classification(
         CType.GPUCLOTH_FEATURE_STATIC_OBJECT_COLLISION)
 
 
+def _resolve_collider_surface_contract(settings):
+    """Map Blender's independent flags onto the finite native ABI."""
+    single_sided = bool(settings.use_culling)
+    # Blender 4.2 defaults to (True, False). The native one-sided contract
+    # always uses surface normals, so Single Sided owns the mapping. Keep RNA
+    # unchanged; Override Normals cannot change native sidedness.
+    bool(settings.use_normal)
+    return (
+        CType.GPUCLOTH_COLLIDER_ONE_SIDED_NORMAL
+        if single_sided else CType.GPUCLOTH_COLLIDER_TWO_SIDED)
+
+
 def _capture_collider_payload(
     occurrence, modifier_index, depsgraph, cloth_owner_id, collection_id,
-        snapshot_generation, collider_history, cloth_inverse):
+        snapshot_generation, collider_history, cloth_inverse,
+        require_rigid_transform=False):
     evaluated = occurrence["evaluated_object"]
     mesh = None
     mesh_owner = None
@@ -3346,7 +3936,8 @@ def _capture_collider_payload(
         cloth_local_positions = [None] * (vertex_count * 3)
         relative_matrix = _cloth_local_matrix(
             cloth_inverse, occurrence["matrix_world"],
-            f"collider {occurrence['source_object'].name_full!r}")
+            f"collider {occurrence['source_object'].name_full!r}",
+            require_rigid_transform)
         for vertex in mesh.vertices:
             index = int(vertex.index)
             if index < 0 or index >= vertex_count:
@@ -3533,8 +4124,7 @@ def _capture_collider_payload(
         config.friction = float(settings.cloth_friction)
         config.damping = float(settings.damping)
         config.effector_absorption = float(settings.absorption)
-        use_culling = bool(settings.use_culling)
-        use_normal = bool(settings.use_normal)
+        config.sidedness = _resolve_collider_surface_contract(settings)
     except (AttributeError, ReferenceError, RuntimeError, TypeError) as exc:
         raise RuntimeError(
             f"collider {source_object.name_full!r} has incomplete Blender "
@@ -3561,15 +4151,6 @@ def _capture_collider_payload(
         raise RuntimeError(
             f"collider {source_object.name_full!r} absorption is "
             "outside [0, 1]")
-    if use_culling != use_normal:
-        raise RuntimeError(
-            f"collider {source_object.name_full!r} must select an explicit "
-            "surface contract: culling+normal for one-sided, or neither "
-            "for two-sided")
-    config.sidedness = (
-        CType.GPUCLOTH_COLLIDER_ONE_SIDED_NORMAL
-        if use_culling else CType.GPUCLOTH_COLLIDER_TWO_SIDED)
-
     record = CType.GPUClothCollectionRecord()
     record.struct_size = sizeof(record)
     record.record_version = 1
@@ -3977,6 +4558,8 @@ def _prepare_collection_snapshots(
         cloth_owner_id = _blender_session_uid(
             owner_obj, "cloth simulation object")
         settings = cloth_obj.GPUCloth
+        require_rigid_transform = (
+            str(getattr(settings, "solver_type", "")) == "PD")
         try:
             evaluated_cloth = cloth_obj.evaluated_get(depsgraph)
             cloth_world = evaluated_cloth.matrix_world.copy()
@@ -3988,7 +4571,8 @@ def _prepare_collection_snapshots(
                 f"{cloth_obj.name_full!r}") from exc
         cloth_inverse = _matrix_inverse(
             cloth_world,
-            f"cloth {cloth_obj.name_full!r} evaluated world transform")
+            f"cloth {cloth_obj.name_full!r} evaluated world transform",
+            require_rigid_transform)
         collision_selection = _collision_collection_selection(settings)
         effector_selection = _collection_selection(
             settings.effector_weights.collection, "effector")
@@ -4008,7 +4592,8 @@ def _prepare_collection_snapshots(
                 occurrence, modifier_index, depsgraph, cloth_owner_id,
                 collision_selection["collection_id"]
                 if collision_selection is not None else 0,
-                snapshot_generation, collider_history, cloth_inverse))
+                snapshot_generation, collider_history, cloth_inverse,
+                require_rigid_transform))
 
         effector_payloads = []
         effector_sources = []
@@ -4377,10 +4962,12 @@ def _publish_frame_inputs(context, depsgraph):
         prepared_dynamic_meshes = []
         for index, (cloth_obj, simulation_obj) in enumerate(zip(
                 g_clothOBJs, g_simulationOBJs)):
-            prepared_pins.append(_capture_pin_snapshot(
-                cloth_obj, simulation_obj, capture_depsgraph,
-                _pin_snapshot_states[index]["topology_generation"],
-                generation))
+            prepared_pins.append(_vertex_drag_pin_snapshot(
+                index,
+                _capture_pin_snapshot(
+                    cloth_obj, simulation_obj, capture_depsgraph,
+                    _pin_snapshot_states[index]["topology_generation"],
+                    generation)))
             dynamic_state = _dynamic_mesh_states[index]
             enabled = bool(cloth_obj.GPUCloth.use_dynamic_mesh)
             if enabled != bool(dynamic_state["enabled"]):
@@ -4451,7 +5038,13 @@ def _accept_dynamic_mesh_snapshot(index):
 _cache_playback_guard  = {'active': False}
 _initial_positions     = []     # list[np.ndarray] — rest positions per cloth object
 _bake_range            = {'start': 1, 'end': 250}
-_simulation_frame_state = {'last_solved': None}
+_simulation_frame_state = {
+    'last_solved': None,
+    # Live simulation does not own a native cache unless bake/playback is
+    # requested.  Retain reached render states so timeline rewinds still
+    # publish the requested geometry in that mode.
+    'positions': {},
+}
 _cache_source_state = {'generation': 0}
 _input_generation = {'value': 0}
 
@@ -4498,6 +5091,8 @@ def _cache_source_generation(scene):
             "bake_start", "bake_end", "bake_progress",
             "is_baked", "is_baking", "is_outdated", "is_frame_skip",
             "cache_info", "cached_frame_count", "playback_mode",
+            "memory_preflight_status", "prepare_state", "prepare_status",
+            "prepare_progress",
         })
     _cache_hash_value(hasher, "render.fps", scene.render.fps)
     _cache_hash_value(hasher, "render.fps_base", scene.render.fps_base)
@@ -4781,6 +5376,38 @@ def _restore_initial_positions():
             cloth_obj.data.update_tag()
 
 
+def _store_simulation_frame(frame):
+    """Retain one reached render state for live timeline playback."""
+    snapshots = []
+    for cloth_obj in g_clothOBJs:
+        values = np.empty(len(cloth_obj.data.vertices) * 3, dtype=np.float32)
+        cloth_obj.data.vertices.foreach_get("co", values)
+        snapshots.append(values.copy())
+    _simulation_frame_state['positions'][int(frame)] = tuple(snapshots)
+
+
+def _load_simulation_frame(frame, depsgraph):
+    """Publish a retained live state when native cache is unavailable."""
+    snapshots = _simulation_frame_state['positions'].get(int(frame))
+    if snapshots is None:
+        if int(frame) != int(_bake_range['start']) or not _initial_positions:
+            return False
+        _restore_initial_positions()
+        depsgraph.update()
+        return True
+    if len(snapshots) != len(g_clothOBJs):
+        return False
+    for cloth_obj, values in zip(g_clothOBJs, snapshots):
+        expected = len(cloth_obj.data.vertices) * 3
+        if values.size != expected:
+            return False
+        cloth_obj.data.vertices.foreach_set("co", values)
+        cloth_obj.data.update()
+        cloth_obj.data.update_tag()
+    depsgraph.update()
+    return True
+
+
 def _load_cached_frame(scene, depsgraph, frame):
     if g_dll is None or not _runtime_handle_value() or not _cache_handle_value():
         return False
@@ -4891,7 +5518,8 @@ def _cache_write_frame(scene, frame, values, vertex_count):
 
 
 def _cache_input_change_handler(scene, depsgraph):
-    if (_cache_playback_guard['active'] or g_dll is None or
+    if (prepare_task_active() or _cache_playback_guard['active'] or
+            g_dll is None or
             not g_clothOBJs or _cache_source_state['generation'] == 0):
         return
     helper = scene.gpu_cloth_helper
@@ -4918,7 +5546,7 @@ def _cache_input_change_handler(scene, depsgraph):
 
 
 def _frame_change_handler(scene, depsgraph):
-    if _teardown_failure:
+    if prepare_task_active() or _teardown_failure or _stop_requested:
         return
     if _cache_playback_guard['active']:
         return
@@ -4943,7 +5571,8 @@ def _frame_change_handler(scene, depsgraph):
         elif not scene_s.is_baked:
             last_solved = _simulation_frame_state['last_solved']
             if last_solved is not None and frame <= last_solved:
-                _load_cached_frame(scene, depsgraph, frame)
+                if not _load_cached_frame(scene, depsgraph, frame):
+                    _load_simulation_frame(frame, depsgraph)
                 return
             if frame > scene_s.bake_end:
                 return
@@ -4975,6 +5604,10 @@ def free_gpu_memory(context=None, shutdown_runtime=False):
     global g_clothOBJs, g_simulationOBJs, g_clothCollisionOBJs, g_proxy_handles
     global _teardown_failure, _collider_history
 
+    if _prepare_native_worker_active():
+        print("free_gpu_memory: native preparation worker is active")
+        return False
+
     if g_dll is None and _runtime_owners_retained():
         print(
             "free_gpu_memory: native DLL unavailable while runtime or "
@@ -4989,19 +5622,6 @@ def free_gpu_memory(context=None, shutdown_runtime=False):
             print(f"free_gpu_memory: v3 runtime teardown failed: {e}")
             _teardown_failure = True
             return False
-
-    try:
-        from . import cloth_settings_bridge
-        for cloth_obj in tuple(g_clothOBJs):
-            cloth_settings_bridge.apply_modifier_ownership(
-                cloth_obj, "CPU")
-    except (
-            AttributeError, ReferenceError, RuntimeError,
-            TypeError) as exc:
-        print(
-            f"free_gpu_memory: CPU Cloth visibility restore failed: {exc}")
-        _teardown_failure = True
-        return False
 
     g_cloth_handles      = []
     _cloth_input_owners  = []
@@ -5023,6 +5643,7 @@ def free_gpu_memory(context=None, shutdown_runtime=False):
     _drape_status_by_uid.clear()
     _initial_positions.clear()
     _simulation_frame_state['last_solved'] = None
+    _simulation_frame_state['positions'].clear()
     _cache_source_state['generation'] = 0
     _input_generation['value'] = 0
     if context is not None and hasattr(context.scene, 'gpu_cloth_springs_built'):
@@ -5046,7 +5667,18 @@ class GPUCloth_FreeVRAM(bpy.types.Operator):
         return True
 
     def execute(self, context):
-        if not free_gpu_memory(context):
+        global _stop_requested
+        was_preparing = prepare_task_active()
+        cancel_auto_prepare()
+        _stop_requested = True
+        if was_preparing and prepare_task_active():
+            self.report({'INFO'}, "GPUCloth preparation cancellation requested")
+            return {'FINISHED'}
+        try:
+            bpy.ops.screen.animation_cancel()
+        except (AttributeError, RuntimeError):
+            pass
+        if not free_gpu_memory(context, shutdown_runtime=True):
             self.report({'ERROR'}, "Не удалось освободить GPU память.")
             return {'CANCELLED'}
         self.report({'INFO'}, "GPU память освобождена.")
@@ -5056,6 +5688,75 @@ class GPUCloth_FreeVRAM(bpy.types.Operator):
 # ===========================================================================
 #  Оператор: загрузка DLL
 # ===========================================================================
+
+def _load_gpucloth_dll_native(filename):
+    """Load and validate the DLL without touching Blender's Python API."""
+    try:
+        result = subprocess.run(
+            ["nvidia-smi"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=True,
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError) as exc:
+        raise RuntimeError("nvidia-smi CUDA check failed") from exc
+    if ("CUDA Version" not in result.stdout and
+            "CUDA UMD Version" not in result.stdout):
+        raise RuntimeError("NVIDIA driver does not report CUDA support")
+
+    dll_dir = os.path.dirname(filename)
+    if dll_dir not in os.environ.get("PATH", ""):
+        os.environ["PATH"] = (
+            dll_dir + os.pathsep + os.environ.get("PATH", ""))
+    directory_handles = []
+    try:
+        if hasattr(os, "add_dll_directory"):
+            candidates = [dll_dir]
+            cuda_path = os.environ.get("CUDA_PATH")
+            if cuda_path:
+                candidates.extend((
+                    os.path.join(cuda_path, "bin", "x64"),
+                    os.path.join(cuda_path, "bin"),
+                ))
+            for path_entry in os.environ.get("PATH", "").split(os.pathsep):
+                if (path_entry and
+                        (os.path.isfile(os.path.join(
+                            path_entry, "cublas64_13.dll")) or
+                         os.path.isfile(os.path.join(
+                            path_entry, "cusparse64_12.dll")))):
+                    candidates.append(path_entry)
+            for directory in dict.fromkeys(
+                    os.path.abspath(path) for path in candidates):
+                if os.path.isdir(directory):
+                    directory_handles.append(os.add_dll_directory(directory))
+        dll = cdll.LoadLibrary(filename)
+        _bind_gpucloth_v3_exports(dll)
+        _validate_product_abi(dll)
+        _validate_descriptor_layout(dll)
+    except BaseException:
+        for handle in reversed(directory_handles):
+            try:
+                handle.close()
+            except OSError:
+                pass
+        raise
+    return dll, tuple(directory_handles)
+
+
+def _build_v3_cloth_native(
+        dll, cloth_handle, prepared_constraint_network, prepared_shrink_bounds,
+        object_id, topology_generation, geometry_generation):
+    """Build one native cloth and validate its accepted typed inputs."""
+    result = int(dll.GPUCloth_v3_cloth_build(cloth_handle))
+    if result != CType.GPUCLOTH_ABI_OK:
+        raise RuntimeError(f"v3 cloth build rejected with {result}")
+    _validate_constraint_network_status(
+        dll, cloth_handle, prepared_constraint_network)
+    _validate_shrink_status(
+        dll, cloth_handle, prepared_shrink_bounds,
+        object_id, topology_generation, geometry_generation)
+    return result
 
 class GPUCloth_LoadDLL(bpy.types.Operator):
     """Загрузить нативную библиотеку GPUCloth (DLL / .so)"""
@@ -5180,7 +5881,7 @@ class GPUCloth_UnloadDLL(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        return g_dll is not None
+        return g_dll is not None and not prepare_task_active()
 
     def execute(self, context):
         global g_dll, _dll_directory_handles
@@ -5226,25 +5927,54 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        return True
+        return not prepare_task_active()
 
     # ── Вспомогательные методы ───────────────────────────────────────────────
 
-    @_guard_prepare_teardown
     def execute(self, context):
+        if not _start_prepare_task(context, automatic=False):
+            self.report({'WARNING'}, "GPUCloth preparation is already active")
+            return {'CANCELLED'}
+        self.report({'INFO'}, "GPUCloth preparation started")
+        return {'FINISHED'}
+
+    def _prepare_steps(self, context):
         global g_dll, g_cloth_handles
+        global _dll_directory_handles
         global _cloth_input_owners, _readback_owners
         global g_clothOBJs, g_simulationOBJs
         global g_clothCollisionOBJs, g_proxy_handles
+        global _stop_requested
 
         self._native_prepare_mutated = False
 
+        if _teardown_failure:
+            if not free_gpu_memory(context):
+                self.report(
+                    {'ERROR'},
+                    "Native teardown retry failed; retained owners block "
+                    "prepare")
+                return {'CANCELLED'}
+
+        yield _prepare_progress(2, "Loading GPUCloth runtime")
+
         # 1. Загружаем DLL если нужно
         if g_dll is None:
-            bpy.ops.gpucloth.load_dll()
-            if g_dll is None:
-                self.report({'ERROR'}, "Не удалось загрузить DLL")
+            filename = vcu.get_dll_path("GPUCloth.dll")
+            if filename is None:
+                self.report({'ERROR'}, "GPUCloth.dll was not found")
                 return {'CANCELLED'}
+            try:
+                loaded_dll, directory_handles = yield _prepare_native(
+                    _load_gpucloth_dll_native, (filename,), 5,
+                    "Loading and validating GPUCloth.dll")
+            except (AttributeError, OSError, RuntimeError) as exc:
+                self.report({'ERROR'}, f"GPUCloth DLL load failed: {exc}")
+                return {'CANCELLED'}
+            g_dll = loaded_dll
+            _dll_directory_handles.extend(directory_handles)
+
+        yield _prepare_progress(10, "Saving Blender inputs")
 
         # 2. Сохраняем файл (DLL нужен путь к blend для ряда операций)
         if not bpy.data.is_saved:
@@ -5260,6 +5990,7 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
         bpy.ops.object.mode_set(mode='OBJECT')
 
         # 4. Preflight every Blender-owned input before native mutation.
+        yield _prepare_progress(15, "Reading Blender cloth inputs")
         view_layer_objects = tuple(
             getattr(context.view_layer, "objects", context.scene.objects))
         active_cloth = [
@@ -5308,6 +6039,21 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
             self.report(
                 {'ERROR'}, f"Modifier evaluation rejected: {exc}")
             return {'CANCELLED'}
+        solver_types = [
+            str(item.GPUCloth.solver_type) for item in active_cloth]
+        try:
+            memory = _require_gpu_memory_preflight(
+                simulation_objects, solver_types)
+        except RuntimeError as exc:
+            helper.memory_preflight_status = str(exc)
+            self.report({'ERROR'}, str(exc))
+            return {'CANCELLED'}
+        helper.memory_preflight_status = (
+            f"PASS: lower bound {memory['lower_bound_bytes']} bytes; "
+            f"free {memory['free_bytes']} bytes")
+        _stop_requested = False
+
+        yield _prepare_progress(25, "Capturing evaluated cloth geometry")
 
         # One generation owns the complete initial publication.  Keep the
         # runtime generation monotonic across destroy/recreate so a new
@@ -5410,6 +6156,8 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
             except (AttributeError, ReferenceError, RuntimeError):
                 pass
 
+        yield _prepare_progress(40, "Creating GPUCloth runtime owners")
+
         # 5. Native mutation starts only after complete preflight.
         self._native_prepare_mutated = True
         if (_runtime_owners_retained() or
@@ -5448,6 +6196,8 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
             free_gpu_memory(context)
             bpy.ops.object.mode_set(mode=mode)
             return {'CANCELLED'}
+
+        yield _prepare_progress(48, "Creating native cloth objects")
 
         if external_playback:
             # External playback owns only the v3 runtime/cache and Blender
@@ -5488,6 +6238,8 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
             free_gpu_memory(context)
             bpy.ops.object.mode_set(mode=mode)
             return {'CANCELLED'}
+
+        yield _prepare_progress(55, "Configuring native cloth solvers")
 
         # 7. Live simulation owns the native scene and solver state.
         for i in range(len(g_clothOBJs)):
@@ -5544,18 +6296,24 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
                 free_gpu_memory(context)
                 bpy.ops.object.mode_set(mode=mode)
                 return {'CANCELLED'}
+            cloth_progress = 60 + int(
+                (20 * i) / max(1, len(g_clothOBJs)))
             try:
-                result = int(g_dll.GPUCloth_v3_cloth_build(cloth_handle))
+                result = yield _prepare_native(
+                    _build_v3_cloth_native,
+                    (
+                        g_dll, cloth_handle,
+                        prepared_constraint_networks[i],
+                        prepared_shrink_bounds[i],
+                        _cloth_input_owners[i]["object_id"],
+                        _cloth_input_owners[i]["topology_generation"],
+                        _cloth_input_owners[i]["geometry_generation"],
+                    ),
+                    cloth_progress,
+                    f"Building cloth {i + 1}/{len(g_clothOBJs)} on GPU",
+                )
                 if result != CType.GPUCLOTH_ABI_OK:
-                    raise RuntimeError(
-                        f"v3 cloth build rejected with {result}")
-                _validate_constraint_network_status(
-                    g_dll, cloth_handle, prepared_constraint_networks[i])
-                _validate_shrink_status(
-                    g_dll, cloth_handle, prepared_shrink_bounds[i],
-                    _cloth_input_owners[i]["object_id"],
-                    _cloth_input_owners[i]["topology_generation"],
-                    _cloth_input_owners[i]["geometry_generation"])
+                    raise RuntimeError(f"v3 cloth build returned {result}")
             except (OSError, RuntimeError) as exc:
                 self.report({'ERROR'}, f"v3 cloth build failed: {exc}")
                 free_gpu_memory(context)
@@ -5578,6 +6336,11 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
                 bpy.ops.object.mode_set(mode=mode)
                 return {'CANCELLED'}
 
+            yield _prepare_progress(
+                60 + int((20 * (i + 1)) / max(1, len(g_clothOBJs))),
+                f"Cloth {i + 1}/{len(g_clothOBJs)} built")
+
+        yield _prepare_progress(84, "Publishing initial GPU state")
         try:
             for cloth_handle, owners in zip(
                     g_cloth_handles, prepared_collections):
@@ -5623,6 +6386,8 @@ class GPUCloth_PrepareSimulation(bpy.types.Operator):
             free_gpu_memory(context)
             bpy.ops.object.mode_set(mode=mode)
             return {'CANCELLED'}
+
+        yield _prepare_progress(94, "Finalizing Blender ownership")
 
         # 8. Create one typed v3 proxy owner per render/simulation binding.
         g_proxy_handles.clear()
@@ -5699,10 +6464,10 @@ class GPUCloth_UpdateSimulation(bpy.types.Operator):
         global g_dll
         global g_clothOBJs, g_simulationOBJs
 
-        if _teardown_failure:
+        if prepare_task_active() or _teardown_failure or _stop_requested:
             self.report(
                 {'ERROR'},
-                "Native teardown recovery is required before update")
+                "Simulation is stopped; prepare is required before update")
             return {'CANCELLED'}
 
         if g_dll is None or context.scene.frame_current < 2:
@@ -5729,8 +6494,9 @@ class GPUCloth_UpdateSimulation(bpy.types.Operator):
 
         last_solved = _simulation_frame_state['last_solved']
         if last_solved is not None and frame <= last_solved:
-            _load_cached_frame(
-                context.scene, context.evaluated_depsgraph_get(), frame)
+            depsgraph = context.evaluated_depsgraph_get()
+            if not _load_cached_frame(context.scene, depsgraph, frame):
+                _load_simulation_frame(frame, depsgraph)
             return {'FINISHED'}
 
         # ── РЕЖИМ ЖИВОЙ СИМУЛЯЦИИ ────────────────────────────────────────────
@@ -5835,6 +6601,8 @@ class GPUCloth_UpdateSimulation(bpy.types.Operator):
                             {'ERROR'},
                             f"Cache write rejected at frame {frame}")
                         return {'CANCELLED'}
+
+            _store_simulation_frame(frame)
 
         except (OSError, RuntimeError, VertexChannelError) as err:
             print(f"GPUCloth_UpdateSimulation failed: {err}")
@@ -6040,6 +6808,7 @@ class GPUCloth_ApplyDrape(bpy.types.Operator):
             _store_initial_positions()
             _simulation_frame_state['last_solved'] = max(
                 1, int(context.scene.gpu_cloth_helper.bake_start) - 1)
+            _simulation_frame_state['positions'].clear()
             _cache_status_update(
                 CType.GPUCLOTH_CACHE_STATUS_SOURCE_CHANGED, context.scene)
             _sync_cache_status(context.scene)
@@ -6217,6 +6986,7 @@ class GPUCloth_BakeSimulation(bpy.types.Operator):
         _bake_range['end'] = s.bake_end
         _simulation_frame_state['last_solved'] = max(
             1, int(s.bake_start) - 1)
+        _simulation_frame_state['positions'].clear()
         self._frame = s.bake_start
         return True
 
@@ -6528,20 +7298,164 @@ class GPUCloth_ExportUSD(bpy.types.Operator):
 #  Test scene operators
 # ===========================================================================
 
-import bmesh
+# ── C++ TestScene scene registry (authoritative parameters) ────────────────
+# enum class SceneType {
+#     DrapeOnSphere = 0, TwistTest = 1, MultiLayerDrop = 2,
+#     CushionDrop = 3, CapeProject = 4, MDHorizontalContact = 5 };
+#     src/engine/TestScene/TestScene.h:159
+# static const char* kSceneNames[6] = {...};
+#     src/engine/TestScene/TestScene_UI.cpp:1321
+#
+# Every numeric scene parameter below cites its C++ definition.  Solver type,
+# substep/iteration counts and frame timing deliberately stay on the add-on
+# defaults shared by all six operators; only scene authoring is mirrored.
+TESTSCENE_CLOTH_NX = 128            # TestScene.h:443-444 m_clothNX = m_clothNY
+TESTSCENE_GRID_QUADS = TESTSCENE_CLOTH_NX - 1   # TestScene.cpp:2287 NX=m_clothNX-1
+TESTSCENE_CLOTH_HALF_SIZE = 3.0     # TestScene.h:54  CLOTH_HALF_SIZE
+TESTSCENE_INIT_Z = 4.0              # TestScene.cpp:2289 initZ
+TESTSCENE_TWIST_INIT_Z = 0.0        # TestScene.cpp:2289 TwistTest initZ
+TESTSCENE_SPHERE_RADIUS = 1.8       # TestScene.h:55  SPHERE_RADIUS
+TESTSCENE_SPHERE_CZ = 0.5           # TestScene.h:58  SPHERE_CZ
+TESTSCENE_SPHERE_RINGS = 10         # TestScene.h:59  SPHERE_RINGS
+TESTSCENE_SPHERE_SECTORS = 12       # TestScene.h:60  SPHERE_SECTORS
+TESTSCENE_CYLINDER_RADIUS = 1.5     # TestScene.h:64  CYLINDER_RADIUS
+TESTSCENE_CYLINDER_HALF_LEN = 4.5   # TestScene.h:65  CYLINDER_HALF_LEN
+TESTSCENE_CYLINDER_CZ = 0.3         # TestScene.h:68  CYLINDER_CZ
+TESTSCENE_CYLINDER_RINGS = 20       # TestScene.h:69  CYLINDER_RINGS
+TESTSCENE_CYLINDER_STACKS = 10      # TestScene.h:70  CYLINDER_STACKS
+TESTSCENE_FLOOR_Z = -2.0            # TestScene.h:71  FLOOR_Z
+TESTSCENE_FLOOR_HALF = 12.0         # TestScene.h:72  FLOOR_HALF
+TESTSCENE_MULTILAYER_BASE_Z = 4.0   # TestScene.h:74  MULTILAYER_BASE_Z
+TESTSCENE_MULTILAYER_LAYER_DZ = 0.15  # TestScene.h:75 MULTILAYER_LAYER_DZ
+TESTSCENE_MULTILAYER_COUNT = 2      # TestScene.h:490 m_layerCount{2}
+TESTSCENE_CUSHION_DOME_H = TESTSCENE_CLOTH_HALF_SIZE * 0.25   # TestScene.h:81
+TESTSCENE_CUSHION_INIT_SEP = 0.02   # TestScene.h:82  CUSHION_INIT_SEP
+TESTSCENE_CUSHION_INIT_Z = (        # TestScene.h:83  CUSHION_INIT_Z
+    TESTSCENE_FLOOR_Z + TESTSCENE_CUSHION_DOME_H
+    + TESTSCENE_CUSHION_INIT_SEP * 0.5 + 2.0)
+TESTSCENE_CUSHION_PRESSURE_RATIO = 1.3   # TestScene.cpp:2634 pressure.ratio
+TESTSCENE_GRAVITY_Z = -9.81         # TestScene.cpp:1908 gravity.z (m/s^2)
+TESTSCENE_CAPE_CONTACT_THICKNESS = 0.003    # TestScene.cpp:2532
+TESTSCENE_MD_CONTACT_THICKNESS = 0.0025     # TestScene.cpp:2532
+TESTSCENE_CONTACT_FRICTION = 0.5            # TestScene.cpp:2535
+TESTSCENE_COLLISION_LOOPS = 4               # TestScene.cpp:2541
+TESTSCENE_CAPE_OGC_RADIUS_MM = 3.0          # TestScene.cpp:5099
+TESTSCENE_CAPE_OGC_KC = 1000.0              # TestScene.cpp:5100
+TESTSCENE_CAPE_OGC_FRICTION = 0.3           # TestScene.cpp:5101
+# MD fixture guard: TestScene.cpp:421-422.
+TESTSCENE_MD_EXPECTED = {
+    "nv": 9149, "nt": 17994, "nseam": 0, "npin": 0,
+    "body_nv": 4, "body_nt": 2,
+}
+# OGC auto sizing for generated grid scenes, TestScene_UI.cpp:2531-2576:
+#   r_m = clamp(radius_frac * avg_spring_len, 0.002, 0.08)
+#   kc  = clamp(20 / r_m, 10, 100000)
+TESTSCENE_MULTILAYER_OGC_RADIUS_FRAC = 0.60   # TestScene_UI.cpp:2542
+TESTSCENE_OGC_FRICTION = 0.3                  # TestScene_UI.cpp:2567
+TESTSCENE_OGC_GAMMA_P = 0.45                  # TestScene_UI.cpp:2425
+
+# Cloth/material parameters, TestScene.cpp:1870-1907 / 1433-1448.  They are
+# applied explicitly so a preset (PD/COTTON would raise tension to 30) or a
+# future RNA default change cannot drift away from the C++ scene.
+TESTSCENE_MATERIAL = {
+    "vertex_mass": 0.3,             # RegisterParam("mass", 0.3f)
+    "tension": 15.0,                # cloth.tension
+    "compression": 15.0,            # cloth.compression
+    "shear": 5.0,                   # cloth.shear
+    "bending_stiffness": 0.5,       # cloth.bending
+    "tension_damp": 5.0,            # cloth.tension_damp
+    "compression_damp": 5.0,        # cloth.compression_damp
+    "shear_damp": 5.0,              # cloth.shear_damp
+    "bending_damping": 0.5,         # cloth.bending_damp
+    "vel_damping": 0.0,             # cloth.vel_damping
+    "max_tension": 500.0,           # cloth.max_tension
+    "max_compression": 500.0,       # cloth.max_compression
+    "max_shear": 500.0,             # cloth.max_shear
+    "max_bend": 100.0,              # cloth.max_bend
+}
 
 
-def _make_grid_mesh(name, nx, ny, half_size, height, pin_corners=False):
-    """Create a subdivided grid mesh and return (obj, mesh_data)."""
-    mesh_data = bpy.data.meshes.new(name + "_mesh")
-    obj = bpy.data.objects.new(name, mesh_data)
-    bpy.context.collection.objects.link(obj)
+def _testscene_avg_edge(half_size, quads):
+    """Mean structural rest length of a uniform grid.
 
+    ``avg_spring_len`` is the arithmetic mean over structural springs
+    (src/engine/source/kernel/intern/cloth.cu:3461-3483); on a regular grid
+    every structural spring is one cell long, so the mean is exact.
+    """
+    return 2.0 * half_size / float(quads)
+
+
+def _testscene_ogc_auto(avg_edge, radius_frac):
+    """OGC auto radius/stiffness for generated grid scenes (radii in mm)."""
+    r_m = max(0.002, min(radius_frac * avg_edge, 0.08))
+    return r_m * 1000.0, max(10.0, min(20.0 / r_m, 100000.0))
+
+
+def _setup_testscene_cloth(obj, solver='PD'):
+    """Enable GPUCloth with the C++ TestScene material/physical settings."""
+    _setup_cloth(obj, solver=solver, material='CUSTOM')
+    for prop_name, value in TESTSCENE_MATERIAL.items():
+        setattr(obj.GPUCloth, prop_name, value)
+    obj.GPUCloth.use_object_collision = True   # TestScene.h:387
+    return obj
+
+
+def _set_scene_gravity(context, x=0.0, y=0.0, z=TESTSCENE_GRAVITY_Z):
+    helper = context.scene.gpu_cloth_helper
+    helper.gravity_x = x
+    helper.gravity_y = y
+    helper.gravity_z = z
+
+
+def _imported_cloth_edges(asset):
+    """Mesh edge list for an imported cloth asset, with seams appended.
+
+    The asset edge tail reproduces the native ``medge`` array; each seam pair
+    becomes one extra loose edge, which the add-on uploads as a sewing record
+    with rest length 0 (``_upload_sewing``) — exactly the explicit seam spring
+    the C++ builder appends (TestScene.cpp:2570-2580: ij/kl pair, restlen
+    CAPE_SEAM_WELD_LENGTH_M).
+    """
+    edges = []
+    seen = set()
+    for index in range(0, len(asset["edges"]), 2):
+        key = (int(asset["edges"][index]), int(asset["edges"][index + 1]))
+        edges.append(key)
+        seen.add(key)
+    for index in range(0, len(asset["seams"]), 2):
+        a, b = int(asset["seams"][index]), int(asset["seams"][index + 1])
+        key = (a, b) if a < b else (b, a)
+        if key in seen:
+            continue
+        seen.add(key)
+        edges.append(key)
+    return edges
+
+
+def _closed_mesh_volume(mesh):
+    """|signed volume| of a closed mesh (TestScene.cpp:2614-2629).
+
+    ``V0`` is the pressure reference volume; the C++ builder sums the signed
+    tetrahedron volumes and negates the result when it comes out negative.
+    """
+    total = 0.0
+    for triangle in vcu.calc_mesh_loop_triangles(mesh):
+        i0, i1, i2 = (int(index) for index in triangle.vertices)
+        p0 = mesh.vertices[i0].co
+        p1 = mesh.vertices[i1].co
+        p2 = mesh.vertices[i2].co
+        total += (p0[0] * (p1[1] * p2[2] - p1[2] * p2[1])
+                  + p0[1] * (p1[2] * p2[0] - p1[0] * p2[2])
+                  + p0[2] * (p1[0] * p2[1] - p1[1] * p2[0])) / 6.0
+    return abs(total)
+
+
+def _grid_verts_faces(nx, ny, half_size, height):
+    """Shared grid topology; one layer at height. Returns (verts, faces)."""
     sx = nx + 1
-    sy = ny + 1
     verts = []
-    for row in range(sy):
-        for col in range(sx):
+    for row in range(ny + 1):
+        for col in range(nx + 1):
             x = -half_size + 2.0 * half_size * col / nx
             y = -half_size + 2.0 * half_size * row / ny
             verts.append((x, y, height))
@@ -6551,67 +7465,77 @@ def _make_grid_mesh(name, nx, ny, half_size, height, pin_corners=False):
         for col in range(nx):
             i = row * sx + col
             faces.append((i, i + 1, i + sx + 1, i + sx))
+    return verts, faces
+
+
+def _make_grid_mesh(name, nx, ny, half_size, height, pin_corners=False):
+    """Create a subdivided grid mesh and return (obj, mesh_data)."""
+    mesh_data = bpy.data.meshes.new(name + "_mesh")
+    obj = bpy.data.objects.new(name, mesh_data)
+    bpy.context.collection.objects.link(obj)
+
+    verts, faces = _grid_verts_faces(nx, ny, half_size, height)
 
     mesh_data.from_pydata(verts, [], faces)
     mesh_data.update()
 
     if pin_corners:
-        for v in obj.data.vertices:
-            pinned = False
-            if (abs(v.co.x - (-half_size)) < 0.01 and abs(v.co.y - half_size) < 0.01):
-                pinned = True
-            if (abs(v.co.x - half_size) < 0.01 and abs(v.co.y - half_size) < 0.01):
-                pinned = True
-            if pinned:
-                v.co.z += 0.0
-        mesh_data.update()
+        # Native DrapeOnSphere/TwistTest pin the two top corners
+        # vi(0, NY) + vi(NX, NY) with goal 1. Same corners here.
+        sx = nx + 1
+        pin_group = obj.vertex_groups.new(name="Pin")
+        pin_group.add([(ny * sx) + 0, (ny * sx) + nx], 1.0, 'REPLACE')
 
     return obj, mesh_data
 
 
-def _make_uv_sphere(name, radius, cx, cy, cz, rings=10, sectors=12):
-    """Create a UV sphere collision object and return it."""
+def _make_multilayer_mesh(name, nx, ny, half_size, base_z, dz, layers):
+    """Stack N grid layers base_z + k*dz into one mesh, native layout."""
     mesh_data = bpy.data.meshes.new(name + "_mesh")
     obj = bpy.data.objects.new(name, mesh_data)
     bpy.context.collection.objects.link(obj)
 
-    bm = bmesh.new()
-    segs_loop = sectors
-    segs_ring = rings
-    import math
-    for i in range(segs_ring + 1):
-        phi = math.pi * i / segs_ring
-        for j in range(segs_loop + 1):
-            theta = 2.0 * math.pi * j / segs_loop
-            x = cx + radius * math.sin(phi) * math.cos(theta)
-            y = cy + radius * math.sin(phi) * math.sin(theta)
-            z = cz + radius * math.cos(phi)
-            bm.verts.new((x, y, z))
+    layer_verts, layer_faces = _grid_verts_faces(nx, ny, half_size, base_z)
+    per_layer = len(layer_verts)
+    verts = []
+    faces = []
+    for k in range(layers):
+        z = base_z + k * dz
+        verts.extend((x, y, z) for x, y, _ in layer_verts)
+        base = k * per_layer
+        faces.extend((a + base, b + base, c + base, d + base)
+                     for a, b, c, d in layer_faces)
 
-    bm.verts.ensure_lookup_table()
-    w = segs_loop + 1
-    for i in range(segs_ring):
-        for j in range(segs_loop):
-            a = i * w + j
-            b = i * w + j + 1
-            c = (i + 1) * w + j + 1
-            d = (i + 1) * w + j
-            bm.faces.new([bm.verts[a], bm.verts[b], bm.verts[c], bm.verts[d]])
-    bm.to_mesh(mesh_data)
-    bm.free()
+    mesh_data.from_pydata(verts, [], faces)
     mesh_data.update()
+    return obj, mesh_data
+
+
+def _make_uv_sphere(name, radius, cx, cy, cz, rings=10, sectors=12):
+    """Create a UV sphere collision object and return it.
+
+    Uses the Blender primitive: hand-rolled grids duplicate pole verts,
+    which makes zero-area fan triangles that the native hard preflight
+    (DEGENERATE_TRIANGLE) correctly rejects.
+    """
+    bpy.ops.mesh.primitive_uv_sphere_add(
+        segments=sectors, ring_count=rings, radius=radius,
+        location=(cx, cy, cz))
+    obj = bpy.context.view_layer.objects.active
+    obj.name = name
+    obj.data.name = name + "_mesh"
     return obj
 
 
-def _make_cylinder_floor(name, radius, half_len, cx, cy, cz, floor_z, floor_half):
-    """Create a cylinder + floor collision object."""
+def _make_cylinder_floor(name, radius, half_len, cx, cy, cz, floor_z, floor_half,
+                         rings=TESTSCENE_CYLINDER_RINGS,
+                         stacks=TESTSCENE_CYLINDER_STACKS):
+    """Create a cylinder + floor collision object (native CollisionCylinder)."""
     mesh_data = bpy.data.meshes.new(name + "_mesh")
     obj = bpy.data.objects.new(name, mesh_data)
     bpy.context.collection.objects.link(obj)
 
     verts = []
-    rings = 20
-    stacks = 10
     for s in range(stacks + 1):
         y = cy - half_len + 2.0 * half_len * s / stacks
         for r in range(rings + 1):
@@ -6671,9 +7595,36 @@ def _make_cushion_mesh(name, nx, ny, half_size, init_z, sep, dome_height):
                 i = base + row * sx + col
                 faces.append((i, i + 1, i + sx + 1, i + sx))
 
+    # Side walls closing the volume, native CushionMesh layout: quads join
+    # the boundary loops of both sheets so pressure sees a closed mesh.
+    def _gvi(sh, col, row):
+        return sh * sx * sy + row * sx + col
+
+    for col in range(nx):
+        faces.append((_gvi(0, col, 0), _gvi(0, col + 1, 0),
+                      _gvi(1, col + 1, 0), _gvi(1, col, 0)))
+        faces.append((_gvi(0, col + 1, ny), _gvi(0, col, ny),
+                      _gvi(1, col, ny), _gvi(1, col + 1, ny)))
+    for row in range(ny):
+        faces.append((_gvi(0, 0, row + 1), _gvi(0, 0, row),
+                      _gvi(1, 0, row), _gvi(1, 0, row + 1)))
+        faces.append((_gvi(0, nx, row), _gvi(0, nx, row + 1),
+                      _gvi(1, nx, row + 1), _gvi(1, nx, row)))
+
     mesh_data.from_pydata(verts, [], faces)
     mesh_data.update()
     return obj
+
+
+def _make_two_sided_collider(obj):
+    """Explicit two-sided surface contract for scene collider builders.
+
+    Matches the Smoke fixture (tools/blender_product_gate.py): product
+    preflight requires an explicit surface contract, while Blender 4.2
+    defaults (culling on) resolve to ONE_SIDED_NORMAL.
+    """
+    obj.collision.use_culling = False
+    obj.collision.use_normal = False
 
 
 def _setup_cloth(obj, solver='PD', material='COTTON'):
@@ -6692,17 +7643,27 @@ class GPUCloth_TestDrapeOnSphere(bpy.types.Operator):
     def execute(self, context):
         bpy.ops.object.select_all(action='DESELECT')
 
-        cloth_obj, _ = _make_grid_mesh("DrapeCloth", 64, 64, 3.0, 4.0)
-        sphere_obj = _make_uv_sphere("CollisionSphere", 1.8, 0.0, 0.0, 0.5)
+        # TestScene.cpp:2540-2542 grid = ClothGrid(NX, NY, CLOTH_HALF_SIZE,
+        # CLOTH_HALF_SIZE, initZ) at 128x128 verts; pins vi(0,NY)/vi(NX,NY)
+        # at TestScene.cpp:2646-2656.
+        cloth_obj, _ = _make_grid_mesh(
+            "DrapeCloth", TESTSCENE_GRID_QUADS, TESTSCENE_GRID_QUADS,
+            TESTSCENE_CLOTH_HALF_SIZE, TESTSCENE_INIT_Z, pin_corners=True)
+        sphere_obj = _make_uv_sphere(
+            "CollisionSphere", TESTSCENE_SPHERE_RADIUS, 0.0, 0.0,
+            TESTSCENE_SPHERE_CZ, TESTSCENE_SPHERE_RINGS,
+            TESTSCENE_SPHERE_SECTORS)
 
-        col_mod = sphere_obj.modifiers.new(name="Collision", type='COLLISION')
+        sphere_obj.modifiers.new(name="Collision", type='COLLISION')
+        _make_two_sided_collider(sphere_obj)
 
         bpy.context.view_layer.objects.active = cloth_obj
         cloth_obj.select_set(True)
 
-        _setup_cloth(cloth_obj, solver='PD', material='COTTON')
+        _setup_testscene_cloth(cloth_obj, solver='PD')
+        cloth_obj.GPUCloth.vgroup_mass = "Pin"
 
-        context.scene.gpu_cloth_helper.gravity_z = -9.81
+        _set_scene_gravity(context)
 
         self.report({'INFO'}, "DrapeOnSphere test scene created")
         return {'FINISHED'}
@@ -6717,16 +7678,26 @@ class GPUCloth_TestTwist(bpy.types.Operator):
     def execute(self, context):
         bpy.ops.object.select_all(action='DESELECT')
 
-        cloth_obj, _ = _make_grid_mesh("TwistCloth", 64, 64, 3.0, 0.0)
+        # Static top-corner pins mirror native TwistTest (TestScene.cpp:2735).
+        # The rotating bottom pair (TestScene.cpp:3349-3375, twist.speed
+        # 0.8 rad/s about the top-pin axis) needs per-frame kinematic pin
+        # targets; the add-on captures pin targets from the evaluated mesh
+        # only, so the pair is created as "TwistRotate" for inspection.
+        cloth_obj, _ = _make_grid_mesh(
+            "TwistCloth", TESTSCENE_GRID_QUADS, TESTSCENE_GRID_QUADS,
+            TESTSCENE_CLOTH_HALF_SIZE, TESTSCENE_TWIST_INIT_Z,
+            pin_corners=True)
+        rotate_group = cloth_obj.vertex_groups.new(name="TwistRotate")
+        rotate_group.add([0, TESTSCENE_GRID_QUADS], 1.0, 'REPLACE')
 
         bpy.context.view_layer.objects.active = cloth_obj
         cloth_obj.select_set(True)
 
-        _setup_cloth(cloth_obj, solver='PD', material='COTTON')
+        _setup_testscene_cloth(cloth_obj, solver='PD')
+        cloth_obj.GPUCloth.vgroup_mass = "Pin"
 
-        context.scene.gpu_cloth_helper.gravity_x = 0.0
-        context.scene.gpu_cloth_helper.gravity_y = 0.0
-        context.scene.gpu_cloth_helper.gravity_z = 0.0
+        # TestScene.cpp:3434-3435: gravity is forced to zero for TwistTest.
+        _set_scene_gravity(context, 0.0, 0.0, 0.0)
 
         self.report({'INFO'}, "TwistTest scene created")
         return {'FINISHED'}
@@ -6738,25 +7709,51 @@ class GPUCloth_TestMultiLayerDrop(bpy.types.Operator):
     bl_label = "Multi Layer Drop"
     bl_options = {'REGISTER', 'UNDO'}
 
+    # Native bounds: MULTILAYER_COUNT_MIN/MAX/STEP = 1/50/1, default 2.
+    layer_count: bpy.props.IntProperty(
+        name="Layers",
+        description="Cloth layer count (native default 2, dz 0.15)",
+        default=TESTSCENE_MULTILAYER_COUNT,
+        min=1,
+        max=50,
+    )
+
     def execute(self, context):
         bpy.ops.object.select_all(action='DESELECT')
 
-        cloth_obj, _ = _make_grid_mesh("MultiLayerCloth", 64, 64, 3.0, 4.0)
+        # No pins: all N layers fall freely, OGC owns inter-layer contact.
+        cloth_obj, _ = _make_multilayer_mesh(
+            "MultiLayerCloth", TESTSCENE_GRID_QUADS, TESTSCENE_GRID_QUADS,
+            TESTSCENE_CLOTH_HALF_SIZE, TESTSCENE_MULTILAYER_BASE_Z,
+            TESTSCENE_MULTILAYER_LAYER_DZ, self.layer_count)
         collision_obj = _make_cylinder_floor(
             "CollisionCylinder",
-            1.5, 4.5, 0.0, 0.0, 0.3, -2.0, 12.0)
+            TESTSCENE_CYLINDER_RADIUS, TESTSCENE_CYLINDER_HALF_LEN,
+            0.0, 0.0, TESTSCENE_CYLINDER_CZ,
+            TESTSCENE_FLOOR_Z, TESTSCENE_FLOOR_HALF,
+            TESTSCENE_CYLINDER_RINGS, TESTSCENE_CYLINDER_STACKS)
 
-        col_mod = collision_obj.modifiers.new(name="Collision", type='COLLISION')
+        collision_obj.modifiers.new(name="Collision", type='COLLISION')
+        _make_two_sided_collider(collision_obj)
 
         bpy.context.view_layer.objects.active = cloth_obj
         cloth_obj.select_set(True)
 
-        _setup_cloth(cloth_obj, solver='PD', material='COTTON')
+        _setup_testscene_cloth(cloth_obj, solver='PD')
+        # Inter-layer contact is OGC self-collision; the C++ auto sizer
+        # (TestScene_UI.cpp:2531-2576) derives radius and kc from the grid's
+        # mean structural spring length.
+        avg_edge = _testscene_avg_edge(
+            TESTSCENE_CLOTH_HALF_SIZE, TESTSCENE_GRID_QUADS)
+        ogc_radius_mm, ogc_kc = _testscene_ogc_auto(
+            avg_edge, TESTSCENE_MULTILAYER_OGC_RADIUS_FRAC)
         cloth_obj.GPUCloth.use_self_collision = True
-        cloth_obj.GPUCloth.ogc_radius = 150.0
-        cloth_obj.GPUCloth.ogc_friction = 0.3
+        cloth_obj.GPUCloth.ogc_radius = ogc_radius_mm
+        cloth_obj.GPUCloth.ogc_kc = ogc_kc
+        cloth_obj.GPUCloth.ogc_friction = TESTSCENE_OGC_FRICTION
+        cloth_obj.GPUCloth.ogc_gamma_p = TESTSCENE_OGC_GAMMA_P
 
-        context.scene.gpu_cloth_helper.gravity_z = -9.81
+        _set_scene_gravity(context)
 
         self.report({'INFO'}, "MultiLayerDrop test scene created")
         return {'FINISHED'}
@@ -6771,29 +7768,318 @@ class GPUCloth_TestCushionDrop(bpy.types.Operator):
     def execute(self, context):
         bpy.ops.object.select_all(action='DESELECT')
 
-        init_z = -2.0 + 3.0 * 0.25 + 0.02 * 0.5 + 2.0
+        # TestScene.cpp:2410-2431: dome = 0.25 * CLOTH_HALF_SIZE, sep 0.02,
+        # initZ = FLOOR_Z + dome + sep/2 + 2.
         cushion_obj = _make_cushion_mesh(
-            "CushionCloth", 32, 32, 3.0, init_z, 0.02, 3.0 * 0.25)
+            "CushionCloth", TESTSCENE_GRID_QUADS, TESTSCENE_GRID_QUADS,
+            TESTSCENE_CLOTH_HALF_SIZE, TESTSCENE_CUSHION_INIT_Z,
+            TESTSCENE_CUSHION_INIT_SEP, TESTSCENE_CUSHION_DOME_H)
 
+        # TestScene.cpp:2501-2508: the visible floor quad (FLOOR_Z, half
+        # FLOOR_HALF).  The C++ object also carries a degenerate 1x1 cylinder
+        # 100 m below the floor; that sliver cannot contact the cloth and its
+        # coincident vertices are rejected by the Blender preflight.
         floor_mesh = bpy.data.meshes.new("Floor_mesh")
         floor_obj = bpy.data.objects.new("Floor", floor_mesh)
         bpy.context.collection.objects.link(floor_obj)
-        fh = 12.0
-        fz = -2.0
+        fh = TESTSCENE_FLOOR_HALF
+        fz = TESTSCENE_FLOOR_Z
         floor_verts = [(-fh, -fh, fz), (fh, -fh, fz), (fh, fh, fz), (-fh, fh, fz)]
         floor_faces = [(0, 1, 2, 3)]
         floor_mesh.from_pydata(floor_verts, [], floor_faces)
         floor_mesh.update()
-        col_mod = floor_obj.modifiers.new(name="Collision", type='COLLISION')
+        floor_obj.modifiers.new(name="Collision", type='COLLISION')
+        _make_two_sided_collider(floor_obj)
 
         bpy.context.view_layer.objects.active = cushion_obj
         cushion_obj.select_set(True)
 
-        _setup_cloth(cushion_obj, solver='PD', material='COTTON')
+        _setup_testscene_cloth(cushion_obj, solver='PD')
+        # Closed side-wall volume: pressure.ratio 1.3 (TestScene.cpp:2634) is
+        # expressed as target_volume = 1.3 * V0, the product RNA's only owner
+        # of Pressure_create's pressure_ratio.
+        cushion_obj.GPUCloth.use_pressure = True
+        cushion_obj.GPUCloth.use_pressure_volume = True
+        cushion_obj.GPUCloth.target_volume = (
+            TESTSCENE_CUSHION_PRESSURE_RATIO
+            * _closed_mesh_volume(cushion_obj.data))
 
-        context.scene.gpu_cloth_helper.gravity_z = -9.81
+        _set_scene_gravity(context)
 
         self.report({'INFO'}, "CushionDrop test scene created")
+        return {'FINISHED'}
+
+
+# --- Imported cloth asset layout (mirrors TestScene.cpp LoadCapeClothBin) ---
+# Cape and MD scenes share the binary layout; only Cape consumes
+# seams/pins/animation (TestScene.h:166-178).  Asset directories mirror the
+# executable-relative catalogs CapeAssetPath/MDAssetPath (TestScene.cpp:135-151).
+_CAPE_MAGIC = b"CCAPE002"
+_CAPE_VERSION = 2
+_CAPE_ASSET_SUBDIR = "cape_import"
+_CAPE_ASSET_FILE = "cape.clothbin"
+_MD_ASSET_SUBDIR = "md_comparison"
+_MD_ASSET_FILE = "MDHorizontalContact.clothbin"
+
+
+def _find_cloth_asset_dir(subdir, filename, explicit=""):
+    """Locate a directory holding ``filename``, or return None.
+
+    The release stage puts both catalogs beside the add-on package
+    (tools/build_blender_release.py), so the add-on root and the source-tree
+    root are both searched before giving up.
+    """
+    candidates = []
+    if explicit:
+        candidates.append(explicit)
+    try:
+        addon_dir = os.path.dirname(os.path.abspath(__file__))
+        for steps in ("..", os.path.join("..", ".."),
+                      os.path.join("..", "..", "..")):
+            candidates.append(os.path.join(addon_dir, steps, subdir))
+    except Exception:
+        pass
+    for candidate in candidates:
+        if os.path.isfile(os.path.join(candidate, filename)):
+            return os.path.normpath(candidate)
+    return None
+
+
+def _find_cape_asset_dir(explicit=""):
+    """Locate cape_import/ holding cape.clothbin, or return None."""
+    return _find_cloth_asset_dir(
+        _CAPE_ASSET_SUBDIR, _CAPE_ASSET_FILE, explicit)
+
+
+def _find_md_asset_dir(explicit=""):
+    """Locate md_comparison/ holding MDHorizontalContact.clothbin, or None."""
+    return _find_cloth_asset_dir(
+        _MD_ASSET_SUBDIR, _MD_ASSET_FILE, explicit)
+
+
+def _read_cape_cloth_bin(path, require_seams=True):
+    """Parse CCAPE002 asset with the native header guards, or return None."""
+    try:
+        with open(path, "rb") as handle:
+            payload = handle.read()
+    except OSError:
+        return None
+    if len(payload) < 48 or payload[0:8] != _CAPE_MAGIC:
+        return None
+    (version, panels, nv, nt, ne, nseam, npin,
+     body_nv, body_nt, scale) = struct.unpack("<9If", payload[8:48])
+    if (version != _CAPE_VERSION or panels == 0 or nv == 0
+            or nt == 0 or ne == 0 or (require_seams and nseam == 0)
+            or body_nv == 0 or body_nt == 0 or scale <= 0.0):
+        return None
+    counts = (nv * 3, nt * 3, ne * 2, nseam * 2, npin,
+              body_nv * 3, body_nt * 3)
+    formats = ("f", "I", "I", "I", "I", "f", "I")
+    if len(payload) != 48 + sum(counts) * 4:
+        return None
+    parts = []
+    offset = 48
+    for count, kind in zip(counts, formats):
+        parts.append(struct.unpack("<%d%s" % (count, kind),
+                                   payload[offset:offset + count * 4])
+                     if count else ())
+        offset += count * 4
+    keys = ("verts", "tris", "edges", "seams", "pins",
+            "body_verts", "body_tris")
+    asset = dict(zip(keys, parts))
+    asset.update(panels=panels, nv=nv, nt=nt, ne=ne, nseam=nseam,
+                 npin=npin, body_nv=body_nv, body_nt=body_nt, scale=scale)
+    return asset
+
+
+def _read_md_cloth_bin(path):
+    """Parse the MD horizontal-contact fixture, or return None.
+
+    The fixture has no seams and no pins, and its body is a two-triangle
+    plate; the counts are a hard guard (TestScene.cpp:421-422).
+    """
+    asset = _read_cape_cloth_bin(path, require_seams=False)
+    if asset is None:
+        return None
+    for key, expected in TESTSCENE_MD_EXPECTED.items():
+        if int(asset[key]) != int(expected):
+            return None
+    return asset
+
+
+def _imported_cloth_objects(asset):
+    """Build (cloth_obj, body_obj) from a parsed cloth asset, unscaled."""
+    scale = asset["scale"]
+    verts = [(asset["verts"][i] * scale,
+              asset["verts"][i + 1] * scale,
+              asset["verts"][i + 2] * scale)
+             for i in range(0, asset["nv"] * 3, 3)]
+    faces = [(asset["tris"][i], asset["tris"][i + 1], asset["tris"][i + 2])
+             for i in range(0, asset["nt"] * 3, 3)]
+    body_verts = [(asset["body_verts"][i] * scale,
+                   asset["body_verts"][i + 1] * scale,
+                   asset["body_verts"][i + 2] * scale)
+                  for i in range(0, asset["body_nv"] * 3, 3)]
+    body_faces = [(asset["body_tris"][i], asset["body_tris"][i + 1],
+                   asset["body_tris"][i + 2])
+                  for i in range(0, asset["body_nt"] * 3, 3)]
+    return verts, faces, body_verts, body_faces
+
+
+def _apply_imported_contact_settings(cloth_obj, contact_thickness):
+    """C++ contact thickness/friction/convergence for imported garments.
+
+    TestScene.cpp:2525-2542: epsilon = selfepsilon = contact thickness,
+    friction 0.5, and four collision-iteration passes.
+    """
+    settings = cloth_obj.GPUCloth
+    settings.epsilon = contact_thickness
+    settings.selfepsilon = contact_thickness
+    settings.collision_friction = TESTSCENE_CONTACT_FRICTION
+    settings.collision_quality = TESTSCENE_COLLISION_LOOPS
+
+
+class GPUCloth_TestCape(bpy.types.Operator):
+    """Create CapeProject scene: sewn garment panels over body collider"""
+    bl_idname = "gpucloth.test_cape"
+    bl_label = "Cape Project"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    asset_dir: bpy.props.StringProperty(
+        name="Cape Asset Dir",
+        description="Directory holding cape.clothbin (default: addon cape_import/)",
+        default="",
+    )
+
+    collar_pins: bpy.props.BoolProperty(
+        name="Collar Pins",
+        description=(
+            "Pin the imported garment at the collar.  Native default is off "
+            "(TESTSCENE_CAPE_COLLAR_PINS=0), i.e. an MD-style free garment"),
+        default=False,
+    )
+
+    def execute(self, context):
+        asset_dir = _find_cape_asset_dir(self.asset_dir)
+        if asset_dir is None:
+            self.report({'ERROR'},
+                        "cape.clothbin not found: set asset_dir or ship "
+                        "cape_import/ beside the addon")
+            return {'CANCELLED'}
+        asset = _read_cape_cloth_bin(
+            os.path.join(asset_dir, _CAPE_ASSET_FILE))
+        if asset is None:
+            self.report({'ERROR'}, "invalid cape.clothbin header or payload")
+            return {'CANCELLED'}
+
+        bpy.ops.object.select_all(action='DESELECT')
+        verts, faces, body_verts, body_faces = _imported_cloth_objects(asset)
+        cloth_mesh = bpy.data.meshes.new("CapeCloth_mesh")
+        cloth_obj = bpy.data.objects.new("CapeCloth", cloth_mesh)
+        bpy.context.collection.objects.link(cloth_obj)
+        # Explicit sewing springs: one loose edge per imported seam pair
+        # (TestScene.cpp:2554-2584).
+        cloth_mesh.from_pydata(verts, _imported_cloth_edges(asset), faces)
+        cloth_mesh.update()
+
+        body_mesh = bpy.data.meshes.new("CapeBody_mesh")
+        body_obj = bpy.data.objects.new("CapeBody", body_mesh)
+        bpy.context.collection.objects.link(body_obj)
+        body_mesh.from_pydata(body_verts, [], body_faces)
+        body_mesh.update()
+        body_obj.modifiers.new(name="Collision", type='COLLISION')
+        _make_two_sided_collider(body_obj)
+
+        if asset["npin"]:
+            pin_group = cloth_obj.vertex_groups.new(name="CapePin")
+            pin_group.add(list(asset["pins"]), 1.0, 'REPLACE')
+
+        bpy.context.view_layer.objects.active = cloth_obj
+        cloth_obj.select_set(True)
+
+        _setup_testscene_cloth(cloth_obj, solver='PD')
+        _apply_imported_contact_settings(
+            cloth_obj, TESTSCENE_CAPE_CONTACT_THICKNESS)
+        cloth_obj.GPUCloth.use_self_collision = True
+        cloth_obj.GPUCloth.ogc_radius = TESTSCENE_CAPE_OGC_RADIUS_MM
+        cloth_obj.GPUCloth.ogc_kc = TESTSCENE_CAPE_OGC_KC
+        cloth_obj.GPUCloth.ogc_friction = TESTSCENE_CAPE_OGC_FRICTION
+        cloth_obj.GPUCloth.use_sewing_springs = True
+        if self.collar_pins and asset["npin"]:
+            cloth_obj.GPUCloth.vgroup_mass = "CapePin"
+
+        _set_scene_gravity(context)
+
+        self.report({'INFO'},
+                    "CapeProject test scene created: %d panels, %d verts, "
+                    "%d tris, %d seams, %d pins%s" % (
+                        asset["panels"], asset["nv"], asset["nt"],
+                        asset["nseam"], asset["npin"],
+                        "" if self.collar_pins else " (collar pins off)"))
+        return {'FINISHED'}
+
+
+class GPUCloth_TestMDHorizontalContact(bpy.types.Operator):
+    """Create MDHorizontalContact scene: MD-imported cloth on a static plate"""
+    bl_idname = "gpucloth.test_md_horizontal_contact"
+    bl_label = "MD Horizontal Contact"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    asset_dir: bpy.props.StringProperty(
+        name="MD Asset Dir",
+        description=(
+            "Directory holding MDHorizontalContact.clothbin "
+            "(default: addon md_comparison/)"),
+        default="",
+    )
+
+    def execute(self, context):
+        asset_dir = _find_md_asset_dir(self.asset_dir)
+        if asset_dir is None:
+            self.report({'ERROR'},
+                        "MDHorizontalContact.clothbin not found: set "
+                        "asset_dir or ship md_comparison/ beside the addon")
+            return {'CANCELLED'}
+        asset = _read_md_cloth_bin(os.path.join(asset_dir, _MD_ASSET_FILE))
+        if asset is None:
+            self.report({'ERROR'},
+                        "invalid MDHorizontalContact.clothbin header, "
+                        "payload, or fixture counts")
+            return {'CANCELLED'}
+
+        bpy.ops.object.select_all(action='DESELECT')
+        verts, faces, body_verts, body_faces = _imported_cloth_objects(asset)
+        cloth_mesh = bpy.data.meshes.new("MDCloth_mesh")
+        cloth_obj = bpy.data.objects.new("MDCloth", cloth_mesh)
+        bpy.context.collection.objects.link(cloth_obj)
+        cloth_mesh.from_pydata(verts, _imported_cloth_edges(asset), faces)
+        cloth_mesh.update()
+
+        body_mesh = bpy.data.meshes.new("MDContactBody_mesh")
+        body_obj = bpy.data.objects.new("MDContactBody", body_mesh)
+        bpy.context.collection.objects.link(body_obj)
+        body_mesh.from_pydata(body_verts, [], body_faces)
+        body_mesh.update()
+        body_obj.modifiers.new(name="Collision", type='COLLISION')
+        _make_two_sided_collider(body_obj)
+
+        bpy.context.view_layer.objects.active = cloth_obj
+        cloth_obj.select_set(True)
+
+        # TestScene.cpp:5108-5125: no proxy, no SDB bending, no self
+        # collision, PD only.  No pins and no seams (TestScene.cpp:2728-2731).
+        _setup_testscene_cloth(cloth_obj, solver='PD')
+        _apply_imported_contact_settings(
+            cloth_obj, TESTSCENE_MD_CONTACT_THICKNESS)
+        cloth_obj.GPUCloth.use_self_collision = False
+        cloth_obj.GPUCloth.use_proxy = False
+
+        _set_scene_gravity(context)
+
+        self.report({'INFO'},
+                    "MDHorizontalContact test scene created: %d verts, "
+                    "%d tris, static body %d verts" % (
+                        asset["nv"], asset["nt"], asset["body_nv"]))
         return {'FINISHED'}
 
 
@@ -6833,6 +8119,601 @@ class GPUCloth_TestOGCBounds(bpy.types.Operator):
         bpy.context.view_layer.objects.active = upper
         self.report({'INFO'}, "OGC Bounds Viz scene created")
         return {'FINISHED'}
+
+
+# ===========================================================================
+#  Interaction: move the cloth by dragging one vertex (MD-style grab)
+# ===========================================================================
+#
+#  Reference behaviour (C++ TestScene application):
+#    * TestScene_UI.cpp:3435-3470 — a scene click not consumed by the UI grabs
+#      the nearest cloth vertex; releasing the button clears the grab.
+#    * TestScene_UI.cpp:2716-2731 — the cursor delta is converted with
+#      worldPerPx = depth * tanHalfFov * 2 / H and applied along the camera
+#      right / screen-up axes, so the target stays in the camera plane at the
+#      grabbed vertex's depth and the vertex follows the cursor.
+#    * TestScene.cpp:3491-3504 — while a grab is live the drag target is
+#      written into that vertex's positional constraint
+#      (cv.xconst = m_dragTarget, CLOTH_VERT_FLAG_PINNED) once per frame, and
+#      restored after the solver step, so the cloth is driven by the solver
+#      rather than by directly written coordinates.
+#
+#  The add-on cannot write xconst directly: GPUCLOTH_VERTEX_PIN_WEIGHT and
+#  GPUCLOTH_VERTEX_PIN_TARGET_XYZ are rejected as NOT_CONFIGURABLE, and the
+#  animated pin snapshot owns all per-vertex pin state.  The grab therefore
+#  folds its target into the pin snapshot that _publish_frame_inputs already
+#  commits once per simulated frame, which the native commit turns into
+#  exactly PINNED + xconst for that one vertex.  The tool is inert outside
+#  playback: the gate below is the only place that lets the modal touch the
+#  mouse, and every other event is passed through to Blender unchanged.
+
+_VERTEX_DRAG_POLL_INTERVAL = 0.02
+_VERTEX_DRAG_PICK_RADIUS_PX = 14.0
+_VERTEX_DRAG_MARKER_FRACTION = 0.02
+
+_vertex_drag_state = {
+    'armed': False,        # the tool was switched on from the panel
+    'modal_live': False,   # a modal handler owns the timer right now
+    'dragging': False,     # one vertex is currently held
+    'object_index': -1,    # index into g_clothOBJs / g_simulationOBJs
+    'object_uid': 0,       # Blender session UID of the grabbed cloth object
+    'vertex_index': -1,
+    'target_world': None,  # mathutils.Vector; the live constraint target
+    'last_mouse': (0.0, 0.0),
+    'timer': None,
+    'status': "",
+}
+_vertex_drag_draw_handle = None
+
+
+def _animation_is_playing(context):
+    """True only while Blender plays back the animation (live sim drive)."""
+    screen = getattr(context, "screen", None)
+    if screen is None:
+        return False
+    try:
+        return bool(screen.is_animation_playing)
+    except (AttributeError, ReferenceError, RuntimeError, TypeError):
+        return False
+
+
+def _vertex_drag_simulation_ready(scene):
+    """True when a live (non-baked) simulation can consume a drag target."""
+    if g_dll is None or not g_clothOBJs or not g_simulationOBJs:
+        return False
+    if scene is None or not bool(
+            getattr(scene, "gpu_cloth_springs_built", False)):
+        return False
+    helper = getattr(scene, "gpu_cloth_helper", None)
+    if helper is not None and bool(getattr(helper, "is_baked", False)):
+        return False
+    if prepare_task_active() or _teardown_failure or _stop_requested:
+        return False
+    return True
+
+
+def _vertex_drag_gate(context):
+    """The only condition under which the tool may consume the mouse.
+
+    Outside playback (and outside a live simulation) this returns False and
+    the modal handler passes every event through, so clicks keep selecting
+    objects and mesh elements exactly as Blender normally does.
+    """
+    if not _vertex_drag_state['armed']:
+        return False
+    if not _animation_is_playing(context):
+        return False
+    return _vertex_drag_simulation_ready(getattr(context, "scene", None))
+
+
+def _vertex_drag_region(context):
+    """Return (region, rv3d) when the event belongs to a 3D viewport."""
+    region = getattr(context, "region", None)
+    space = getattr(context, "space_data", None)
+    region_data = getattr(context, "region_data", None)
+    if region is None or space is None or region_data is None:
+        return None, None
+    if getattr(region, "type", None) != 'WINDOW':
+        return None, None
+    if getattr(space, "type", None) != 'VIEW_3D':
+        return None, None
+    return region, region_data
+
+
+def _vertex_drag_release(reason):
+    """Drop the grabbed vertex so the cloth stops being constrained."""
+    state = _vertex_drag_state
+    if not state['dragging']:
+        return False
+    state['dragging'] = False
+    state['object_index'] = -1
+    state['object_uid'] = 0
+    state['vertex_index'] = -1
+    state['target_world'] = None
+    state['last_mouse'] = (0.0, 0.0)
+    state['status'] = reason
+    return True
+
+
+def _vertex_drag_grab_is_live():
+    """The held vertex still exists in the mesh the solver owns."""
+    state = _vertex_drag_state
+    index = state['object_index']
+    if index < 0 or index >= len(g_simulationOBJs):
+        return False
+    obj = g_simulationOBJs[index]
+    if obj is None:
+        return False
+    try:
+        vertex_count = len(obj.data.vertices)
+        object_uid = int(obj.session_uid)
+    except (AttributeError, ReferenceError, RuntimeError, TypeError):
+        return False
+    if object_uid != state['object_uid']:
+        return False
+    return 0 <= state['vertex_index'] < vertex_count
+
+
+def _simulation_vertex_world_positions(obj, depsgraph):
+    """Homogeneous world-space positions of one simulation mesh, as (n, 4)."""
+    try:
+        vertices = obj.evaluated_get(depsgraph).data.vertices
+    except (AttributeError, ReferenceError, RuntimeError, TypeError):
+        try:
+            vertices = obj.data.vertices
+        except (AttributeError, ReferenceError, RuntimeError, TypeError):
+            return None
+    vertex_count = len(vertices)
+    if vertex_count == 0:
+        return None
+    local = np.empty(vertex_count * 3, dtype=np.float64)
+    vertices.foreach_get("co", local)
+    try:
+        matrix = np.array(obj.matrix_world, dtype=np.float64)
+    except (ReferenceError, RuntimeError, TypeError, ValueError):
+        return None
+    positions = np.empty((vertex_count, 4), dtype=np.float64)
+    positions[:, :3] = local.reshape(vertex_count, 3)
+    positions[:, 3] = 1.0
+    return positions @ matrix.T
+
+
+def _vertex_drag_pick(region, rv3d, depsgraph, mouse):
+    """Nearest simulation vertex under the cursor, within the pick radius.
+
+    Mirrors TestScene::PickClosestVertex: project every candidate into the
+    region and keep the closest one, or nothing when the cursor is not close
+    to any cloth vertex.
+    """
+    try:
+        projection = np.array(rv3d.perspective_matrix, dtype=np.float64)
+    except (AttributeError, RuntimeError, TypeError, ValueError):
+        return None
+    half_width = float(region.width) * 0.5
+    half_height = float(region.height) * 0.5
+    best = None
+    best_distance = _VERTEX_DRAG_PICK_RADIUS_PX ** 2
+    for index, obj in enumerate(g_simulationOBJs):
+        positions = _simulation_vertex_world_positions(obj, depsgraph)
+        if positions is None:
+            continue
+        clip = positions @ projection.T
+        w = clip[:, 3]
+        valid = w > 1.0e-6
+        if not bool(valid.any()):
+            continue
+        inverse_w = np.where(valid, 1.0 / np.where(valid, w, 1.0), 0.0)
+        px = half_width + half_width * clip[:, 0] * inverse_w
+        py = half_height + half_height * clip[:, 1] * inverse_w
+        distance = (px - mouse[0]) ** 2 + (py - mouse[1]) ** 2
+        distance = np.where(valid, distance, np.inf)
+        candidate = int(np.argmin(distance))
+        if float(distance[candidate]) >= best_distance:
+            continue
+        best_distance = float(distance[candidate])
+        best = (
+            index,
+            candidate,
+            Vector(positions[candidate, :3]),
+        )
+    return best
+
+
+def _vertex_drag_local_target(index):
+    """The live drag target expressed in the simulation object's space."""
+    state = _vertex_drag_state
+    if not state['dragging'] or state['target_world'] is None:
+        return None
+    if index < 0 or index >= len(g_simulationOBJs):
+        return None
+    obj = g_simulationOBJs[index]
+    if obj is None:
+        return None
+    try:
+        matrix = obj.matrix_world.inverted()
+    except (AttributeError, ReferenceError, RuntimeError, TypeError, ValueError):
+        _vertex_drag_release("grab rejected: cloth transform is singular")
+        return None
+    return matrix @ state['target_world']
+
+
+def _vertex_drag_pin_snapshot(index, snapshot):
+    """Fold the live drag target into one frame's pin snapshot.
+
+    Called once per simulated frame from _publish_frame_inputs, so the
+    constraint target is re-sampled every frame and released as soon as the
+    grab ends.
+    """
+    state = _vertex_drag_state
+    if (not state['dragging'] or state['object_index'] != index or
+            state['vertex_index'] < 0):
+        return snapshot
+    if not _vertex_drag_grab_is_live():
+        _vertex_drag_release("grab released: cloth topology changed")
+        return snapshot
+    target = _vertex_drag_local_target(index)
+    if target is None:
+        return snapshot
+    try:
+        return with_dragged_vertex_pin(
+            snapshot, state['vertex_index'], tuple(target))
+    except VertexChannelError as exc:
+        _vertex_drag_release(f"grab rejected: {exc}")
+        return snapshot
+
+
+def _vertex_drag_begin(context, event):
+    """Grab the nearest cloth vertex under the cursor."""
+    region, rv3d = _vertex_drag_region(context)
+    if region is None:
+        return False
+    mouse = (float(event.mouse_region_x), float(event.mouse_region_y))
+    try:
+        depsgraph = context.evaluated_depsgraph_get()
+    except (AttributeError, ReferenceError, RuntimeError, TypeError):
+        return False
+    hit = _vertex_drag_pick(region, rv3d, depsgraph, mouse)
+    if hit is None:
+        return False
+    index, vertex_index, world = hit
+    try:
+        object_uid = int(g_clothOBJs[index].session_uid)
+    except (AttributeError, IndexError, ReferenceError, RuntimeError, TypeError):
+        return False
+    state = _vertex_drag_state
+    state['dragging'] = True
+    state['object_index'] = index
+    state['object_uid'] = object_uid
+    state['vertex_index'] = vertex_index
+    state['target_world'] = world
+    state['last_mouse'] = mouse
+    state['status'] = f"dragging vertex {vertex_index}"
+    return True
+
+
+def _vertex_drag_update(context, event):
+    """Move the constraint target with the cursor, in the camera plane."""
+    state = _vertex_drag_state
+    region, rv3d = _vertex_drag_region(context)
+    if region is None or state['target_world'] is None:
+        return False
+    mouse = (float(event.mouse_region_x), float(event.mouse_region_y))
+    previous = state['last_mouse']
+    delta_x = mouse[0] - previous[0]
+    delta_y = mouse[1] - previous[1]
+    state['last_mouse'] = mouse
+    if delta_x == 0.0 and delta_y == 0.0:
+        return False
+    target = state['target_world']
+    try:
+        base = region_2d_to_location_3d(region, rv3d, mouse, target)
+        right = region_2d_to_location_3d(
+            region, rv3d, (mouse[0] + 1.0, mouse[1]), target)
+        up = region_2d_to_location_3d(
+            region, rv3d, (mouse[0], mouse[1] + 1.0), target)
+    except (AttributeError, ReferenceError, RuntimeError, TypeError, ValueError):
+        return False
+    if base is None or right is None or up is None:
+        return False
+    # Per-pixel world vectors along the camera right / screen-up axes at the
+    # grabbed vertex's depth; this is TestScene's worldPerPx conversion
+    # (depth * tanHalfFov * 2 / H) taken from the region projection, so it
+    # also holds for orthographic views.
+    state['target_world'] = (
+        target + (right - base) * delta_x + (up - base) * delta_y)
+    return True
+
+
+def _vertex_drag_tag_redraw(context):
+    screen = getattr(context, "screen", None)
+    if screen is None:
+        return
+    for area in getattr(screen, "areas", ()):
+        if getattr(area, "type", None) == 'VIEW_3D':
+            area.tag_redraw()
+
+
+def _vertex_drag_timer_remove(window_manager):
+    state = _vertex_drag_state
+    timer = state['timer']
+    state['timer'] = None
+    if timer is None or window_manager is None:
+        return
+    try:
+        window_manager.event_timer_remove(timer)
+    except (AttributeError, RuntimeError, TypeError):
+        pass
+
+
+def _vertex_drag_arm(context, operator):
+    """Arm the tool and register the modal handler that owns its events."""
+    state = _vertex_drag_state
+    if state['armed']:
+        return True
+    if state['modal_live']:
+        # The previous session still owns its timer and is leaving on its next
+        # poll; a second handler would orphan that timer.
+        return False
+    window = getattr(context, "window", None)
+    window_manager = getattr(context, "window_manager", None)
+    if window is None or window_manager is None:
+        return False
+    try:
+        state['timer'] = window_manager.event_timer_add(
+            _VERTEX_DRAG_POLL_INTERVAL, window=window)
+        window_manager.modal_handler_add(operator)
+    except (AttributeError, RuntimeError, TypeError) as exc:
+        _vertex_drag_timer_remove(window_manager)
+        print(f"GPUCloth vertex drag: cannot start modal tool: {exc}")
+        return False
+    state['armed'] = True
+    state['modal_live'] = True
+    state['status'] = "armed: play the animation, then drag a cloth vertex"
+    return True
+
+
+def _vertex_drag_teardown(context):
+    """Symmetric counterpart of _vertex_drag_arm."""
+    state = _vertex_drag_state
+    _vertex_drag_release("grab released: tool off")
+    state['armed'] = False
+    _vertex_drag_timer_remove(getattr(context, "window_manager", None))
+    state['modal_live'] = False
+    _vertex_drag_tag_redraw(context)
+
+
+def _vertex_drag_disarm(context, status):
+    """Leave the tool switched on as a modal handler but stop its grab.
+
+    The armed modal handler removes itself, and its timer, on its next poll;
+    removing the timer here would leave it unable to observe the flag.
+    """
+    state = _vertex_drag_state
+    _vertex_drag_release(status)
+    state['armed'] = False
+    state['status'] = status
+
+
+def vertex_drag_tool_state(context=None):
+    """Read-only tool state for the panel."""
+    context = bpy.context if context is None else context
+    state = _vertex_drag_state
+    dragging = bool(state['dragging'])
+    object_name = ""
+    if dragging and 0 <= state['object_index'] < len(g_clothOBJs):
+        try:
+            object_name = g_clothOBJs[state['object_index']].name
+        except (AttributeError, IndexError, ReferenceError, RuntimeError):
+            object_name = ""
+    return {
+        "armed": bool(state['armed']),
+        "dragging": dragging,
+        "vertex_index": int(state['vertex_index']) if dragging else -1,
+        "object_name": object_name,
+        "playing": _animation_is_playing(context),
+        "available": _vertex_drag_simulation_ready(
+            getattr(context, "scene", None)),
+        "status": state['status'] or "",
+    }
+
+
+def _vertex_drag_draw():
+    """Viewport overlay: grabbed vertex, live constraint target."""
+    state = _vertex_drag_state
+    if not state['dragging'] or state['target_world'] is None:
+        return
+    index = state['object_index']
+    vertex_index = state['vertex_index']
+    if index < 0 or index >= len(g_simulationOBJs):
+        return
+    obj = g_simulationOBJs[index]
+    if obj is None:
+        return
+    try:
+        import gpu
+        from gpu_extras.batch import batch_for_shader
+    except ImportError:
+        return
+    try:
+        vertices = obj.data.vertices
+    except (AttributeError, ReferenceError, RuntimeError, TypeError):
+        return
+    if vertex_index < 0 or vertex_index >= len(vertices):
+        return
+    try:
+        right = Vector((1.0, 0.0, 0.0))
+        up = Vector((0.0, 0.0, 1.0))
+        region_data = bpy.context.region_data
+        size = max(
+            abs(float(region_data.view_distance)) * _VERTEX_DRAG_MARKER_FRACTION,
+            1.0e-5)
+        right = region_data.view_rotation @ right
+        up = region_data.view_rotation @ up
+    except (AttributeError, RuntimeError, TypeError, ValueError):
+        right = Vector((1.0, 0.0, 0.0))
+        up = Vector((0.0, 0.0, 1.0))
+        size = 0.01
+    try:
+        vertex_world = obj.matrix_world @ vertices[vertex_index].co
+    except (AttributeError, ReferenceError, RuntimeError, TypeError):
+        return
+
+    target = state['target_world']
+    target_lines = [
+        target - right * size, target + right * size,
+        target - up * size, target + up * size,
+    ]
+    vertex_lines = [
+        vertex_world - right * size - up * size,
+        vertex_world + right * size - up * size,
+        vertex_world + right * size - up * size,
+        vertex_world + right * size + up * size,
+        vertex_world + right * size + up * size,
+        vertex_world - right * size + up * size,
+        vertex_world - right * size + up * size,
+        vertex_world - right * size - up * size,
+    ]
+    shader = gpu.shader.from_builtin('UNIFORM_COLOR')
+    gpu.state.blend_set('ALPHA')
+    gpu.state.line_width_set(2.0)
+    shader.bind()
+    shader.uniform_float("color", (1.0, 0.30, 0.30, 1.0))
+    batch = batch_for_shader(
+        shader, 'LINES',
+        {"pos": [tuple(point) for point in vertex_lines]})
+    batch.draw(shader)
+    shader.uniform_float("color", (1.0, 0.85, 0.10, 1.0))
+    batch = batch_for_shader(
+        shader, 'LINES',
+        {"pos": [tuple(point) for point in target_lines]})
+    batch.draw(shader)
+    gpu.state.blend_set('NONE')
+
+
+def _vertex_drag_load_post_handler(*_args):
+    """A new file owns no native grab; drop the tool's transient state."""
+    _vertex_drag_shutdown()
+
+
+def _vertex_drag_shutdown():
+    """Release every transient surface the tool owns (unregister path)."""
+    global _vertex_drag_draw_handle
+    _vertex_drag_teardown(bpy.context)
+    if _vertex_drag_draw_handle is not None:
+        try:
+            bpy.types.SpaceView3D.draw_handler_remove(
+                _vertex_drag_draw_handle, 'WINDOW')
+        except (AttributeError, RuntimeError, TypeError) as exc:
+            print(f"GPUCloth vertex drag: overlay teardown failed: {exc}")
+        _vertex_drag_draw_handle = None
+
+
+def _vertex_drag_add_draw_handler():
+    global _vertex_drag_draw_handle
+    if _vertex_drag_draw_handle is None:
+        _vertex_drag_draw_handle = bpy.types.SpaceView3D.draw_handler_add(
+            _vertex_drag_draw, (), 'WINDOW', 'POST_VIEW')
+
+
+class GPUCloth_MoveClothByVertex(bpy.types.Operator):
+    """Move the cloth by dragging one vertex while the simulation plays
+
+    The grab is active only during animation playback: while the animation is
+    stopped every event is handed back to Blender, so clicking keeps
+    selecting as usual.
+    """
+    bl_idname = "gpucloth.move_cloth_by_vertex"
+    bl_label = "Move Cloth By Vertex (MD-style)"
+    bl_options = {'REGISTER'}
+
+    @classmethod
+    def poll(cls, context):
+        return (
+            _vertex_drag_state['armed'] or
+            _vertex_drag_simulation_ready(getattr(context, "scene", None))
+        )
+
+    def invoke(self, context, event):
+        state = _vertex_drag_state
+        if state['armed']:
+            _vertex_drag_disarm(context, "tool off")
+            self.report({'INFO'}, "Move Cloth By Vertex: off")
+            return {'FINISHED'}
+        if state['modal_live']:
+            self.report(
+                {'INFO'},
+                "Move Cloth By Vertex is still stopping; try again")
+            return {'CANCELLED'}
+        if not _vertex_drag_simulation_ready(getattr(context, "scene", None)):
+            self.report(
+                {'ERROR'},
+                "Prepare the simulation before moving cloth by vertex")
+            return {'CANCELLED'}
+        if not _vertex_drag_arm(context, self):
+            self.report({'ERROR'}, "Move Cloth By Vertex needs a window")
+            return {'CANCELLED'}
+        self.report(
+            {'INFO'},
+            "Move Cloth By Vertex armed: play the animation, then drag a "
+            "cloth vertex")
+        return {'RUNNING_MODAL'}
+
+    def execute(self, context):
+        if _vertex_drag_state['armed']:
+            _vertex_drag_disarm(context, "tool off")
+            return {'FINISHED'}
+        bpy.ops.gpucloth.move_cloth_by_vertex('INVOKE_DEFAULT')
+        return {'FINISHED'}
+
+    def modal(self, context, event):
+        state = _vertex_drag_state
+
+        if event.type == 'TIMER':
+            if not state['armed']:
+                _vertex_drag_teardown(context)
+                return {'CANCELLED'}
+            if state['dragging'] and (
+                    not _vertex_drag_gate(context) or
+                    not _vertex_drag_grab_is_live()):
+                _vertex_drag_release("grab released: simulation stopped")
+                _vertex_drag_tag_redraw(context)
+            return {'PASS_THROUGH'}
+
+        if not _vertex_drag_gate(context):
+            # Not playing: never take the mouse, let Blender select normally.
+            if state['dragging']:
+                _vertex_drag_release("grab released: simulation stopped")
+                _vertex_drag_tag_redraw(context)
+            return {'PASS_THROUGH'}
+
+        if event.type == 'ESC':
+            if state['dragging']:
+                _vertex_drag_release("grab cancelled")
+                _vertex_drag_tag_redraw(context)
+                return {'RUNNING_MODAL'}
+            _vertex_drag_disarm(context, "tool off")
+            return {'RUNNING_MODAL'}
+
+        if state['dragging']:
+            if event.type == 'MOUSEMOVE':
+                if _vertex_drag_update(context, event):
+                    _vertex_drag_tag_redraw(context)
+                return {'RUNNING_MODAL'}
+            if event.type == 'LEFTMOUSE' and event.value == 'RELEASE':
+                _vertex_drag_release("grab released")
+                _vertex_drag_tag_redraw(context)
+                return {'RUNNING_MODAL'}
+            if event.type == 'RIGHTMOUSE' and event.value == 'PRESS':
+                _vertex_drag_release("grab cancelled")
+                _vertex_drag_tag_redraw(context)
+                return {'RUNNING_MODAL'}
+            return {'PASS_THROUGH'}
+
+        if event.type == 'LEFTMOUSE' and event.value == 'PRESS':
+            if _vertex_drag_begin(context, event):
+                _vertex_drag_tag_redraw(context)
+                return {'RUNNING_MODAL'}
+        return {'PASS_THROUGH'}
 
 
 # ===========================================================================
@@ -7006,6 +8887,7 @@ _OPERATOR_CLASSES = [
     GPUCloth_CopyInvariantDiagnostics,
     GPUCloth_SaveInvariantDiagnostics,
     GPUCloth_BakeSimulation,
+    GPUCloth_MoveClothByVertex,
     GPUCloth_FreeCache,
     GPUCloth_ExportAlembic,
     GPUCloth_ExportUSD,
@@ -7013,6 +8895,8 @@ _OPERATOR_CLASSES = [
     GPUCloth_TestTwist,
     GPUCloth_TestMultiLayerDrop,
     GPUCloth_TestCushionDrop,
+    GPUCloth_TestCape,
+    GPUCloth_TestMDHorizontalContact,
     GPUCloth_TestOGCBounds,
 ]
 
@@ -7023,6 +8907,8 @@ def _register_operator_surfaces():
     frame_handler_added = False
     cache_handler_added = False
     draw_handler_added = False
+    vertex_drag_draw_handler_added = False
+    load_handler_added = False
     try:
         for cls in _OPERATOR_CLASSES:
             bpy.utils.register_class(cls)
@@ -7039,7 +8925,19 @@ def _register_operator_surfaces():
             _ogc_draw_handle = bpy.types.SpaceView3D.draw_handler_add(
                 _ogc_bounds_draw, (), 'WINDOW', 'POST_VIEW')
             draw_handler_added = True
+        if _vertex_drag_draw_handle is None:
+            _vertex_drag_add_draw_handler()
+            vertex_drag_draw_handler_added = True
+        if (_vertex_drag_load_post_handler not in
+                bpy.app.handlers.load_post):
+            bpy.app.handlers.load_post.append(_vertex_drag_load_post_handler)
+            load_handler_added = True
     except Exception:
+        if load_handler_added and (_vertex_drag_load_post_handler in
+                bpy.app.handlers.load_post):
+            bpy.app.handlers.load_post.remove(_vertex_drag_load_post_handler)
+        if vertex_drag_draw_handler_added:
+            _vertex_drag_shutdown()
         if draw_handler_added and _ogc_draw_handle is not None:
             bpy.types.SpaceView3D.draw_handler_remove(
                 _ogc_draw_handle, 'WINDOW')
@@ -7068,13 +8966,29 @@ def register():
     # OGC contact-bounds visualiser — register once, draw callback checks flag
 def unregister():
     global g_dll
+    global _stop_requested, _prepare_timer_registered
+    cancel_auto_prepare()
+    _stop_requested = True
     if not ensure_native_teardown(shutdown_runtime=True):
         print(
             "GPUCloth unregister retained handlers, classes, DLL, and "
             "owners because native teardown failed")
         return False
+    try:
+        if bpy.app.timers.is_registered(_advance_prepare_task):
+            bpy.app.timers.unregister(_advance_prepare_task)
+    except (AttributeError, RuntimeError):
+        pass
+    _prepare_timer_registered = False
 
     global _ogc_draw_handle
+    # The vertex drag owns a modal handler, a timer, an overlay and at most
+    # one live positional constraint.  Release all of them before the
+    # operator classes they reference are unregistered.
+    _vertex_drag_shutdown()
+    if _vertex_drag_load_post_handler in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.remove(_vertex_drag_load_post_handler)
+
     if _ogc_draw_handle is not None:
         bpy.types.SpaceView3D.draw_handler_remove(_ogc_draw_handle, 'WINDOW')
         _ogc_draw_handle = None
