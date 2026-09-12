@@ -915,6 +915,10 @@ struct GPUClothDiagnosticsStatus {
     uint64_t solve_count;
     uint64_t failure_count;
     uint64_t event_generation;
+    // Additive W2 diagnostic: selected joint-bank stable-orientation conflicts
+    // for the last solved frame (PD outer report). Zero when no conflict is
+    // reported; never gates the solver result.
+    uint32_t joint_orientation_conflicts;
     uint64_t reserved[2];
 };
 
@@ -1543,7 +1547,7 @@ static_assert(sizeof(GPUClothCollisionFilterConfig) == 32, "GPUClothCollisionFil
 static_assert(sizeof(GPUClothProxyConfig) == 160, "GPUClothProxyConfig ABI drift");
 static_assert(sizeof(GPUClothDiagnosticsConfig) == 96, "GPUClothDiagnosticsConfig ABI drift");
 static_assert(sizeof(GPUClothDiagnosticsEvent) == 32, "GPUClothDiagnosticsEvent ABI drift");
-static_assert(sizeof(GPUClothDiagnosticsStatus) == 152, "GPUClothDiagnosticsStatus ABI drift");
+static_assert(sizeof(GPUClothDiagnosticsStatus) == 160, "GPUClothDiagnosticsStatus ABI drift");
 static_assert(sizeof(GPUClothInvariantWitness) == 256, "GPUClothInvariantWitness ABI drift");
 static_assert(sizeof(GPUClothPreparationConfig) == 96, "GPUClothPreparationConfig ABI drift");
 static_assert(sizeof(GPUClothPreparationStatus) == 96, "GPUClothPreparationStatus ABI drift");
