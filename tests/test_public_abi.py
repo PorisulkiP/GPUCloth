@@ -66,6 +66,29 @@ def load_loader_class_without_blender(class_name):
     return namespace[class_name], namespace
 
 
+def load_native_loader_without_blender():
+    """Compile the module-level native loader with tiny global fakes."""
+    tree = ast.parse(OPERATORS.read_text(encoding="utf-8"), OPERATORS.name)
+    loader_node = next(
+        node for node in tree.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "_load_gpucloth_dll_native"
+    )
+    namespace = {
+        "os": os,
+        "subprocess": subprocess,
+        "sys": SimpleNamespace(platform="darwin"),
+        "cdll": SimpleNamespace(LoadLibrary=mock.Mock(return_value=object())),
+        "_bind_gpucloth_v3_exports": mock.Mock(),
+        "_validate_product_abi": mock.Mock(),
+        "_validate_descriptor_layout": mock.Mock(),
+    }
+    module = ast.Module(body=[loader_node], type_ignores=[])
+    exec(compile(ast.fix_missing_locations(module), OPERATORS.name, "exec"),
+         namespace)
+    return namespace["_load_gpucloth_dll_native"], namespace
+
+
 class PublicABIContractTest(unittest.TestCase):
     def test_python_sources_parse_without_blender(self):
         sources = sorted((ROOT / "GPUCloth").rglob("*.py"))
@@ -227,6 +250,58 @@ class PublicABIContractTest(unittest.TestCase):
         win_dll.assert_called_once_with("kernel32")
         free_library.assert_called_once_with(123)
         self.assertIsNone(namespace["g_dll"])
+
+    def test_mocked_posix_native_loader_skips_cuda_and_keeps_path(self):
+        for platform in ("linux", "darwin"):
+            loader, namespace = load_native_loader_without_blender()
+            namespace["sys"].platform = platform
+            fake_env = {"PATH": "/usr/bin"}
+            namespace["os"] = SimpleNamespace(
+                path=os.path,
+                pathsep=os.pathsep,
+                environ=fake_env,
+            )
+            native_path = "/package/GPUCloth.so"
+
+            with mock.patch.object(subprocess, "run") as nvidia_probe:
+                nvidia_probe.return_value = SimpleNamespace(
+                    stdout="CUDA Version: 12.0", stderr="")
+                loader(native_path)
+            nvidia_probe.assert_not_called()
+            self.assertEqual(fake_env, {"PATH": "/usr/bin"})
+            namespace["cdll"].LoadLibrary.assert_called_once_with(native_path)
+
+    def test_mocked_windows_native_loader_keeps_cuda_gate_and_search_path(self):
+        loader, namespace = load_native_loader_without_blender()
+        namespace["sys"].platform = "win32"
+        fake_env = {"PATH": ""}
+        fake_os = SimpleNamespace(
+            path=os.path,
+            pathsep=os.pathsep,
+            environ=fake_env,
+            add_dll_directory=mock.Mock(),
+        )
+        namespace["os"] = fake_os
+        native_path = str(ROOT / "GPUCloth.dll")
+
+        with mock.patch.object(subprocess, "run") as nvidia_probe:
+            nvidia_probe.return_value = SimpleNamespace(
+                stdout="CUDA Version: 12.0", stderr="")
+            loader(native_path)
+
+        nvidia_probe.assert_called_once_with(
+            ["nvidia-smi"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=True,
+        )
+        self.assertEqual(
+            fake_env["PATH"],
+            os.path.dirname(native_path) + os.pathsep)
+        fake_os.add_dll_directory.assert_called_once_with(
+            os.path.dirname(native_path))
+        namespace["cdll"].LoadLibrary.assert_called_once_with(native_path)
 
 
 if __name__ == "__main__":
