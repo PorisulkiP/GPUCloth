@@ -5691,27 +5691,34 @@ class GPUCloth_FreeVRAM(bpy.types.Operator):
 
 def _load_gpucloth_dll_native(filename):
     """Load and validate the DLL without touching Blender's Python API."""
-    try:
-        result = subprocess.run(
-            ["nvidia-smi"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            check=True,
-        )
-    except (FileNotFoundError, subprocess.CalledProcessError) as exc:
-        raise RuntimeError("nvidia-smi CUDA check failed") from exc
-    if ("CUDA Version" not in result.stdout and
-            "CUDA UMD Version" not in result.stdout):
-        raise RuntimeError("NVIDIA driver does not report CUDA support")
+    # The CUDA/nvidia-smi probe is the legacy Windows prerequisite, not a POSIX
+    # readiness test.  On POSIX the native load, ABI validation and runtime
+    # creation are the readiness proof, so a host without nvidia-smi still loads.
+    if sys.platform == "win32":
+        try:
+            result = subprocess.run(
+                ["nvidia-smi"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                check=True,
+            )
+        except (FileNotFoundError, subprocess.CalledProcessError) as exc:
+            raise RuntimeError("nvidia-smi CUDA check failed") from exc
+        if ("CUDA Version" not in result.stdout and
+                "CUDA UMD Version" not in result.stdout):
+            raise RuntimeError("NVIDIA driver does not report CUDA support")
 
     dll_dir = os.path.dirname(filename)
-    if dll_dir not in os.environ.get("PATH", ""):
-        os.environ["PATH"] = (
-            dll_dir + os.pathsep + os.environ.get("PATH", ""))
+    # Windows DLL dependency search is explicit.  On POSIX, let dyld/ld.so
+    # resolve packaged dependencies; do not mutate process search paths.
+    if sys.platform == "win32":
+        if dll_dir not in os.environ.get("PATH", ""):
+            os.environ["PATH"] = (
+                dll_dir + os.pathsep + os.environ.get("PATH", ""))
     directory_handles = []
     try:
-        if hasattr(os, "add_dll_directory"):
+        if sys.platform == "win32" and hasattr(os, "add_dll_directory"):
             candidates = [dll_dir]
             cuda_path = os.environ.get("CUDA_PATH")
             if cuda_path:
@@ -5759,7 +5766,7 @@ def _build_v3_cloth_native(
     return result
 
 class GPUCloth_LoadDLL(bpy.types.Operator):
-    """Загрузить нативную библиотеку GPUCloth (DLL / .so)"""
+    """Загрузить нативную библиотеку GPUCloth (DLL / .dylib / .so)"""
     bl_idname = "gpucloth.load_dll"
     bl_label  = "Load GPUCloth DLL"
 
