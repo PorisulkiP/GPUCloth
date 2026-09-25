@@ -7,6 +7,8 @@ import math
 
 import bpy
 
+from ..utils.version_compatibility_utils import is_blender_50
+
 
 SCHEMA_VERSION = 1
 _STATE_PREFIX = "gpucloth_cpu_modifier_"
@@ -427,6 +429,16 @@ def _copy_point_cache(obj, scene, copied, errors):
         external_path = bpy.path.abspath(
             str(point_cache.filepath), library=library)
 
+    # PointCache.compression was removed in Blender 5.0; the destination helper
+    # still owns the enum on every supported version.  Below 5.0 the host value
+    # is authoritative, so the user's CPU cache compression choice is imported;
+    # from 5.0 on the host no longer has the setting and the addon keeps its own
+    # value rather than failing the whole sync on one field.
+    if is_blender_50():
+        cache_compression = str(helper.cache_compression)
+    else:
+        cache_compression = str(point_cache.compression)
+
     values = {
         "cache_index": cache_index,
         "cache_name": cache_name,
@@ -434,7 +446,7 @@ def _copy_point_cache(obj, scene, copied, errors):
         "use_external_cache": use_external,
         "external_cache_dir": external_path,
         "use_library_path": use_library_path,
-        "cache_compression": str(point_cache.compression),
+        "cache_compression": cache_compression,
         "bake_start": int(point_cache.frame_start),
         "bake_end": int(point_cache.frame_end),
     }
@@ -598,6 +610,21 @@ def select_backend(obj, backend, scene=None):
                 error = f"{obj.name!r} failed to create Cloth modifier: {exc}"
             else:
                 modifiers = find_cpu_cloth_modifiers(obj)
+                # Seed the new CPU modifier's substep count from the addon
+                # property the UI shows, rather than letting the sync below
+                # overwrite it with Blender's own Cloth quality default (5).
+                # Without this the panel displays one substep count while the
+                # solver runs another: quality_step's declared default is
+                # unreachable, because activation always copies the CPU value
+                # over it.  Only a modifier this call just created is seeded, so
+                # a cloth that already exists keeps the CPU value as the owner
+                # of that field, which is the bridge's documented direction.
+                if len(modifiers) == 1:
+                    try:
+                        modifiers[0].settings.quality = int(
+                            obj.GPUCloth.quality_step)
+                    except (AttributeError, TypeError, ValueError):
+                        pass
         if error is None and len(modifiers) != 1:
             error = (
                 f"{obj.name!r} requires exactly one Cloth modifier; "

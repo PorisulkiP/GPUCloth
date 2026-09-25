@@ -35,11 +35,57 @@ from . import properties
 from . import operators
 from . import ui
 
+import bpy
+
 
 _REGISTER_TEARDOWN_FAILURE = (
     "GPUCloth package register blocked by retained native owners")
 _UNREGISTER_TEARDOWN_FAILURE = (
     "GPUCloth package unregister blocked by retained native owners")
+_EXIT_TEARDOWN_FAILURE = (
+    "GPUCloth exit teardown retained native owners")
+
+# Blender's own exit hook, chained rather than replaced, and the once-only guard
+# for it: ``WM_exit_ex`` runs that hook, so calling it back from inside the hook
+# would run Blender's whole disable-all pass a second time over classes this
+# package has already unregistered.
+_exit_hook_previous = None
+_exit_teardown_done = False
+
+
+def _exit_teardown():
+    """Release the CUDA owners inside Blender's exit, before driver teardown.
+
+    ``bpy.utils._on_exit`` is what ``WM_exit_ex`` runs to disable add-ons, and
+    it runs while the CUDA driver is still usable.  A prepared simulation that
+    is still owning managed memory when the process reaches static destruction
+    frees it after the driver has begun shutting down, which aborts the process
+    (``GPUassert: driver shutting down``).  Running the addon's existing
+    teardown here releases that memory while the driver can still serve it.
+
+    The wrapped hook is not called from here: Blender already runs it, and it
+    performs its add-on disable pass over objects this teardown has released.
+    """
+    global _exit_teardown_done
+    if _exit_teardown_done:
+        return
+    _exit_teardown_done = True
+    try:
+        if unregister() is False:
+            print(_EXIT_TEARDOWN_FAILURE)
+    except Exception as exc:  # an exit path must not raise into Blender's exit
+        print(f"GPUCloth exit teardown failed: {exc}")
+
+
+def _install_exit_hook():
+    """Chain this package's teardown onto Blender's exit hook, once."""
+    global _exit_hook_previous
+    previous = getattr(bpy.utils, "_on_exit", None)
+    if previous is None or previous is _exit_teardown:
+        return False
+    _exit_hook_previous = previous
+    bpy.utils._on_exit = _exit_teardown
+    return True
 
 
 def get_solver_diagnostics(cloth=None):
@@ -74,6 +120,7 @@ def register():
     except Exception:
         _rollback_registered_modules(registered)
         raise
+    _install_exit_hook()
 
 
 def unregister():

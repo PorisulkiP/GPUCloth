@@ -67,7 +67,8 @@ def is_blender_50():
 def get_addon_directory():
     """
     Возвращает корневую директорию аддона GPUCloth.
-    Структура установки: <addon>/utils/version_compatibility_utils.py
+    При установке в Blender структура: <addon>/utils/version_compatibility_utils.py
+    При разработке в репо:            <repo>/src/python/utils/version_compatibility_utils.py
     Ищет __init__.py с bl_info, поднимаясь от текущего файла вверх.
     """
     current = os.path.dirname(os.path.realpath(__file__))
@@ -100,7 +101,7 @@ def get_lib_directory():
 
 def get_dll_path(dll_name="GPUCloth.dll"):
     """
-    Ищет библиотеку только в каталоге lib установленного аддона.
+    Ищет DLL сначала рядом с аддоном, затем в стандартных местах сборки.
     Поддерживает Windows (.dll) / Linux (.so) / macOS (.dylib).
     """
     import platform
@@ -117,7 +118,17 @@ def get_dll_path(dll_name="GPUCloth.dll"):
     addon_dir = get_addon_directory()
     lib_dir   = get_lib_directory()
 
-    candidates = [os.path.join(lib_dir, lib_filename)]
+    candidates = [
+        os.path.join(lib_dir, lib_filename),
+        os.path.join(addon_dir, lib_filename),
+        # Development checkout: the addon root is <repo>/src/python, so the build
+        # tree produced by build_dll.bat is two levels up.  One level up only
+        # reaches <repo>/src, which holds no build output.
+        os.path.join(addon_dir, "..", "..", "build", lib_filename),
+        os.path.join(addon_dir, "..", "build", lib_filename),
+        os.path.join(addon_dir, "src", "build", lib_filename),
+        os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "..", "build", lib_filename),
+    ]
 
     for candidate in candidates:
         resolved = os.path.normpath(candidate)

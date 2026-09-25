@@ -44,7 +44,7 @@ CLOTH_SIMSETTINGS_FLAG_DYNAMIC_MESH           = CLOTH_SIMSETTINGS_FLAG_DYNAMIC_B
 
 # ---------------------------------------------------------------------------
 #  Типы GPU-солверов ткани
-#  Значения публичного GPUCloth solver contract
+#  Зеркало C++ enum SolverType в src/engine/source/DNA/cloth_types.cuh
 # ---------------------------------------------------------------------------
 SOLVER_PD     = 1   # Projective Dynamics с Chebyshev-Jacobi ускорением
 SOLVER_Mil2   = 3   # Non-distance barriers + subspace reuse (Mil²)
@@ -432,6 +432,7 @@ GPUCLOTH_FEATURE_EFFECTOR_SCALES = 58
 GPUCLOTH_FEATURE_CONSTRAINT_NETWORK = 59
 
 GPUCLOTH_MATERIAL_ANISOTROPY_ENABLED = 1 << 0
+GPUCLOTH_MATERIAL_TRIANGLE_MEMBRANE = 1 << 1
 
 GPUCLOTH_CONSTRAINT_INTERNAL_SPRINGS = 1 << 0
 GPUCLOTH_CONSTRAINT_INTERNAL_NORMAL_CHECK = 1 << 1
@@ -523,6 +524,10 @@ GPUCLOTH_COLLECTION_EFFECTOR = 2
 GPUCLOTH_COLLECTION_OBJECT_MESH = 1
 GPUCLOTH_COLLECTION_OBJECT_CURVE = 2
 GPUCLOTH_COLLECTION_OBJECT_EMPTY = 3
+# Analytic sphere collider: one record = centre+radius swept on the three
+# collider time levels, vertex_count 1, triangle_count 0.  Additive; no
+# existing value changed.
+GPUCLOTH_COLLECTION_OBJECT_SPHERE = 4
 GPUCLOTH_COLLECTION_OBJECT_OTHER = 255
 GPUCLOTH_COLLECTION_RECORD_INSTANCE = 1 << 0
 GPUCLOTH_COLLECTION_RECORD_EVALUATED = 1 << 1
@@ -1056,6 +1061,33 @@ class GPUClothSimulationConfig(Structure):
         ("air_damping", c_float),
         ("velocity_damping", c_float),
         ("simulation_flags", c_uint),
+        ("reserved", c_uint * 2),
+    ]
+
+
+class GPUClothQualityConfig(Structure):
+    _fields_ = [
+        ("header", GPUClothFeatureConfigHeader),
+        ("solver_mask", c_uint),
+        ("quality_steps", c_uint),
+        ("time_scale", c_float),
+        ("vertex_mass", c_float),
+        ("gravity", c_float * 3),
+        ("air_damping", c_float),
+        ("velocity_damping", c_float),
+        ("simulation_flags", c_uint),
+        ("simulation_reserved", c_uint * 2),
+        ("solver_iterations", c_uint),
+        ("reserved", c_uint),
+        ("solver_krylov_iterations", c_uint),
+    ]
+
+
+class GPUClothArealMassConfig(Structure):
+    _fields_ = [
+        ("header", GPUClothFeatureConfigHeader),
+        ("solver_mask", c_uint),
+        ("density_kg_m2", c_float),
         ("reserved", c_uint * 2),
     ]
 
@@ -1805,7 +1837,8 @@ class ClothSimSettings(Structure):
             ("solver_ptb_seam", c_short),
             ("solver_use_pt_budget",         c_short),
             ("use_anisotropy",               c_short),
-            ("product_flags",                c_short)
+            ("product_flags",                c_short),
+            ("solver_krylov_iterations",     c_short)
 ]
 
     def __init__(self):
